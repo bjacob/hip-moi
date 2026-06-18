@@ -38,6 +38,15 @@ function(hip_moi_add_gtest name)
   add_executable(${name} ${ARGN})
   target_compile_features(${name} PRIVATE cxx_std_17)
   target_link_libraries(${name} PRIVATE hip_moi::hip_moi GTest::gtest_main)
+  target_compile_options(
+    ${name}
+    PRIVATE
+      $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall>
+      $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wextra>
+      $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Werror>
+      $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Wall>
+      $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Wextra>
+      $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Werror>)
 
   set_target_properties(${name} PROPERTIES
     HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}"
