@@ -25,6 +25,30 @@ The near-term schedule is deliberately aggressive:
 * Later: incremental widening of the memory model, especially atomics and
   fences.
 
+## Current status
+
+The repository has been initialized with the planning and test-harness
+foundation:
+
+* CMake uses Ninja and builds HIP tests with GTest.
+* GTest is found as a system package when available, with `FetchContent`
+  fallback.
+* `HIP_MOI_CTEST_PER_CASE=ON` is the default, so CTest reports one entry per
+  GTest case.
+* `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
+  reference corpus. It is a parameterized GTest suite exposing one CTest entry
+  per launched safe reference kernel.
+* The reference corpus currently contains 55 safe kernels that compile, launch,
+  and numerically check their outputs.
+* The same source also contains compile-only diagnostic-positive and hard
+  synchronization references that are intentionally not launched.
+* The actual `hip-moi` implementation library and instrumented tests have not
+  started yet.
+
+The reference corpus is a map of desired coverage, not an obligation to
+instrument everything immediately. The instrumented suite should grow only when
+the library actually supports the corresponding behavior.
+
 ## Foundations
 
 ### Terminology
@@ -188,6 +212,8 @@ class context {
 
 Notes:
 
+* First implementation target: `include/hip_moi/hip_moi.hpp`, as a header-only
+  library target exported by CMake.
 * `context_storage_ref` is a non-owning view of caller-provided metadata
   buffers. Those buffers may be in global memory, which avoids consuming scarce
   LDS in kernels that already use nearly all available shared memory.
@@ -214,6 +240,59 @@ Notes:
   diagnostic API.
 * The API should eventually support labels/source locations, but MVP diagnostics
   can start with compact numeric records.
+
+### Instrumented kernel shape
+
+An uninstrumented reference kernel:
+
+```c++
+__global__ void kernel(int* out) {
+  __shared__ int lds[32];
+
+  int tid = threadIdx.x;
+  lds[tid] = tid;
+  __syncthreads();
+  out[tid] = lds[(tid + 1) & 31];
+}
+```
+
+The MVP instrumented version should look like:
+
+```c++
+__global__ void kernel(int* out, hip_moi::context_storage_ref storage) {
+  __shared__ int lds[32];
+
+  hip_moi::config cfg{
+      static_cast<int>(blockDim.x),
+      static_cast<int>(blockDim.x),
+      1,
+  };
+  hip_moi::context ctx(storage, cfg);
+
+  ctx.init_workgroup();
+  ctx.syncthreads();
+
+  int tid = threadIdx.x;
+  ctx.lds_store(&lds[tid], tid);
+  ctx.syncthreads();
+
+  int value = ctx.lds_load(&lds[(tid + 1) & 31]);
+  out[tid] = value;
+}
+```
+
+MVP contract for instrumented kernels:
+
+* Every LDS access that should participate in diagnostics goes through
+  `ctx.lds_load` or `ctx.lds_store`.
+* Any raw LDS access is invisible to hip-moi and outside the diagnostic
+  contract.
+* Synchronization that should advance the shadow epoch goes through
+  `ctx.syncthreads()`.
+* `ctx.syncthreads()` performs the real full-workgroup synchronization and
+  advances the detector's shadow epoch.
+* Tests should start with one workgroup per launch where possible, then broaden
+  only when storage/result handling supports multiple workgroups cleanly.
 
 ### MVP implementation model
 
@@ -385,7 +464,7 @@ The goal for EOD is a tiny but real library with GPU tests that compile and run.
    * GTest from system package, fallback to FetchContent.
 
 2. Add the first public header.
-   * `include/hip_moi/hip_moi.h`
+   * `include/hip_moi/hip_moi.hpp`
    * `context_storage_ref`
    * `static_context_storage`
    * `context`
@@ -408,6 +487,8 @@ The goal for EOD is a tiny but real library with GPU tests that compile and run.
    * Launch tiny kernels.
    * Copy diagnostic counters/records back.
    * Assert with GTest.
+   * Use a parameterized GTest suite so CTest can report one entry per
+     instrumented kernel when `HIP_MOI_CTEST_PER_CASE=ON`.
 
 5. Add EOD test cases.
    * Same thread store then load: no diagnostic.
@@ -427,6 +508,42 @@ The goal for EOD is a tiny but real library with GPU tests that compile and run.
      synchronization lowering.
 
 ### MVP test corpus
+
+The current `tests/reference/` corpus should remain ahead of the instrumented
+suite. It keeps concrete, compiling kernel shapes available even before the
+library can diagnose them.
+
+The future `tests/instrumented/` suite should be contractual: an instrumented
+test should exist only for behavior the library claims to support today. Do not
+bulk-instrument the whole reference corpus at once. Instead, each broadening of
+library capability earns one or a few matching instrumented tests.
+
+Proposed instrumented test layout:
+
+```text
+tests/instrumented/
+  safe_mvp_test.hip
+  race_mvp_test.hip
+  test_support.hpp
+```
+
+`safe_mvp_test.hip` should assert both numerical outputs and zero diagnostics.
+`race_mvp_test.hip` should assert deterministic diagnostics; for racy kernels,
+numerical output is not the oracle.
+
+Incremental instrumented test growth:
+
+1. Add the smallest safe instrumented kernel when `ctx.lds_load` and
+   `ctx.lds_store` exist.
+2. Add the smallest same-epoch write/read diagnostic when overlap detection
+   exists.
+3. Add write/write diagnostics.
+4. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
+5. Add all-thread array cases when per-thread metadata and byte-range tracking
+   are solid.
+6. Add loops when repeated epochs are solid.
+7. Add tiled and matmul-like LDS cases when the basic machinery has survived
+   enough pressure.
 
 Layer 1: toy deterministic kernels.
 
