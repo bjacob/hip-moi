@@ -50,24 +50,33 @@ foundation:
   `config`, `access_record`, `diagnostic`, `subgroup_state`,
   `context_storage_ref`, `static_context_storage`, and `context`.
 * The current `context` implementation is intentionally only a pass-through
-  skeleton: `init_workgroup()` initializes counters/epoch storage,
-  `lds_load<T>` and `lds_store<T>` perform the real LDS access without logging,
-  and `syncthreads()` executes a real barrier while advancing the first epoch
-  slot.
+  skeleton in synchronization scope, but now has real same-epoch access
+  logging: `init_workgroup()` initializes counters, epoch storage, and a
+  detector-internal metadata lock; `lds_load<T>` and `lds_store<T>` record the
+  LDS byte range before performing the real access; and `syncthreads()` executes
+  a real barrier while advancing the first epoch slot.
 * `tests/instrumented/safe_mvp_test.hip` contains the first instrumented kernel
   test. It passes caller-provided global-memory metadata storage into a kernel,
   performs a same-thread instrumented LDS store/load, checks the numerical
-  result, and asserts zero diagnostics.
-* Access logging, overlap detection, and diagnostic emission have not started
-  yet.
+  result, asserts two logged accesses, and asserts zero diagnostics.
+* `tests/instrumented/race_mvp_test.hip` contains the first
+  diagnostic-positive instrumented kernel. It checks that a same-epoch LDS
+  write/read byte-range conflict from two different threads produces one
+  deterministic diagnostic.
+* The current detector uses a simple metadata lock around compare-and-append
+  bookkeeping. That lock is detector-internal and must not be treated as
+  user-program synchronization by the shadow model.
+* Access logging and first conflict diagnostics exist. Broader conflict-kind
+  coverage, byte-range edge cases, epoch clearing, and low-overhead per-thread
+  logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: add real access logging to the global-memory-backed
-metadata path and introduce the first deterministic diagnostic-positive
-instrumented test.
+Next implementation slice: broaden the instrumented conflict tests to cover
+read/read same address, write/write same address, non-overlapping addresses,
+adjacent byte ranges, and partially overlapping byte ranges.
 
 ## Foundations
 
@@ -195,6 +204,9 @@ struct context_storage_ref {
   int diagnostic_capacity;
   subgroup_state* subgroup_states;
   int subgroup_capacity;
+  int* access_count;
+  int* diagnostic_count;
+  int* metadata_lock;
 };
 
 // Optional fixed-capacity storage helper for users who want static storage.
@@ -237,6 +249,8 @@ Notes:
 * `context_storage_ref` is a non-owning view of caller-provided metadata
   buffers. Those buffers may be in global memory, which avoids consuming scarce
   LDS in kernels that already use nearly all available shared memory.
+* `metadata_lock` is detector-internal bookkeeping for the current simple
+  implementation. It must not be modeled as user-program synchronization.
 * `static_context_storage` is only a convenience helper for users who do want
   fixed-size storage, for example in `__shared__` memory. Its capacities are
   template parameters because that is how the helper embeds fixed-size arrays.
@@ -554,9 +568,9 @@ numerical output is not the oracle.
 Incremental instrumented test growth:
 
 1. Add the smallest safe instrumented kernel when `ctx.lds_load` and
-   `ctx.lds_store` exist.
+   `ctx.lds_store` exist. Done.
 2. Add the smallest same-epoch write/read diagnostic when overlap detection
-   exists.
+   exists. Done.
 3. Add write/write diagnostics.
 4. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
 5. Add all-thread array cases when per-thread metadata and byte-range tracking

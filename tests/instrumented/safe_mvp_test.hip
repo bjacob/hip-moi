@@ -68,9 +68,15 @@ namespace
                                           storage.diagnostic_count_device(),
                                           sizeof(diagnostic_count),
                                           hipMemcpyDeviceToHost));
+        int access_count = -1;
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&access_count,
+                                          storage.access_count_device(),
+                                          sizeof(access_count),
+                                          hipMemcpyDeviceToHost));
 
         EXPECT_EQ(output[0], 123);
         EXPECT_EQ(output[1], 0);
+        EXPECT_EQ(access_count, 2);
         EXPECT_EQ(diagnostic_count, 0);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));

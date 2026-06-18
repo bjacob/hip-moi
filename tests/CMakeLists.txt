@@ -74,5 +74,7 @@ endfunction()
 
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
+hip_moi_add_gtest(hip_moi_instrumented_race_mvp_test
+                  instrumented/race_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_safe_mvp_test
                   instrumented/safe_mvp_test.hip)
