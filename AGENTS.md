@@ -18,6 +18,20 @@ At the end of every substantive work session:
 If `git clang-format` changes source files, rebuild and rerun the affected tests
 before committing.
 
+## Code style preferences
+
+When passing a positional argument sequence where the meaning is not obvious at
+the call site, add C/C++ named-argument comments when they improve readability,
+for example:
+
+```c++
+hip_moi::config cfg{
+    /*thread_count=*/static_cast<int>(blockDim.x),
+    /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
+    /*subgroup_count=*/1,
+};
+```
+
 ## Build and test
 
 Use Ninja. The canonical build directory in this workspace is:

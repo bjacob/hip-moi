@@ -21,9 +21,9 @@ namespace
         __shared__ int value;
 
         hip_moi::config cfg{
-            static_cast<int>(blockDim.x),
-            static_cast<int>(blockDim.x),
-            1,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
+            /*subgroup_count=*/1,
         };
         hip_moi::context ctx(storage, cfg);
 
