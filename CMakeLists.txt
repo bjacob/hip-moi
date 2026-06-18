@@ -26,6 +26,12 @@ if(NOT DEFINED HIP_MOI_ROCM_ROOT AND DEFINED CMAKE_HIP_COMPILER_ROCM_ROOT)
       CACHE PATH "ROCm root used for hip-moi test runtime libraries")
 endif()
 
+add_library(hip_moi INTERFACE)
+add_library(hip_moi::hip_moi ALIAS hip_moi)
+target_include_directories(hip_moi
+                           INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+target_compile_features(hip_moi INTERFACE cxx_std_17)
+
 enable_testing()
 
 add_subdirectory(tests)

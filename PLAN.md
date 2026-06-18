@@ -31,6 +31,7 @@ The repository has been initialized with the planning and test-harness
 foundation:
 
 * CMake uses Ninja and builds HIP tests with GTest.
+* CMake exports a header-only `hip_moi::hip_moi` library target.
 * GTest is found as a system package when available, with `FetchContent`
   fallback.
 * `HIP_MOI_CTEST_PER_CASE=ON` is the default, so CTest reports one entry per
@@ -42,12 +43,28 @@ foundation:
   and numerically check their outputs.
 * The same source also contains compile-only diagnostic-positive and hard
   synchronization references that are intentionally not launched.
-* The actual `hip-moi` implementation library and instrumented tests have not
-  started yet.
+* `include/hip_moi/hip_moi.hpp` exists with the first public API skeleton:
+  `config`, `access_record`, `diagnostic`, `subgroup_state`,
+  `context_storage_ref`, `static_context_storage`, and `context`.
+* The current `context` implementation is intentionally only a pass-through
+  skeleton: `init_workgroup()` initializes counters/epoch storage,
+  `lds_load<T>` and `lds_store<T>` perform the real LDS access without logging,
+  and `syncthreads()` executes a real barrier while advancing the first epoch
+  slot.
+* `tests/instrumented/safe_mvp_test.hip` contains the first instrumented kernel
+  test. It passes caller-provided global-memory metadata storage into a kernel,
+  performs a same-thread instrumented LDS store/load, checks the numerical
+  result, and asserts zero diagnostics.
+* Access logging, overlap detection, and diagnostic emission have not started
+  yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
+
+Next implementation slice: add real access logging to the global-memory-backed
+metadata path and introduce the first deterministic diagnostic-positive
+instrumented test.
 
 ## Foundations
 

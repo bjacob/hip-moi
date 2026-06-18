@@ -27,23 +27,6 @@ option(HIP_MOI_CTEST_PER_CASE
        "Register each gtest TEST() as its own ctest entry (vs one entry per binary)"
        ON)
 
-add_executable(hip_moi_reference_selftest
-  reference/mvp_reference_kernels.hip
-)
-
-target_compile_features(hip_moi_reference_selftest PRIVATE cxx_std_17)
-target_link_libraries(hip_moi_reference_selftest PRIVATE GTest::gtest_main)
-
-set_target_properties(hip_moi_reference_selftest PROPERTIES
-  HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}"
-)
-
-if(HIP_MOI_ROCM_ROOT)
-  set_target_properties(hip_moi_reference_selftest PROPERTIES
-    BUILD_RPATH "${HIP_MOI_ROCM_ROOT}/lib"
-  )
-endif()
-
 include(GoogleTest)
 set(_hip_moi_reference_test_env)
 if(HIP_MOI_ROCM_ROOT)
@@ -51,15 +34,36 @@ if(HIP_MOI_ROCM_ROOT)
       PROPERTIES ENVIRONMENT "LD_LIBRARY_PATH=${HIP_MOI_ROCM_ROOT}/lib")
 endif()
 
-if(HIP_MOI_CTEST_PER_CASE)
-  gtest_discover_tests(hip_moi_reference_selftest
-                       NO_PRETTY_VALUES
-                       ${_hip_moi_reference_test_env})
-else()
-  add_test(NAME hip_moi_reference_selftest
-           COMMAND hip_moi_reference_selftest)
-  if(_hip_moi_reference_test_env)
-    set_tests_properties(hip_moi_reference_selftest
-                         ${_hip_moi_reference_test_env})
+function(hip_moi_add_gtest name)
+  add_executable(${name} ${ARGN})
+  target_compile_features(${name} PRIVATE cxx_std_17)
+  target_link_libraries(${name} PRIVATE hip_moi::hip_moi GTest::gtest_main)
+
+  set_target_properties(${name} PROPERTIES
+    HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}"
+  )
+
+  if(HIP_MOI_ROCM_ROOT)
+    set_target_properties(${name} PROPERTIES
+      BUILD_RPATH "${HIP_MOI_ROCM_ROOT}/lib"
+    )
   endif()
-endif()
+
+  if(HIP_MOI_CTEST_PER_CASE)
+    gtest_discover_tests(${name}
+                         NO_PRETTY_VALUES
+                         ${_hip_moi_reference_test_env})
+  else()
+    add_test(NAME ${name}
+             COMMAND ${name})
+    if(_hip_moi_reference_test_env)
+      set_tests_properties(${name}
+                           ${_hip_moi_reference_test_env})
+    endif()
+  endif()
+endfunction()
+
+hip_moi_add_gtest(hip_moi_reference_selftest
+                  reference/mvp_reference_kernels.hip)
+hip_moi_add_gtest(hip_moi_instrumented_safe_mvp_test
+                  instrumented/safe_mvp_test.hip)
