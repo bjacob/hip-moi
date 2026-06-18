@@ -67,7 +67,8 @@ foundation:
   user-facing host diagnostics tests. It exercises `hip_moi::host_context`,
   `HIP_MOI_CHECK`, explicit nonfatal diagnostic consumption, the default
   destructor abort for unconsumed diagnostics, and the destructor reporting/abort
-  opt-outs.
+  opt-outs. It now also checks stderr diagnostic text and abort behavior using
+  GTest stderr capture and death tests.
 * The current detector uses a simple metadata lock around compare-and-append
   bookkeeping. That lock is detector-internal and must not be treated as
   user-program synchronization by the shadow model.
@@ -606,7 +607,7 @@ tests/instrumented/
 `001_safe_mvp_test.hip` should assert both numerical outputs and zero
 diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
 for racy kernels, numerical output is not the oracle.
-`003_host_context_test.hip` should assert end-user behavior: explicit checks,
+`003_host_context_test.hip` asserts end-user behavior: explicit checks,
 stderr/fatal policy, and destructor fallback for forgotten checks.
 
 Incremental instrumented test growth:

@@ -27,4 +27,5 @@ than numerical kernel output.
 
 `003_host_context_test.hip` exercises the user-facing host layer:
 `hip_moi::host_context`, `HIP_MOI_CHECK`, explicit diagnostic consumption, and
-the destructor fallback for unconsumed diagnostics.
+the destructor fallback for unconsumed diagnostics. It uses GTest stderr capture
+and death tests to check both reporting and abort behavior.

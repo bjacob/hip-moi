@@ -14,6 +14,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace
 {
@@ -119,6 +120,11 @@ namespace
         require_hip_success(hipGetLastError(), "hipGetLastError");
     }
 
+    void expect_contains(const std::string& text, const char* needle)
+    {
+        EXPECT_NE(text.find(needle), std::string::npos) << "missing stderr text: " << needle;
+    }
+
     TEST(HipMoiHostContext, CheckMacroSucceedsForSafeKernel)
     {
         hip_moi::host_context moi(small_host_context_options());
@@ -165,6 +171,54 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
+    TEST(HipMoiHostContext, ExplicitCheckPrintsRaceDiagnosticToStderr)
+    {
+        hip_moi::host_context moi(small_host_context_options());
+
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+
+        int initial = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+
+        launch_race_kernel(moi, device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+
+        testing::internal::CaptureStderr();
+        EXPECT_FALSE(moi.check());
+        std::string stderr_output = testing::internal::GetCapturedStderr();
+
+        expect_contains(stderr_output, "hip-moi: 1 diagnostic(s)");
+        expect_contains(stderr_output, "hip-moi diagnostic 0: kind=access_conflict");
+        expect_contains(stderr_output, "first_thread=");
+        expect_contains(stderr_output, "second_thread=");
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
+    TEST(HipMoiHostContext, CheckMacroAbortsOnRaceDiagnostic)
+    {
+        ASSERT_DEATH(
+            {
+                hip_moi::host_context moi(small_host_context_options());
+                launch_race_kernel_or_abort(moi);
+                HIP_MOI_CHECK(moi);
+            },
+            "HIP_MOI_CHECK failed");
+    }
+
+    TEST(HipMoiHostContext, CheckMacroPrintsDiagnosticBeforeAbort)
+    {
+        ASSERT_DEATH(
+            {
+                hip_moi::host_context moi(small_host_context_options());
+                launch_race_kernel_or_abort(moi);
+                HIP_MOI_CHECK(moi);
+            },
+            "kind=access_conflict");
+    }
+
     TEST(HipMoiHostContext, DestructorAbortsOnUnconsumedRaceDiagnostic)
     {
         ASSERT_DEATH(
@@ -173,6 +227,31 @@ namespace
                 launch_race_kernel_or_abort(moi);
             },
             "unconsumed diagnostics");
+    }
+
+    TEST(HipMoiHostContext, DestructorPrintsRaceDiagnosticToStderrWhenAbortDisabled)
+    {
+        testing::internal::CaptureStderr();
+        {
+            hip_moi::host_context moi(small_host_context_options());
+            moi.disable_destructor_abort();
+
+            int* device_output = nullptr;
+            HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+
+            int initial = -1;
+            HIP_MOI_TEST_HIP_ASSERT(
+                hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+
+            launch_race_kernel(moi, device_output);
+            HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+            HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+        }
+        std::string stderr_output = testing::internal::GetCapturedStderr();
+
+        expect_contains(stderr_output, "hip-moi: 1 diagnostic(s)");
+        expect_contains(stderr_output, "kind=access_conflict");
+        EXPECT_EQ(stderr_output.find("destructor; aborting"), std::string::npos);
     }
 
     TEST(HipMoiHostContext, DestructorReportingAndAbortCanBeDisabled)
