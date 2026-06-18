@@ -54,7 +54,10 @@ foundation:
   logging: `init_workgroup()` initializes counters, epoch storage, and a
   detector-internal metadata lock; `lds_load<T>` and `lds_store<T>` record the
   LDS byte range before performing the real access; and `syncthreads()` executes
-  a real barrier while advancing the first epoch slot.
+  a real barrier while advancing the first epoch slot. Detector metadata
+  initialization and epoch increments use detector-internal block fences before
+  releasing the workgroup so global-memory metadata is visible to the
+  participating threads.
 * `tests/instrumented/001_safe_mvp_test.hip` contains the first instrumented
   kernel test. It passes caller-provided global-memory metadata storage into a
   kernel, performs a same-thread instrumented LDS store/load, checks the
@@ -69,20 +72,24 @@ foundation:
   destructor abort for unconsumed diagnostics, and the destructor reporting/abort
   opt-outs. It now also checks stderr diagnostic text and abort behavior using
   GTest stderr capture and death tests.
+* `tests/instrumented/004_basic_conflict_predicate_test.hip` broadens the raw
+  detector-contract coverage for same-epoch byte ranges: read/read same address,
+  write/write same address, non-overlapping writes, adjacent byte ranges, and an
+  overlapping full-object/subobject write.
 * The current detector uses a simple metadata lock around compare-and-append
   bookkeeping. That lock is detector-internal and must not be treated as
   user-program synchronization by the shadow model.
-* Access logging and first conflict diagnostics exist. Broader conflict-kind
-  coverage, byte-range edge cases, epoch clearing, and low-overhead per-thread
-  logs are still future work.
+* Access logging, basic conflict diagnostics, host reporting, and the first
+  byte-range edge cases exist. Epoch separation tests, epoch clearing, broader
+  real-kernel idioms, and low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: broaden the instrumented conflict tests to cover
-read/read same address, write/write same address, non-overlapping addresses,
-adjacent byte ranges, and partially overlapping byte ranges.
+Next implementation slice: exercise `ctx.syncthreads()` as the MVP epoch
+boundary, including same-address accesses separated by a uniform full-workgroup
+barrier and repeated reuse of the same LDS address across epochs.
 
 ## Foundations
 
@@ -601,6 +608,7 @@ tests/instrumented/
   001_safe_mvp_test.hip
   002_race_mvp_test.hip
   003_host_context_test.hip
+  004_basic_conflict_predicate_test.hip
   test_support.hpp
 ```
 
@@ -609,6 +617,8 @@ diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
 for racy kernels, numerical output is not the oracle.
 `003_host_context_test.hip` asserts end-user behavior: explicit checks,
 stderr/fatal policy, and destructor fallback for forgotten checks.
+`004_basic_conflict_predicate_test.hip` asserts the basic MVP predicate around
+same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
 
 Incremental instrumented test growth:
 
@@ -618,7 +628,7 @@ Incremental instrumented test growth:
    exists. Done.
 3. Add the host-side `HIP_MOI_CHECK` path and destructor fallback for
    unconsumed diagnostics. Done.
-4. Add write/write diagnostics.
+4. Add write/write diagnostics and basic byte-range edge cases. Done.
 5. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
 6. Add all-thread array cases when per-thread metadata and byte-range tracking
    are solid.

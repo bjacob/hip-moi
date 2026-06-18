@@ -133,6 +133,7 @@ namespace hip_moi
                 {
                     storage_.subgroup_states[i].epoch = 0;
                 }
+                __threadfence_block();
             }
             __syncthreads();
         }
@@ -161,6 +162,7 @@ namespace hip_moi
             if(threadIdx.x == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
                 ++storage_.subgroup_states[0].epoch;
+                __threadfence_block();
             }
             __syncthreads();
         }

@@ -80,3 +80,5 @@ hip_moi_add_gtest(hip_moi_instrumented_race_mvp_test
                   instrumented/002_race_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_host_context_test
                   instrumented/003_host_context_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_basic_conflict_predicate_test
+                  instrumented/004_basic_conflict_predicate_test.hip)

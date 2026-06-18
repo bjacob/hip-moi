@@ -29,3 +29,7 @@ than numerical kernel output.
 `hip_moi::host_context`, `HIP_MOI_CHECK`, explicit diagnostic consumption, and
 the destructor fallback for unconsumed diagnostics. It uses GTest stderr capture
 and death tests to check both reporting and abort behavior.
+
+`004_basic_conflict_predicate_test.hip` broadens the raw detector-contract
+coverage for same-epoch byte ranges: read/read, write/write, non-overlap,
+adjacent ranges, and overlapping subobjects.
