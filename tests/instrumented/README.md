@@ -41,3 +41,7 @@ same-epoch conflict after a barrier should still report in the new epoch.
 `006_all_thread_array_test.hip` moves beyond hand-picked threads: all threads in
 the workgroup participate in simple LDS array write/read patterns, including one
 intentionally unsynchronized neighbor-read diagnostic case.
+
+`007_metadata_capacity_test.hip` covers access-log overflow, diagnostic counters
+that exceed the stored diagnostic buffer, and the host-facing stderr message for
+truncated diagnostic buffers.

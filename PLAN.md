@@ -88,22 +88,25 @@ foundation:
   ladder step. It covers independent per-thread LDS writes, own-slot reads after
   a barrier, neighbor reads after a barrier, and an intentionally missing-barrier
   neighbor-read diagnostic case.
+* `tests/instrumented/007_metadata_capacity_test.hip` covers access-log
+  overflow, diagnostic counters that exceed stored diagnostic capacity, and the
+  host-facing stderr report for truncated diagnostic buffers.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
   would risk. These atomics and fences are detector-internal and must not be
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
-  cases, epoch-boundary tests, and first all-thread array cases exist. Metadata
-  capacity tests, epoch clearing, broader real-kernel idioms, and low-overhead
-  per-thread logs are still future work.
+  cases, epoch-boundary tests, first all-thread array cases, and metadata
+  capacity tests exist. Epoch clearing, broader real-kernel idioms, and
+  low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: exercise metadata capacity and overflow semantics,
-including full access logs and truncated diagnostic buffers.
+Next implementation slice: add looped epoch patterns to stress repeated
+`ctx.syncthreads()` advancement and access-log growth over time.
 
 ## Foundations
 
@@ -626,6 +629,7 @@ tests/instrumented/
   004_basic_conflict_predicate_test.hip
   005_epoch_boundary_test.hip
   006_all_thread_array_test.hip
+  007_metadata_capacity_test.hip
   test_support.hpp
 ```
 
@@ -640,6 +644,8 @@ same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
 uniform `ctx.syncthreads()`.
 `006_all_thread_array_test.hip` asserts first all-thread LDS array behavior,
 including a missing-barrier diagnostic case.
+`007_metadata_capacity_test.hip` asserts access-log overflow and diagnostic
+buffer truncation behavior, including the user-facing host report.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -666,8 +672,9 @@ Incremental instrumented test growth:
 5. Add `ctx.syncthreads()` separation tests when epoch advancement exists. Done.
 6. Add all-thread array cases when per-thread metadata and byte-range tracking
    are solid. Done.
-7. Add loops when repeated epochs are solid.
-8. Add tiled and matmul-like LDS cases when the basic machinery has survived
+7. Add metadata capacity and diagnostic truncation tests. Done.
+8. Add loops when repeated epochs are solid.
+9. Add tiled and matmul-like LDS cases when the basic machinery has survived
    enough pressure.
 
 Layer 1: toy deterministic kernels.
