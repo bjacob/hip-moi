@@ -35,3 +35,4 @@ target_compile_features(hip_moi INTERFACE cxx_std_17)
 enable_testing()
 
 add_subdirectory(tests)
+add_subdirectory(docs/tutorial)

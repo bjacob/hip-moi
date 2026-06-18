@@ -39,6 +39,10 @@ foundation:
   fallback.
 * `HIP_MOI_CTEST_PER_CASE=ON` is the default, so CTest reports one entry per
   GTest case.
+* `docs/tutorial/` contains self-contained numbered HIP example programs, a
+  README, and a CMake subtree that builds the examples and registers them as
+  CTests. The tutorial CTests include both a passing synchronized example and
+  expected-failing diagnosed examples.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -627,6 +631,19 @@ stderr/fatal policy, and destructor fallback for forgotten checks.
 same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
 `005_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
 uniform `ctx.syncthreads()`.
+
+Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
+they are executable documentation for the user-facing workflow. The README may
+quote short excerpts, but the quoted code should be periodically swept against
+the actual compiled examples:
+
+```text
+docs/tutorial/
+  README.md
+  001_passing_syncthreads.hip
+  002_failing_same_epoch_race.hip
+  003_destructor_fallback.hip
+```
 
 Incremental instrumented test growth:
 
