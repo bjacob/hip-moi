@@ -91,6 +91,10 @@ foundation:
 * `tests/instrumented/007_metadata_capacity_test.hip` covers access-log
   overflow, diagnostic counters that exceed stored diagnostic capacity, and the
   host-facing stderr report for truncated diagnostic buffers.
+* `tests/instrumented/008_loop_epoch_test.hip` covers looped epoch patterns:
+  safe scalar producer/consumer loops, all-thread own-slot loops, repeated
+  missing-barrier diagnostics, and diagnostic epoch numbering across loop
+  iterations.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -98,15 +102,15 @@ foundation:
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, and metadata
-  capacity tests exist. Epoch clearing, broader real-kernel idioms, and
-  low-overhead per-thread logs are still future work.
+  capacity tests, and looped epoch tests exist. Epoch clearing, broader
+  real-kernel idioms, and low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: add looped epoch patterns to stress repeated
-`ctx.syncthreads()` advancement and access-log growth over time.
+Next implementation slice: add tiled and matmul-like LDS idioms, starting with a
+small pattern that keeps the current MVP synchronization contract intact.
 
 ## Foundations
 
@@ -630,6 +634,7 @@ tests/instrumented/
   005_epoch_boundary_test.hip
   006_all_thread_array_test.hip
   007_metadata_capacity_test.hip
+  008_loop_epoch_test.hip
   test_support.hpp
 ```
 
@@ -646,6 +651,8 @@ uniform `ctx.syncthreads()`.
 including a missing-barrier diagnostic case.
 `007_metadata_capacity_test.hip` asserts access-log overflow and diagnostic
 buffer truncation behavior, including the user-facing host report.
+`008_loop_epoch_test.hip` asserts looped epoch behavior, including repeated
+safe barriers and repeated missing-barrier diagnostics.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -673,7 +680,7 @@ Incremental instrumented test growth:
 6. Add all-thread array cases when per-thread metadata and byte-range tracking
    are solid. Done.
 7. Add metadata capacity and diagnostic truncation tests. Done.
-8. Add loops when repeated epochs are solid.
+8. Add loops when repeated epochs are solid. Done.
 9. Add tiled and matmul-like LDS cases when the basic machinery has survived
    enough pressure.
 

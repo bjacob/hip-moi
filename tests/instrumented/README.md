@@ -45,3 +45,7 @@ intentionally unsynchronized neighbor-read diagnostic case.
 `007_metadata_capacity_test.hip` covers access-log overflow, diagnostic counters
 that exceed the stored diagnostic buffer, and the host-facing stderr message for
 truncated diagnostic buffers.
+
+`008_loop_epoch_test.hip` stresses repeated epoch advancement in loops, including
+safe producer/consumer loops, all-thread per-slot loops, repeated missing-barrier
+diagnostics, and diagnostic epoch numbering across iterations.

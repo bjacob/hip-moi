@@ -88,3 +88,5 @@ hip_moi_add_gtest(hip_moi_instrumented_all_thread_array_test
                   instrumented/006_all_thread_array_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_metadata_capacity_test
                   instrumented/007_metadata_capacity_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_loop_epoch_test
+                  instrumented/008_loop_epoch_test.hip)
