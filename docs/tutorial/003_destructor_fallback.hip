@@ -3,8 +3,8 @@
 //
 // docs/tutorial/003_destructor_fallback.hip
 //
-// A failing hip-moi program that intentionally forgets HIP_MOI_CHECK. The
-// host_context destructor reports and aborts on the unconsumed diagnostic.
+// A failing hip-moi program that uses scope-based checking. The host_context
+// destructor reports and aborts on the unconsumed diagnostic.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>

@@ -73,9 +73,9 @@ foundation:
 * `tests/instrumented/003_host_context_test.hip` contains the first
   user-facing host diagnostics tests. It exercises `hip_moi::host_context`,
   `HIP_MOI_CHECK`, explicit nonfatal diagnostic consumption, the default
-  destructor abort for unconsumed diagnostics, and the destructor reporting/abort
-  opt-outs. It now also checks stderr diagnostic text and abort behavior using
-  GTest stderr capture and death tests.
+  scope-based destructor handling of unconsumed diagnostics, and the destructor
+  reporting/abort opt-outs. It now also checks stderr diagnostic text and abort
+  behavior using GTest stderr capture and death tests.
 * `tests/instrumented/004_basic_conflict_predicate_test.hip` broadens the raw
   detector-contract coverage for same-epoch byte ranges: read/read same address,
   write/write same address, non-overlapping writes, adjacent byte ranges, and an
@@ -326,11 +326,12 @@ Notes:
 * The API should eventually support labels/source locations, but MVP diagnostics
   can start with compact numeric records.
 * End users should not have to manually copy `diagnostic_count` or the raw
-  diagnostic buffer. The default user path is `hip_moi::host_context` plus
-  `HIP_MOI_CHECK(moi)`, which reports diagnostics to `stderr` and aborts on
-  failure. If a user forgets the explicit check, `host_context`'s destructor is
-  a safety net: by default, unconsumed diagnostics are reported to `stderr` and
-  abort the process. Advanced users can independently opt out of destructor
+  diagnostic buffer. There are two first-class host-side consumption patterns.
+  The explicit pattern is `hip_moi::host_context` plus `HIP_MOI_CHECK(moi)`,
+  which reports diagnostics to `stderr` and aborts at a precise host source
+  location. The scope-based pattern lets `host_context`'s destructor consume any
+  still-unconsumed diagnostics; by default, it reports them to `stderr` and
+  aborts the process. Advanced users can independently opt out of destructor
   reporting and destructor aborting.
 
 ### Instrumented kernel shape
@@ -626,7 +627,7 @@ tests/instrumented/
 diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
 for racy kernels, numerical output is not the oracle.
 `003_host_context_test.hip` asserts end-user behavior: explicit checks,
-stderr/fatal policy, and destructor fallback for forgotten checks.
+stderr/fatal policy, and scope-based destructor handling.
 `004_basic_conflict_predicate_test.hip` asserts the basic MVP predicate around
 same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
 `005_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
@@ -651,8 +652,8 @@ Incremental instrumented test growth:
    `ctx.lds_store` exist. Done.
 2. Add the smallest same-epoch write/read diagnostic when overlap detection
    exists. Done.
-3. Add the host-side `HIP_MOI_CHECK` path and destructor fallback for
-   unconsumed diagnostics. Done.
+3. Add the host-side `HIP_MOI_CHECK` path and scope-based destructor handling
+   for unconsumed diagnostics. Done.
 4. Add write/write diagnostics and basic byte-range edge cases. Done.
 5. Add `ctx.syncthreads()` separation tests when epoch advancement exists. Done.
 6. Add all-thread array cases when per-thread metadata and byte-range tracking

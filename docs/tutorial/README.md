@@ -14,8 +14,8 @@ tests:
 
 * `001_passing_syncthreads.hip`: a correctly synchronized producer/consumer.
 * `002_failing_same_epoch_race.hip`: a race diagnosed by `HIP_MOI_CHECK`.
-* `003_destructor_fallback.hip`: the same race, but with the check forgotten so
-  `hip_moi::host_context` reports from its destructor.
+* `003_destructor_fallback.hip`: the same race diagnosed by the scope-based
+  `hip_moi::host_context` destructor path.
 
 Run them through CTest:
 
@@ -26,10 +26,10 @@ ctest --test-dir /home/benoit/workspace/hip-moi-build -R HipMoiTutorial --output
 The failing examples intentionally abort when run directly. Their CTest wrappers
 expect that failure and check the diagnostic text.
 
-## Basic Pattern
+## Explicit Check Pattern
 
 Create a host context, pass its device-side storage view to the kernel, then
-check after launch:
+check at the point where you want diagnostics reported:
 
 ```c++
 hip_moi::host_context moi(small_context_options());
@@ -45,6 +45,11 @@ check_hip(hipGetLastError(), "hipGetLastError");
 
 HIP_MOI_CHECK(moi);
 ```
+
+This style gives precise control over where diagnostics are consumed. It is a
+good fit when one host context is reused across launches, when a test wants to
+assert details immediately, or when the program wants the source location of the
+explicit check in the failure message.
 
 Inside the kernel, bind the device context to that storage and use hip-moi APIs
 for the LDS accesses you want checked:
@@ -97,10 +102,15 @@ hip-moi diagnostic 0: kind=access_conflict ...
 hip-moi: HIP_MOI_CHECK failed at ...
 ```
 
-If the user forgets `HIP_MOI_CHECK(moi)`, the default
-`hip_moi::host_context` destructor still reports unconsumed diagnostics and
-aborts:
+The destructor path is also a first-class usage pattern. Let a
+`hip_moi::host_context` live for the scope you want checked; when it is
+destroyed, any unconsumed diagnostics are reported to `stderr` and abort by
+default:
 
 ```text
 hip-moi: unconsumed diagnostics in host_context destructor; aborting
 ```
+
+The destructor style is less precise than `HIP_MOI_CHECK(moi)`, but it is a
+legitimate concise mode for users who want checked scopes with minimal host-side
+ceremony.
