@@ -31,6 +31,15 @@ add_library(hip_moi::hip_moi ALIAS hip_moi)
 target_include_directories(hip_moi
                            INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_features(hip_moi INTERFACE cxx_std_17)
+target_compile_options(
+  hip_moi
+  INTERFACE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wextra>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Werror>
+    $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Wall>
+    $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Wextra>
+    $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Werror>)
 
 enable_testing()
 

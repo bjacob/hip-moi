@@ -282,7 +282,7 @@ namespace
         {
             return "same_thread_store_load";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -304,7 +304,7 @@ namespace
         {
             return "different_threads_nonoverlapping_addresses";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int values[2];
@@ -332,7 +332,7 @@ namespace
         {
             return "different_threads_read_same_address";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -359,7 +359,7 @@ namespace
         {
             return "adjacent_addresses_same_epoch";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int values[2];
@@ -390,7 +390,7 @@ namespace
         {
             return "write_read_separated_by_syncthreads";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -416,7 +416,7 @@ namespace
         {
             return "write_write_separated_by_syncthreads";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -447,7 +447,7 @@ namespace
         {
             return "multiple_epochs_reuse_same_address";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -484,7 +484,7 @@ namespace
         {
             return "trivially_copyable_struct_access";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ Pair pair;
@@ -519,7 +519,7 @@ namespace
         {
             return "array_identity_all_threads";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -543,7 +543,7 @@ namespace
         {
             return "array_neighbor_read_all_threads";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -567,7 +567,7 @@ namespace
         {
             return "array_reverse_read_all_threads";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -591,7 +591,7 @@ namespace
         {
             return "array_permutation_multiply3_all_threads";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -615,7 +615,7 @@ namespace
         {
             return "array_permutation_multiply5_gather";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -639,7 +639,7 @@ namespace
         {
             return "array_two_arrays_zip";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int a[kArrayThreadCount];
@@ -667,7 +667,7 @@ namespace
         {
             return "array_transpose_4x8";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4][8];
@@ -693,7 +693,7 @@ namespace
         {
             return "array_pairwise_swap";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -717,7 +717,7 @@ namespace
         {
             return "array_group_broadcast";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int group_values[8];
@@ -746,7 +746,7 @@ namespace
         {
             return "array_rolling_window_sum";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -772,7 +772,7 @@ namespace
         {
             return "array_struct_per_thread";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ Pair pairs[kArrayThreadCount];
@@ -798,7 +798,7 @@ namespace
         {
             return "array_strided_two_elements_per_thread";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[2 * kArrayThreadCount];
@@ -828,7 +828,7 @@ namespace
         {
             return "loop_identity_epochs";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -858,7 +858,7 @@ namespace
         {
             return "loop_neighbor_epochs";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -888,7 +888,7 @@ namespace
         {
             return "loop_reverse_epochs";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -918,7 +918,7 @@ namespace
         {
             return "loop_permutation3_epochs";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -948,7 +948,7 @@ namespace
         {
             return "loop_permutation5_gather";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -978,7 +978,7 @@ namespace
         {
             return "loop_ping_pong_buffers";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[2][kArrayThreadCount];
@@ -1008,7 +1008,7 @@ namespace
         {
             return "loop_rolling_window";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -1038,7 +1038,7 @@ namespace
         {
             return "loop_group_broadcast";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int group_values[8];
@@ -1073,7 +1073,7 @@ namespace
         {
             return "loop_two_phase_producer_consumer";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int input[kArrayThreadCount];
@@ -1106,7 +1106,7 @@ namespace
         {
             return "loop_struct_per_thread";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ Pair pairs[kArrayThreadCount];
@@ -1143,7 +1143,7 @@ namespace
         {
             return "loop_partial_thread_count16";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ int data[16];
@@ -1173,7 +1173,7 @@ namespace
         {
             return "loop_two_dim_tile4x8";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4][8];
@@ -1213,7 +1213,7 @@ namespace
         {
             return "tile2d_row_major_copy_4x8";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4][8];
@@ -1239,7 +1239,7 @@ namespace
         {
             return "tile2d_column_major_layout_4x8";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[32];
@@ -1265,7 +1265,7 @@ namespace
         {
             return "tile2d_transpose_4x8_to_8x4";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4][8];
@@ -1295,7 +1295,7 @@ namespace
         {
             return "tile2d_skewed_row_stride";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4 * 9];
@@ -1321,7 +1321,7 @@ namespace
         {
             return "tile2d_blocked_2x2_layout";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[32];
@@ -1351,7 +1351,7 @@ namespace
         {
             return "tile2d_diagonal_gather";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int tile[4][8];
@@ -1376,7 +1376,7 @@ namespace
     template <int OddConstant>
     struct PseudoRandomOddScatter
     {
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -1433,7 +1433,7 @@ namespace
         {
             return "pseudorandom_gather_after_identity";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[kArrayThreadCount];
@@ -1457,7 +1457,7 @@ namespace
         {
             return "vectorized_pair_tile";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ Pair tile[16];
@@ -1484,7 +1484,7 @@ namespace
         {
             return "tile2d_striped_load_store";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ int tile[32];
@@ -1518,7 +1518,7 @@ namespace
         {
             return "matmul_2x2_k3_simple";
         }
-        static constexpr int   thread_count = 4;
+        [[maybe_unused]] static constexpr int thread_count = 4;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[2 * 3];
@@ -1537,7 +1537,7 @@ namespace
         {
             return "matmul_2x4_k3_simple";
         }
-        static constexpr int   thread_count = 8;
+        [[maybe_unused]] static constexpr int thread_count = 8;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[2 * 3];
@@ -1556,7 +1556,7 @@ namespace
         {
             return "matmul_4x4_k4_simple";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[4 * 4];
@@ -1575,7 +1575,7 @@ namespace
         {
             return "matmul_4x2_k5_simple";
         }
-        static constexpr int   thread_count = 8;
+        [[maybe_unused]] static constexpr int thread_count = 8;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[4 * 5];
@@ -1594,7 +1594,7 @@ namespace
         {
             return "matmul_4x8_k4_simple";
         }
-        static constexpr int   thread_count = 32;
+        [[maybe_unused]] static constexpr int thread_count = 32;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[4 * 4];
@@ -1613,7 +1613,7 @@ namespace
         {
             return "matmul_chunked_2x2_k2x3";
         }
-        static constexpr int   thread_count = 4;
+        [[maybe_unused]] static constexpr int thread_count = 4;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[2 * 2];
@@ -1632,7 +1632,7 @@ namespace
         {
             return "matmul_chunked_4x4_k2x4";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[4 * 2];
@@ -1651,7 +1651,7 @@ namespace
         {
             return "matmul_double_buffered_2x4_k2x3";
         }
-        static constexpr int   thread_count = 8;
+        [[maybe_unused]] static constexpr int thread_count = 8;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[2][2 * 2];
@@ -1694,7 +1694,7 @@ namespace
         {
             return "matmul_skewed_lds_4x4_k4";
         }
-        static constexpr int   thread_count = 16;
+        [[maybe_unused]] static constexpr int thread_count = 16;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[4 * 5];
@@ -1713,7 +1713,7 @@ namespace
         {
             return "matmul_two_workgroups_2x2_k3";
         }
-        static constexpr int   thread_count = 4;
+        [[maybe_unused]] static constexpr int thread_count = 4;
         __global__ static void run(int* out)
         {
             __shared__ int a_shared[2 * 3];
@@ -1739,7 +1739,7 @@ namespace
         {
             return "same_epoch_write_read_conflict_reference";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -1761,7 +1761,7 @@ namespace
         {
             return "same_epoch_write_write_conflict_reference";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -1788,7 +1788,7 @@ namespace
         {
             return "partially_overlapping_write_conflict_reference";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ Pair pair;
@@ -1815,7 +1815,7 @@ namespace
         {
             return "array_same_index_write_conflict_reference";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[1];
@@ -1835,7 +1835,7 @@ namespace
         {
             return "array_same_index_read_write_conflict_reference";
         }
-        static constexpr int   thread_count = kArrayThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kArrayThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int data[1];
@@ -1857,7 +1857,7 @@ namespace
         {
             return "divergent_barrier_missing_reader_reference";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;
@@ -1880,7 +1880,7 @@ namespace
         {
             return "divergent_barrier_missing_writer_reference";
         }
-        static constexpr int   thread_count = kDefaultThreadCount;
+        [[maybe_unused]] static constexpr int thread_count = kDefaultThreadCount;
         __global__ static void run(int* out)
         {
             __shared__ int value;

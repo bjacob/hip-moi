@@ -32,6 +32,8 @@ foundation:
 
 * CMake uses Ninja and builds HIP tests with GTest.
 * CMake exports a header-only `hip_moi::hip_moi` library target.
+* On Clang/GCC-compatible compilers, targets that link `hip_moi::hip_moi`
+  compile with `-Wall -Wextra -Werror` for project C++/HIP sources.
 * GTest is found as a system package when available, with `FetchContent`
   fallback.
 * `HIP_MOI_CTEST_PER_CASE=ON` is the default, so CTest reports one entry per
