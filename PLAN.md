@@ -76,20 +76,25 @@ foundation:
   detector-contract coverage for same-epoch byte ranges: read/read same address,
   write/write same address, non-overlapping writes, adjacent byte ranges, and an
   overlapping full-object/subobject write.
+* `tests/instrumented/005_epoch_boundary_test.hip` exercises uniform
+  `ctx.syncthreads()` as the MVP epoch boundary. It checks that same-address
+  accesses separated by a barrier do not report, repeated reuse across epochs
+  does not report, and a new same-epoch conflict after a barrier reports in the
+  new epoch.
 * The current detector uses a simple metadata lock around compare-and-append
   bookkeeping. That lock is detector-internal and must not be treated as
   user-program synchronization by the shadow model.
-* Access logging, basic conflict diagnostics, host reporting, and the first
-  byte-range edge cases exist. Epoch separation tests, epoch clearing, broader
-  real-kernel idioms, and low-overhead per-thread logs are still future work.
+* Access logging, basic conflict diagnostics, host reporting, byte-range edge
+  cases, and epoch-boundary tests exist. Epoch clearing, broader real-kernel
+  idioms, and low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: exercise `ctx.syncthreads()` as the MVP epoch
-boundary, including same-address accesses separated by a uniform full-workgroup
-barrier and repeated reuse of the same LDS address across epochs.
+Next implementation slice: start all-thread array cases, where every thread
+participates in a simple LDS pattern instead of only one or two selected
+threads.
 
 ## Foundations
 
@@ -609,6 +614,7 @@ tests/instrumented/
   002_race_mvp_test.hip
   003_host_context_test.hip
   004_basic_conflict_predicate_test.hip
+  005_epoch_boundary_test.hip
   test_support.hpp
 ```
 
@@ -619,6 +625,8 @@ for racy kernels, numerical output is not the oracle.
 stderr/fatal policy, and destructor fallback for forgotten checks.
 `004_basic_conflict_predicate_test.hip` asserts the basic MVP predicate around
 same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
+`005_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
+uniform `ctx.syncthreads()`.
 
 Incremental instrumented test growth:
 
@@ -629,7 +637,7 @@ Incremental instrumented test growth:
 3. Add the host-side `HIP_MOI_CHECK` path and destructor fallback for
    unconsumed diagnostics. Done.
 4. Add write/write diagnostics and basic byte-range edge cases. Done.
-5. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
+5. Add `ctx.syncthreads()` separation tests when epoch advancement exists. Done.
 6. Add all-thread array cases when per-thread metadata and byte-range tracking
    are solid.
 7. Add loops when repeated epochs are solid.

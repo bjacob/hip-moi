@@ -33,3 +33,7 @@ and death tests to check both reporting and abort behavior.
 `004_basic_conflict_predicate_test.hip` broadens the raw detector-contract
 coverage for same-epoch byte ranges: read/read, write/write, non-overlap,
 adjacent ranges, and overlapping subobjects.
+
+`005_epoch_boundary_test.hip` exercises uniform `ctx.syncthreads()` as the MVP
+epoch boundary: separated same-address accesses should not report, while a new
+same-epoch conflict after a barrier should still report in the new epoch.
