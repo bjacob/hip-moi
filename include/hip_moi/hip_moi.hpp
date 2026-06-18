@@ -75,7 +75,6 @@ namespace hip_moi
         int             subgroup_capacity;
         int*            access_count;
         int*            diagnostic_count;
-        int*            metadata_lock;
     };
 
     template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
@@ -86,7 +85,6 @@ namespace hip_moi
         subgroup_state subgroup_states[SubgroupCapacity];
         int            access_count;
         int            diagnostic_count;
-        int            metadata_lock;
 
         __device__ context_storage_ref ref()
         {
@@ -99,7 +97,6 @@ namespace hip_moi
                 SubgroupCapacity,
                 &access_count,
                 &diagnostic_count,
-                &metadata_lock,
             };
         }
     };
@@ -125,15 +122,15 @@ namespace hip_moi
                 {
                     *storage_.diagnostic_count = 0;
                 }
-                if(storage_.metadata_lock)
-                {
-                    *storage_.metadata_lock = 0;
-                }
                 for(int i = 0; storage_.subgroup_states && i < storage_.subgroup_capacity; ++i)
                 {
                     storage_.subgroup_states[i].epoch = 0;
                 }
-                __threadfence_block();
+                for(int i = 0; storage_.access_records && i < storage_.access_record_capacity; ++i)
+                {
+                    storage_.access_records[i].valid = 0;
+                }
+                __threadfence();
             }
             __syncthreads();
         }
@@ -162,7 +159,7 @@ namespace hip_moi
             if(threadIdx.x == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
                 ++storage_.subgroup_states[0].epoch;
-                __threadfence_block();
+                __threadfence();
             }
             __syncthreads();
         }
@@ -210,27 +207,6 @@ namespace hip_moi
             return 0;
         }
 
-        __device__ void lock_metadata() const
-        {
-            if(!storage_.metadata_lock)
-            {
-                return;
-            }
-            while(atomicCAS(storage_.metadata_lock, 0, 1) != 0)
-            {
-            }
-        }
-
-        __device__ void unlock_metadata() const
-        {
-            if(!storage_.metadata_lock)
-            {
-                return;
-            }
-            __threadfence();
-            atomicExch(storage_.metadata_lock, 0);
-        }
-
         __device__ static bool byte_ranges_overlap(const access_record& first,
                                                    const access_record& second)
         {
@@ -257,12 +233,11 @@ namespace hip_moi
                 return;
             }
 
-            int index = *storage_.diagnostic_count;
+            int index = atomicAdd(storage_.diagnostic_count, 1);
             if(index < storage_.diagnostic_capacity)
             {
                 storage_.diagnostics[index] = diagnostic_record;
             }
-            *storage_.diagnostic_count = index + 1;
         }
 
         __device__ void emit_conflict(const access_record& first, const access_record& second) const
@@ -321,11 +296,29 @@ namespace hip_moi
                 1,
             };
 
-            lock_metadata();
+            int record_index = atomicAdd(storage_.access_count, 1);
 
-            int access_count = *storage_.access_count;
-            for(int i = 0; i < access_count && i < storage_.access_record_capacity; ++i)
+            if(record_index < storage_.access_record_capacity)
             {
+                record.valid                                = 0;
+                storage_.access_records[record_index]       = record;
+                storage_.access_records[record_index].valid = 0;
+                __threadfence();
+                storage_.access_records[record_index].valid = 1;
+                __threadfence();
+            }
+
+            int scan_limit = atomicAdd(storage_.access_count, 0);
+            if(scan_limit > storage_.access_record_capacity)
+            {
+                scan_limit = storage_.access_record_capacity;
+            }
+            for(int i = 0; i < scan_limit; ++i)
+            {
+                if(i == record_index)
+                {
+                    continue;
+                }
                 access_record prior = storage_.access_records[i];
                 if(conflicts_with(prior, record))
                 {
@@ -333,17 +326,10 @@ namespace hip_moi
                 }
             }
 
-            if(access_count < storage_.access_record_capacity)
-            {
-                storage_.access_records[access_count] = record;
-            }
-            else
+            if(record_index >= storage_.access_record_capacity)
             {
                 emit_metadata_full(record);
             }
-            *storage_.access_count = access_count + 1;
-
-            unlock_metadata();
         }
 
         context_storage_ref storage_;
@@ -412,7 +398,6 @@ namespace hip_moi
                 options_.subgroup_capacity,
                 access_count_,
                 diagnostic_count_,
-                metadata_lock_,
             };
         }
 
@@ -603,7 +588,6 @@ namespace hip_moi
                                   "subgroup_states");
             hip_allocate_or_abort(&access_count_, sizeof(int), "access_count");
             hip_allocate_or_abort(&diagnostic_count_, sizeof(int), "diagnostic_count");
-            hip_allocate_or_abort(&metadata_lock_, sizeof(int), "metadata_lock");
         }
 
         void clear_device_metadata_or_abort()
@@ -620,7 +604,6 @@ namespace hip_moi
                                 "subgroup_states");
             hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
             hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
-            hip_memset_or_abort(metadata_lock_, 0, sizeof(int), "metadata_lock");
         }
 
         template <typename T>
@@ -683,11 +666,6 @@ namespace hip_moi
                 (void)hipFree(diagnostic_count_);
                 diagnostic_count_ = nullptr;
             }
-            if(metadata_lock_)
-            {
-                (void)hipFree(metadata_lock_);
-                metadata_lock_ = nullptr;
-            }
         }
 
         host_context_options options_;
@@ -702,7 +680,6 @@ namespace hip_moi
         subgroup_state* subgroup_states_  = nullptr;
         int*            access_count_     = nullptr;
         int*            diagnostic_count_ = nullptr;
-        int*            metadata_lock_    = nullptr;
     };
 
     inline void check_or_abort(host_context& context, const char* file, int line)

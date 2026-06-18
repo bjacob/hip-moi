@@ -84,3 +84,5 @@ hip_moi_add_gtest(hip_moi_instrumented_basic_conflict_predicate_test
                   instrumented/004_basic_conflict_predicate_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_epoch_boundary_test
                   instrumented/005_epoch_boundary_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_all_thread_array_test
+                  instrumented/006_all_thread_array_test.hip)

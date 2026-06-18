@@ -55,13 +55,12 @@ foundation:
   `context_storage_ref`, `static_context_storage`, and `context`.
 * The current `context` implementation is intentionally only a pass-through
   skeleton in synchronization scope, but now has real same-epoch access
-  logging: `init_workgroup()` initializes counters, epoch storage, and a
-  detector-internal metadata lock; `lds_load<T>` and `lds_store<T>` record the
-  LDS byte range before performing the real access; and `syncthreads()` executes
-  a real barrier while advancing the first epoch slot. Detector metadata
-  initialization and epoch increments use detector-internal block fences before
-  releasing the workgroup so global-memory metadata is visible to the
-  participating threads.
+  logging: `init_workgroup()` initializes counters, epoch storage, and access
+  record validity; `lds_load<T>` and `lds_store<T>` record the LDS byte range
+  before performing the real access; and `syncthreads()` executes a real barrier
+  while advancing the first epoch slot. Detector metadata initialization and
+  epoch increments use detector-internal device fences before releasing the
+  workgroup so global-memory metadata is visible to the participating threads.
 * `tests/instrumented/001_safe_mvp_test.hip` contains the first instrumented
   kernel test. It passes caller-provided global-memory metadata storage into a
   kernel, performs a same-thread instrumented LDS store/load, checks the
@@ -85,20 +84,26 @@ foundation:
   accesses separated by a barrier do not report, repeated reuse across epochs
   does not report, and a new same-epoch conflict after a barrier reports in the
   new epoch.
-* The current detector uses a simple metadata lock around compare-and-append
-  bookkeeping. That lock is detector-internal and must not be treated as
-  user-program synchronization by the shadow model.
+* `tests/instrumented/006_all_thread_array_test.hip` starts the all-thread
+  ladder step. It covers independent per-thread LDS writes, own-slot reads after
+  a barrier, neighbor reads after a barrier, and an intentionally missing-barrier
+  neighbor-read diagnostic case.
+* The current detector uses atomic reservation for access-log and diagnostic-log
+  slots. Access records are published with a valid bit before scanning, avoiding
+  the wavefront-divergent spinlock deadlock that a device-side metadata lock
+  would risk. These atomics and fences are detector-internal and must not be
+  treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
-  cases, and epoch-boundary tests exist. Epoch clearing, broader real-kernel
-  idioms, and low-overhead per-thread logs are still future work.
+  cases, epoch-boundary tests, and first all-thread array cases exist. Metadata
+  capacity tests, epoch clearing, broader real-kernel idioms, and low-overhead
+  per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: start all-thread array cases, where every thread
-participates in a simple LDS pattern instead of only one or two selected
-threads.
+Next implementation slice: exercise metadata capacity and overflow semantics,
+including full access logs and truncated diagnostic buffers.
 
 ## Foundations
 
@@ -228,7 +233,6 @@ struct context_storage_ref {
   int subgroup_capacity;
   int* access_count;
   int* diagnostic_count;
-  int* metadata_lock;
 };
 
 // Optional fixed-capacity storage helper for users who want static storage.
@@ -300,8 +304,9 @@ Notes:
 * `context_storage_ref` is a non-owning view of caller-provided metadata
   buffers. Those buffers may be in global memory, which avoids consuming scarce
   LDS in kernels that already use nearly all available shared memory.
-* `metadata_lock` is detector-internal bookkeeping for the current simple
-  implementation. It must not be modeled as user-program synchronization.
+* The current implementation uses detector-internal atomics and fences to
+  reserve and publish metadata slots. These operations must not be modeled as
+  user-program synchronization.
 * `static_context_storage` is only a convenience helper for users who do want
   fixed-size storage, for example in `__shared__` memory. Its capacities are
   template parameters because that is how the helper embeds fixed-size arrays.
@@ -462,17 +467,17 @@ Preferred implementation direction:
   detector-internal bookkeeping only. Use the weakest ordering sufficient for
   detector correctness.
 
-Fallback/debug implementation:
+Current fallback/debug implementation:
 
-1. Acquire detector metadata lock.
-2. Compare the new access with prior access records in the current epoch.
-3. Append the new access record.
-4. Release detector metadata lock.
+1. Atomically reserve an access-record slot.
+2. Publish the access record with a valid bit.
+3. Compare the new access with valid access records in the current epoch.
+4. Atomically reserve diagnostic slots for any conflicts.
 5. Perform the user's real LDS load or store.
 
-This fallback may perturb scheduling and may introduce real synchronization in
-the instrumented executable, but diagnostics must still be computed from the
-shadow model that ignores detector-created happens-before edges.
+This fallback may perturb scheduling and may introduce extra ordering in the
+instrumented executable, but diagnostics must still be computed from the shadow
+model that ignores detector-created happens-before edges.
 
 This intentionally diagnoses unordered same-epoch conflicting accesses based on
 the program order expressed through hip-moi calls, not on a particular hardware
@@ -620,6 +625,7 @@ tests/instrumented/
   003_host_context_test.hip
   004_basic_conflict_predicate_test.hip
   005_epoch_boundary_test.hip
+  006_all_thread_array_test.hip
   test_support.hpp
 ```
 
@@ -632,6 +638,8 @@ stderr/fatal policy, and scope-based destructor handling.
 same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
 `005_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
 uniform `ctx.syncthreads()`.
+`006_all_thread_array_test.hip` asserts first all-thread LDS array behavior,
+including a missing-barrier diagnostic case.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -657,7 +665,7 @@ Incremental instrumented test growth:
 4. Add write/write diagnostics and basic byte-range edge cases. Done.
 5. Add `ctx.syncthreads()` separation tests when epoch advancement exists. Done.
 6. Add all-thread array cases when per-thread metadata and byte-range tracking
-   are solid.
+   are solid. Done.
 7. Add loops when repeated epochs are solid.
 8. Add tiled and matmul-like LDS cases when the basic machinery has survived
    enough pressure.

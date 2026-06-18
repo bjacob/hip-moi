@@ -50,7 +50,6 @@ namespace hip_moi::test
                 hipMalloc(&subgroup_states_, subgroup_capacity * sizeof(subgroup_state)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&diagnostic_count_, sizeof(int)));
-            HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&metadata_lock_, sizeof(int)));
         }
 
         context_storage_ref ref() const
@@ -64,7 +63,6 @@ namespace hip_moi::test
                 subgroup_capacity_,
                 access_count_,
                 diagnostic_count_,
-                metadata_lock_,
             };
         }
 
@@ -111,11 +109,6 @@ namespace hip_moi::test
                 (void)hipFree(diagnostic_count_);
                 diagnostic_count_ = nullptr;
             }
-            if(metadata_lock_)
-            {
-                (void)hipFree(metadata_lock_);
-                metadata_lock_ = nullptr;
-            }
         }
 
         access_record*  access_records_         = nullptr;
@@ -123,7 +116,6 @@ namespace hip_moi::test
         subgroup_state* subgroup_states_        = nullptr;
         int*            access_count_           = nullptr;
         int*            diagnostic_count_       = nullptr;
-        int*            metadata_lock_          = nullptr;
         int             access_record_capacity_ = 0;
         int             diagnostic_capacity_    = 0;
         int             subgroup_capacity_      = 0;

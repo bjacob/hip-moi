@@ -37,3 +37,7 @@ adjacent ranges, and overlapping subobjects.
 `005_epoch_boundary_test.hip` exercises uniform `ctx.syncthreads()` as the MVP
 epoch boundary: separated same-address accesses should not report, while a new
 same-epoch conflict after a barrier should still report in the new epoch.
+
+`006_all_thread_array_test.hip` moves beyond hand-picked threads: all threads in
+the workgroup participate in simple LDS array write/read patterns, including one
+intentionally unsynchronized neighbor-read diagnostic case.
