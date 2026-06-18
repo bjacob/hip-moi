@@ -16,11 +16,11 @@ Instrumented tests should mirror the reference kernels in
 * diagnostic-positive references should produce deterministic diagnostics,
 * racy references should not rely on numerical kernel outputs as their oracle.
 
-`safe_mvp_test.hip` is intentionally tiny: it verifies that the API can be
+`001_safe_mvp_test.hip` is intentionally tiny: it verifies that the API can be
 included from a HIP kernel, storage can be passed in, and a same-thread
 instrumented LDS store/load can run with two logged accesses and zero
 diagnostics.
 
-`race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
+`002_race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
 write/read conflict on one LDS address. It asserts diagnostic metadata rather
 than numerical kernel output.

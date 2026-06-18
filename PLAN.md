@@ -55,11 +55,11 @@ foundation:
   detector-internal metadata lock; `lds_load<T>` and `lds_store<T>` record the
   LDS byte range before performing the real access; and `syncthreads()` executes
   a real barrier while advancing the first epoch slot.
-* `tests/instrumented/safe_mvp_test.hip` contains the first instrumented kernel
-  test. It passes caller-provided global-memory metadata storage into a kernel,
-  performs a same-thread instrumented LDS store/load, checks the numerical
-  result, asserts two logged accesses, and asserts zero diagnostics.
-* `tests/instrumented/race_mvp_test.hip` contains the first
+* `tests/instrumented/001_safe_mvp_test.hip` contains the first instrumented
+  kernel test. It passes caller-provided global-memory metadata storage into a
+  kernel, performs a same-thread instrumented LDS store/load, checks the
+  numerical result, asserts two logged accesses, and asserts zero diagnostics.
+* `tests/instrumented/002_race_mvp_test.hip` contains the first
   diagnostic-positive instrumented kernel. It checks that a same-epoch LDS
   write/read byte-range conflict from two different threads produces one
   deterministic diagnostic.
@@ -556,14 +556,14 @@ Proposed instrumented test layout:
 
 ```text
 tests/instrumented/
-  safe_mvp_test.hip
-  race_mvp_test.hip
+  001_safe_mvp_test.hip
+  002_race_mvp_test.hip
   test_support.hpp
 ```
 
-`safe_mvp_test.hip` should assert both numerical outputs and zero diagnostics.
-`race_mvp_test.hip` should assert deterministic diagnostics; for racy kernels,
-numerical output is not the oracle.
+`001_safe_mvp_test.hip` should assert both numerical outputs and zero
+diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
+for racy kernels, numerical output is not the oracle.
 
 Incremental instrumented test growth:
 

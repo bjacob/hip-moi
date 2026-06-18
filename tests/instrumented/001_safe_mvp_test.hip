@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/safe_mvp_test.hip
+// tests/instrumented/001_safe_mvp_test.hip
 //
 // Initial diagnostic-free tests for the hip-moi instrumentation API.
 #include "test_support.hpp"
