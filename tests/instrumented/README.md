@@ -24,3 +24,7 @@ diagnostics.
 `002_race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
 write/read conflict on one LDS address. It asserts diagnostic metadata rather
 than numerical kernel output.
+
+`003_host_context_test.hip` exercises the user-facing host layer:
+`hip_moi::host_context`, `HIP_MOI_CHECK`, explicit diagnostic consumption, and
+the destructor fallback for unconsumed diagnostics.

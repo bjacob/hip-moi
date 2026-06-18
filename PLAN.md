@@ -63,6 +63,11 @@ foundation:
   diagnostic-positive instrumented kernel. It checks that a same-epoch LDS
   write/read byte-range conflict from two different threads produces one
   deterministic diagnostic.
+* `tests/instrumented/003_host_context_test.hip` contains the first
+  user-facing host diagnostics tests. It exercises `hip_moi::host_context`,
+  `HIP_MOI_CHECK`, explicit nonfatal diagnostic consumption, the default
+  destructor abort for unconsumed diagnostics, and the destructor reporting/abort
+  opt-outs.
 * The current detector uses a simple metadata lock around compare-and-append
   bookkeeping. That lock is detector-internal and must not be treated as
   user-program synchronization by the shadow model.
@@ -239,6 +244,35 @@ class context {
   __device__ int error_count() const;
 };
 
+struct host_context_options {
+  int access_record_capacity;
+  int diagnostic_capacity;
+  int subgroup_capacity;
+
+  bool destructor_reports;
+  bool destructor_aborts;
+  FILE* diagnostic_stream;
+};
+
+class host_context {
+ public:
+  // Owns global-memory detector metadata and hands a non-owning view to kernels.
+  explicit host_context(host_context_options options = {});
+
+  context_storage_ref device_ref();
+
+  // Synchronizes, copies diagnostics to the host, optionally prints them, and
+  // marks them consumed so the destructor will not report/abort on the same
+  // diagnostics.
+  bool check(FILE* stream = stderr);
+
+  void disable_destructor_reporting();
+  void disable_destructor_abort();
+  void disable_destructor_check();
+};
+
+#define HIP_MOI_CHECK(context) ...
+
 }  // namespace hip_moi
 ```
 
@@ -274,6 +308,13 @@ Notes:
   diagnostic API.
 * The API should eventually support labels/source locations, but MVP diagnostics
   can start with compact numeric records.
+* End users should not have to manually copy `diagnostic_count` or the raw
+  diagnostic buffer. The default user path is `hip_moi::host_context` plus
+  `HIP_MOI_CHECK(moi)`, which reports diagnostics to `stderr` and aborts on
+  failure. If a user forgets the explicit check, `host_context`'s destructor is
+  a safety net: by default, unconsumed diagnostics are reported to `stderr` and
+  abort the process. Advanced users can independently opt out of destructor
+  reporting and destructor aborting.
 
 ### Instrumented kernel shape
 
@@ -558,12 +599,15 @@ Proposed instrumented test layout:
 tests/instrumented/
   001_safe_mvp_test.hip
   002_race_mvp_test.hip
+  003_host_context_test.hip
   test_support.hpp
 ```
 
 `001_safe_mvp_test.hip` should assert both numerical outputs and zero
 diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
 for racy kernels, numerical output is not the oracle.
+`003_host_context_test.hip` should assert end-user behavior: explicit checks,
+stderr/fatal policy, and destructor fallback for forgotten checks.
 
 Incremental instrumented test growth:
 
@@ -571,12 +615,14 @@ Incremental instrumented test growth:
    `ctx.lds_store` exist. Done.
 2. Add the smallest same-epoch write/read diagnostic when overlap detection
    exists. Done.
-3. Add write/write diagnostics.
-4. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
-5. Add all-thread array cases when per-thread metadata and byte-range tracking
+3. Add the host-side `HIP_MOI_CHECK` path and destructor fallback for
+   unconsumed diagnostics. Done.
+4. Add write/write diagnostics.
+5. Add `ctx.syncthreads()` separation tests when epoch advancement exists.
+6. Add all-thread array cases when per-thread metadata and byte-range tracking
    are solid.
-6. Add loops when repeated epochs are solid.
-7. Add tiled and matmul-like LDS cases when the basic machinery has survived
+7. Add loops when repeated epochs are solid.
+8. Add tiled and matmul-like LDS cases when the basic machinery has survived
    enough pressure.
 
 Layer 1: toy deterministic kernels.
