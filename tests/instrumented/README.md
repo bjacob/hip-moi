@@ -17,15 +17,15 @@ Instrumented tests should mirror the reference kernels in
 * racy references should not rely on numerical kernel outputs as their oracle.
 
 Files whose workgroups contain only one subgroup include `single_subgroup` in
-their names. Those files should also exercise subgroup-level mode where the
-outcome is deterministic: in particular, thread-level race diagnostics that are
-entirely intra-subgroup should have subgroup-level companion checks asserting
-zero diagnostics.
+their names. When such a file has deterministic thread-level race diagnostics
+that are entirely intra-subgroup, it should have subgroup-level companion checks
+asserting zero diagnostics. Diagnostic-free single-subgroup tests generally do
+not need redundant subgroup-level mirrors.
 
 `001_single_subgroup_safe_mvp_test.hip` is intentionally tiny: it verifies that the API can be
 included from a HIP kernel, storage can be passed in, and a same-thread
 instrumented LDS store/load can run with two logged accesses and zero
-diagnostics in both thread-level and subgroup-level modes.
+diagnostics.
 
 `002_single_subgroup_race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
 write/read conflict on one LDS address. It asserts diagnostic metadata rather

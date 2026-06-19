@@ -100,33 +100,6 @@ namespace
         ctx.syncthreads();
     }
 
-    __global__ void long_scalar_producer_consumer_subgroup_level_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::subgroup_level_context ctx =
-            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
-        ctx.init_workgroup();
-
-        for(int iter = 0; iter < kIterationCount; ++iter)
-        {
-            if(threadIdx.x == 0)
-            {
-                ctx.lds_store(&value, 200 + iter);
-            }
-
-            ctx.syncthreads();
-
-            if(threadIdx.x == 1)
-            {
-                out[iter] = ctx.lds_load(&value);
-            }
-
-            ctx.syncthreads();
-        }
-    }
-
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,
                                 observed_metadata*                           observed)
     {
@@ -254,38 +227,4 @@ namespace
         EXPECT_EQ(observed.diagnostics[0].epoch, 0u);
     }
 
-    TEST(HipMoiEpochLogLifetime, SubgroupLevelLongScalarLoopReusesSingleAccessSlotPerEpoch)
-    {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/1, /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/1));
-
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, kIterationCount * sizeof(int)));
-
-        hipLaunchKernelGGL(long_scalar_producer_consumer_subgroup_level_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        int output[kIterationCount] = {};
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-
-        for(int iter = 0; iter < kIterationCount; ++iter)
-        {
-            EXPECT_EQ(output[iter], 200 + iter);
-        }
-        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
-            storage, /*expected_access_count=*/2 * kIterationCount,
-            /*expected_diagnostic_count=*/0));
-
-        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
-    }
 } // namespace

@@ -93,16 +93,16 @@ foundation:
   fences before releasing the workgroup so global-memory metadata is visible to
   the participating threads.
 * Instrumented tests that are intentionally limited to a one-subgroup workgroup
-  now use `single_subgroup` near the start of the file name. Representative
-  diagnostic-positive single-subgroup tests have subgroup-level companion checks
-  asserting zero diagnostics, making the mode contract explicit: a
+  now use `single_subgroup` near the start of the file name.
+  Diagnostic-positive single-subgroup race tests have subgroup-level companion
+  checks asserting zero diagnostics, making the mode contract explicit: a
   single-subgroup workgroup has no cross-subgroup race for subgroup-level mode
-  to report.
+  to report. Purely diagnostic-free single-subgroup tests do not need redundant
+  subgroup-level mirrors.
 * `tests/instrumented/001_single_subgroup_safe_mvp_test.hip` contains the first instrumented
   kernel test. It passes caller-provided global-memory metadata storage into a
   kernel, performs a same-thread instrumented LDS store/load, checks the
-  numerical result, asserts two logged accesses, and asserts zero diagnostics
-  in both thread-level and subgroup-level modes.
+  numerical result, asserts two logged accesses, and asserts zero diagnostics.
 * `tests/instrumented/002_single_subgroup_race_mvp_test.hip` contains the first
   diagnostic-positive instrumented kernel. It checks that a same-epoch LDS
   write/read byte-range conflict from two different threads produces one
@@ -198,7 +198,8 @@ foundation:
   diagnostics now exist. Mode-aware subgroup-level host reporting now exists.
   The tutorial now presents thread-level and subgroup-level modes as peers, and
   the single-subgroup instrumented tests now mark themselves in their file names
-  while checking subgroup-level silence for representative intra-subgroup races.
+  while checking subgroup-level silence for representative diagnostic-positive
+  intra-subgroup races.
   Diagnostic quality work and low-overhead subgroup-representative logs are
   still future work.
 
@@ -899,7 +900,9 @@ tests/instrumented/
 Files with `single_subgroup` in their names are deliberately one-subgroup
 workgroups. When such a file has deterministic thread-level race diagnostics,
 it should also include subgroup-level checks showing that intra-subgroup races
-are outside subgroup-level mode's reporting contract.
+are outside subgroup-level mode's reporting contract. Diagnostic-free
+single-subgroup tests generally should not add subgroup-level mirrors unless
+they exercise a subgroup-level behavior not already covered elsewhere.
 
 `001_single_subgroup_safe_mvp_test.hip` should assert both numerical outputs and zero
 diagnostics. `002_single_subgroup_race_mvp_test.hip` should assert deterministic diagnostics;
@@ -1001,7 +1004,7 @@ Incremental instrumented test growth:
     first passing example and a cross-subgroup diagnostic example.
 20. Rename single-subgroup instrumented tests with a fixed-width numeric prefix
     followed by `single_subgroup`, and add subgroup-level companion checks for
-    representative deterministic single-subgroup cases. Done.
+    deterministic diagnostic-positive single-subgroup race cases. Done.
 21. Prototype lower-overhead subgroup-representative logging for tile-shaped
     accesses if the design is clear enough; otherwise document the blockers and
     keep using all-thread logging filtered by subgroup id.
