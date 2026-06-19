@@ -113,3 +113,5 @@ if(_hip_moi_build_rdna4_tests)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_thread_level_subgroup_test
                   instrumented/015_thread_level_subgroup_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_bootstrap_test
+                  instrumented/016_subgroup_level_bootstrap_test.hip)

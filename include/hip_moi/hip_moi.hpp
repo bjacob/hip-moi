@@ -30,11 +30,18 @@ namespace hip_moi
         metadata_full   = 2,
     };
 
+    enum class instrumentation_mode : uint32_t
+    {
+        thread_level   = 0,
+        subgroup_level = 1,
+    };
+
     struct config
     {
-        int thread_count;
-        int threads_per_subgroup;
-        int subgroup_count;
+        int                  thread_count;
+        int                  threads_per_subgroup;
+        int                  subgroup_count;
+        instrumentation_mode mode = instrumentation_mode::thread_level;
     };
 
     struct access_record
@@ -194,6 +201,11 @@ namespace hip_moi
             return cfg_;
         }
 
+        __device__ instrumentation_mode mode() const
+        {
+            return cfg_.mode;
+        }
+
         __device__ uint32_t thread_id() const
         {
             return static_cast<uint32_t>(threadIdx.x
@@ -314,9 +326,21 @@ namespace hip_moi
         __device__ bool conflicts_with(const access_record& first,
                                        const access_record& second) const
         {
-            return first.valid && first.epoch == second.epoch && first.thread_id != second.thread_id
-                   && (is_write(first.kind) || is_write(second.kind))
-                   && byte_ranges_overlap(first, second);
+            if(!first.valid || first.epoch != second.epoch
+               || !(is_write(first.kind) || is_write(second.kind))
+               || !byte_ranges_overlap(first, second))
+            {
+                return false;
+            }
+
+            switch(cfg_.mode)
+            {
+            case instrumentation_mode::thread_level:
+                return first.thread_id != second.thread_id;
+            case instrumentation_mode::subgroup_level:
+                return first.subgroup_id != second.subgroup_id;
+            }
+            return false;
         }
 
         __device__ void record_access(const void* ptr, uint32_t byte_count, access_kind kind)

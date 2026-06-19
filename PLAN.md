@@ -149,6 +149,10 @@ foundation:
   into two 32-thread subgroups, checks the `context` thread/subgroup/rank
   helpers, verifies subgroup ids recorded in access records, and asserts
   same-subgroup and cross-subgroup same-epoch diagnostics.
+* `tests/instrumented/016_subgroup_level_bootstrap_test.hip` starts
+  `subgroup-level` coverage. It selects the mode through `config::mode`, reuses
+  the existing access records as a semantic bootstrap, reports cross-subgroup
+  same-epoch conflicts, and intentionally ignores same-subgroup conflicts.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -158,21 +162,19 @@ foundation:
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
   tests, looped epoch tests, tiled LDS tests, simple matmul-like tests,
   pipeline-like matmul tests, RDNA4 WMMA row-major/data-tiled tests, and first
-  multi-subgroup `thread-level` tests exist. Epoch-local access-log lifetime now
-  exists. `subgroup-level` mode, diagnostic quality work, and low-overhead
-  per-thread logs are still future work.
+  multi-subgroup `thread-level` and `subgroup-level` tests exist. Epoch-local
+  access-log lifetime now exists. A `subgroup-level` semantic bootstrap exists,
+  but dissociated subgroup-level storage, mode-aware diagnostic quality work,
+  and low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: `subgroup-level` mode design and first prototype.
-The immediate goal is to decide how `thread-level` HIP mode and lower-overhead
-`subgroup-level` mode coexist without compromising either contract. The target
-direction is structural dissociation for the hot metadata path: `thread-level`
-and `subgroup-level` may share small helper routines and host reporting, but
-`subgroup-level` should be free to develop its own access records and storage
-layout.
+Next implementation slice: dissociate `subgroup-level` hot metadata. The mode
+selection surface and semantic bootstrap now exist, so the next goal is to give
+`subgroup-level` its own access records and storage layout while keeping shared
+helpers small and non-constraining.
 
 ## Foundations
 
@@ -301,6 +303,11 @@ Use an explicit user-provided context from day one:
 ```c++
 namespace hip_moi {
 
+enum class instrumentation_mode {
+  thread_level,
+  subgroup_level,
+};
+
 struct config {
   // Number of threads participating in this context.
   int thread_count;
@@ -308,16 +315,13 @@ struct config {
   int threads_per_subgroup;
   // Number of subgroups represented in this context.
   int subgroup_count;
+  // Instrumentation granularity. Defaults to thread-level mode.
+  instrumentation_mode mode = instrumentation_mode::thread_level;
 };
 
 struct access_record;
 struct diagnostic;
 struct subgroup_state;
-
-enum class instrumentation_mode {
-  thread_level,
-  subgroup_level,
-};
 
 // Non-owning view of detector metadata buffers. Buffers may live in global
 // memory or in __shared__ memory.
@@ -859,12 +863,17 @@ Incremental instrumented test growth:
     workgroup, cross-subgroup conflicts, same-subgroup conflicts, and
     full-workgroup synchronization separating subgroups. Done.
 15. Add `subgroup-level` mode tests: cross-subgroup conflicts still report,
-    same-subgroup conflicts intentionally do not report, and the mode contract
-    is visible in diagnostic metadata and host reports.
-16. Prototype lower-overhead subgroup-representative logging for tile-shaped
+    same-subgroup conflicts intentionally do not report, and the explicit mode
+    selection surface is exercised. Done for the semantic bootstrap.
+16. Add mode-aware diagnostic metadata and host reports for `subgroup-level`
+    mode, so reports can identify subgroup-to-subgroup conflicts without
+    pretending to identify exact causative threads.
+17. Introduce dissociated `subgroup-level` records and storage, removing thread
+    id from the hot metadata when the mode contract does not need it.
+18. Prototype lower-overhead subgroup-representative logging for tile-shaped
     accesses if the design is clear enough; otherwise document the blockers and
     keep using all-thread logging filtered by subgroup id.
-17. Improve diagnostic quality with labels/source locations and first-conflict
+19. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.
@@ -916,10 +925,9 @@ library teaches us the right subgroup abstractions.
    * Include same-subgroup and cross-subgroup diagnostic-positive tests.
    * Keep this mode principled in the HIP/LLVM memory model.
 
-3. Design the `subgroup-level` mode.
+3. Design the `subgroup-level` mode. Done for the bootstrap surface.
    * Define the mode as intentionally ignoring same-subgroup conflicts.
-   * Decide how the user selects the mode without forcing both modes into one
-     hot data layout.
+   * Select the mode through `config::mode`, defaulting to `thread_level`.
    * Allow a temporary bootstrap that reuses `thread-level` records only long
      enough to validate semantics.
    * Target separate `subgroup-level` records and storage as the optimized
@@ -928,17 +936,21 @@ library teaches us the right subgroup abstractions.
    * Avoid a large templated detector-policy design unless a very small helper
      boundary emerges naturally.
 
-4. Prototype the `subgroup-level` mode.
+4. Prototype the `subgroup-level` mode. Done for the semantic bootstrap.
    * Produce deterministic diagnostics for cross-subgroup conflicts.
    * Produce no diagnostic for same-subgroup conflicts by contract.
-   * If the first version filters existing per-thread records, mark that clearly
-     as the bootstrap implementation.
-   * Then introduce a dissociated `subgroup-level` record path that can remove
-     thread id from the hot metadata.
+   * The first version filters existing per-thread records and is clearly marked
+     as a bootstrap implementation.
+
+5. Introduce a dissociated `subgroup-level` record path.
+   * Remove thread id from the hot metadata when diagnostics only distinguish
+     subgroups.
+   * Keep byte-range overlap, subgroup arithmetic, host ownership, and
+     diagnostic formatting as shared leaf helpers where that remains natural.
    * Measure or inspect metadata footprint, atomic usage, and generated code for
      both modes.
 
-5. Explore subgroup-representative instrumentation.
+6. Explore subgroup-representative instrumentation.
    * Candidate direction: only the 0-th thread of each subgroup records a
      subgroup-level access summary.
    * Do this only for access patterns where the representative can describe the
@@ -948,14 +960,14 @@ library teaches us the right subgroup abstractions.
    * Determine whether this can reduce atomics or eliminate them from the common
      access path.
 
-6. Then resume diagnostic quality work.
+7. Then resume diagnostic quality work.
    * Add source/location IDs or stringless labels.
    * Add first-conflict preservation so later conflicts do not hide the useful
      one.
    * Add clearer mode-aware host diagnostics, especially for
      `subgroup-level` false negatives by design.
 
-7. Keep synchronization lowering notes on the horizon.
+8. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
      `__builtin_amdgcn_s_barrier`, and `__builtin_amdgcn_fence`.
    * Save or document their LLVM IR shape for the HIP-language model.
@@ -993,7 +1005,8 @@ threads in the same subgroup.
 * Use `subgroup_level` as the code-facing mode name and `subgroup-level` in
   prose.
 * Document its false-negative contract.
-* Decide how users select the mode.
+* Users currently select the mode through `config::mode`; omitted aggregate
+  initializers default to `thread_level`.
 * Prefer separate hot metadata structures for the two modes. The public context
   surface may remain similar, but `subgroup-level` should not be constrained to
   reuse `thread-level` access records.
@@ -1016,10 +1029,10 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 
 * First implementation may log all thread accesses using the existing
   `thread-level` record shape and filter same-subgroup conflicts out of the
-  shadow model, but only as a semantic bootstrap.
-* Follow that with a dissociated `subgroup-level` record/storage path so the
-  mode can optimize for subgroup-to-subgroup conflicts instead of preserving
-  per-thread detail it does not report.
+  shadow model, but only as a semantic bootstrap. Done.
+* Next, add a dissociated `subgroup-level` record/storage path so the mode can
+  optimize for subgroup-to-subgroup conflicts instead of preserving per-thread
+  detail it does not report.
 * Then investigate subgroup-representative logging where only the 0-th thread
   of each subgroup records a subgroup-level access summary.
 * Use representative logging only for access patterns whose byte ranges can be
