@@ -48,7 +48,8 @@ foundation:
   data-tiled WMMA matmul example. The README is the tutorial's primary content:
   each example is explained as a plain HIP kernel first, then as the
   corresponding hip-moi instrumented kernel, while the standalone `.hip`
-  programs serve as compiled companions.
+  programs serve as compiled companions. The matmul tutorial presents the
+  data-tiled layout through per-lane vector fragment loads and stores.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.

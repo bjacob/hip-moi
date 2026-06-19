@@ -230,22 +230,15 @@ __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
 The matrix layout is data-tiled: each lane owns one contiguous fragment of A, B,
 and C. For `_Float16` A/B WMMA fragments, lane `i` starts at byte offset
 `i * 16`; for `float` C accumulator fragments, lane `i` starts at byte offset
-`i * 32`. In element units, the helper is the same:
+`i * 32`. The kernel code can express that directly as one vector load or
+store per lane:
 
 ```c++
-__host__ __device__ int data_tiled_fragment_offset(int lane, int elem)
+__device__ f16x8_t load_global_fragment(const _Float16* global_fragments, int lane)
 {
-    return lane * kFragmentElements + elem;
+    return reinterpret_cast<const f16x8_t*>(global_fragments)[lane];
 }
 
-int offset = data_tiled_fragment_offset(lane, idx);
-a[offset]  = static_cast<_Float16>(a_value(m, k));
-b[offset]  = static_cast<_Float16>(b_value(n, k));
-```
-
-The C path uses the same packed fragment idea as a vector store:
-
-```c++
 __device__ void store_global_fragment(float* global_fragments, int lane, f32x8_t fragment)
 {
     reinterpret_cast<f32x8_t*>(global_fragments)[lane] = fragment;

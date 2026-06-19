@@ -84,13 +84,7 @@ namespace
 
     __device__ f16x8_t load_global_fragment(const _Float16* global_fragments, int fragment_index)
     {
-        f16x8_t result;
-        int     base = fragment_index * kFragmentElements;
-        for(int i = 0; i < kFragmentElements; ++i)
-        {
-            result[i] = global_fragments[base + i];
-        }
-        return result;
+        return reinterpret_cast<const f16x8_t*>(global_fragments)[fragment_index];
     }
 
     __device__ void store_global_fragment(float* global_fragments, int fragment_index,
