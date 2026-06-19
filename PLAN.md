@@ -168,7 +168,11 @@ the library actually supports the corresponding behavior.
 
 Next implementation slice: `subgroup-level` mode design and first prototype.
 The immediate goal is to decide how `thread-level` HIP mode and lower-overhead
-`subgroup-level` mode coexist without compromising either contract.
+`subgroup-level` mode coexist without compromising either contract. The target
+direction is structural dissociation for the hot metadata path: `thread-level`
+and `subgroup-level` may share small helper routines and host reporting, but
+`subgroup-level` should be free to develop its own access records and storage
+layout.
 
 ## Foundations
 
@@ -428,6 +432,20 @@ Notes:
   per-thread accesses are not necessarily summarized by the leader's address.
   A lower-overhead mode may need separate subgroup-level APIs or a different
   record path for accesses that are known to be collective/tile-shaped.
+* It is acceptable for the first `subgroup-level` semantic prototype to reuse
+  the existing `thread-level` access records and filter out same-subgroup
+  conflicts. Treat that as a bootstrap, not as the intended data structure.
+* The target design is plain dissociation of mode-specific hot metadata:
+  `thread-level` keeps per-thread identity in its records, while
+  `subgroup-level` gets records and storage shaped around subgroup-to-subgroup
+  conflicts and can omit per-thread identity when the mode contract allows it.
+* Do not default to a templated "one detector parameterized by mode policy"
+  design. Use templates only for small leaf helpers or storage conveniences
+  where they clearly simplify generated code without forcing the two modes into
+  the same data layout.
+* Share code only at boundaries that do not constrain either mode: byte-range
+  overlap predicates, subgroup arithmetic, diagnostics formatting, host
+  ownership, and simple allocation/storage helpers.
 * LDS load/store APIs should be templated immediately. Internally, every memory
   access becomes a byte range: base address plus `sizeof(T)` bytes.
 * The first API can require trivially copyable `T`.
@@ -514,8 +532,10 @@ Each instrumented LDS access records:
 * optional source id,
 * whether the slot is valid.
 
-`subgroup-level` mode should have a compact record form that can omit thread id
-if diagnostics never distinguish threads within one subgroup.
+`subgroup-level` mode should eventually use a distinct compact record and
+storage layout. It can track subgroup ids and subgroup-level byte-range
+summaries while omitting thread id when diagnostics intentionally do not
+distinguish threads within one subgroup.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -898,19 +918,25 @@ library teaches us the right subgroup abstractions.
 
 3. Design the `subgroup-level` mode.
    * Define the mode as intentionally ignoring same-subgroup conflicts.
-   * Decide whether mode selection is a runtime enum, a separate context type,
-     a storage policy, or some other zero-overhead-in-practice shape.
+   * Decide how the user selects the mode without forcing both modes into one
+     hot data layout.
+   * Allow a temporary bootstrap that reuses `thread-level` records only long
+     enough to validate semantics.
+   * Target separate `subgroup-level` records and storage as the optimized
+     design.
    * Avoid virtual dispatch in device code.
-   * Decide whether the first implementation logs all thread accesses and
-     filters by subgroup id, or introduces a subgroup-representative API.
+   * Avoid a large templated detector-policy design unless a very small helper
+     boundary emerges naturally.
 
 4. Prototype the `subgroup-level` mode.
    * Produce deterministic diagnostics for cross-subgroup conflicts.
    * Produce no diagnostic for same-subgroup conflicts by contract.
-   * Measure or at least inspect the metadata footprint difference from
-     `thread-level` mode.
-   * Investigate whether thread id can be removed from the hot access record in
-     this mode.
+   * If the first version filters existing per-thread records, mark that clearly
+     as the bootstrap implementation.
+   * Then introduce a dissociated `subgroup-level` record path that can remove
+     thread id from the hot metadata.
+   * Measure or inspect metadata footprint, atomic usage, and generated code for
+     both modes.
 
 5. Explore subgroup-representative instrumentation.
    * Candidate direction: only the 0-th thread of each subgroup records a
@@ -968,21 +994,32 @@ threads in the same subgroup.
   prose.
 * Document its false-negative contract.
 * Decide how users select the mode.
-* Decide whether the mode shares `context` with `thread-level` mode or uses a
-  separate context/storage wrapper.
+* Prefer separate hot metadata structures for the two modes. The public context
+  surface may remain similar, but `subgroup-level` should not be constrained to
+  reuse `thread-level` access records.
 * Decide whether mode selection must be compile-time for the hot path or can be
   a runtime value that clang optimizes away in local use.
 * Avoid virtual dispatch in device code.
-* Design a compact access record that tracks subgroup id but can omit thread id.
+* Design a compact `subgroup-level` access record that tracks subgroup id but
+  can omit thread id.
 * Decide how diagnostics should report "subgroup A vs subgroup B" without
   pretending to identify exact threads.
+* Share only leaf helpers that are naturally common, such as byte-range overlap,
+  subgroup-index arithmetic, host-side diagnostic formatting, and storage
+  ownership.
+* Use templatization sparingly; do not make a mode-policy template hierarchy the
+  default answer to sharing code between the two modes.
 
 ### Step 3: `subgroup-level` mode prototype
 
 Build the narrow mode before pursuing more esoteric synchronization semantics.
 
-* First implementation may log all thread accesses and filter same-subgroup
-  conflicts out of the shadow model.
+* First implementation may log all thread accesses using the existing
+  `thread-level` record shape and filter same-subgroup conflicts out of the
+  shadow model, but only as a semantic bootstrap.
+* Follow that with a dissociated `subgroup-level` record/storage path so the
+  mode can optimize for subgroup-to-subgroup conflicts instead of preserving
+  per-thread detail it does not report.
 * Then investigate subgroup-representative logging where only the 0-th thread
   of each subgroup records a subgroup-level access summary.
 * Use representative logging only for access patterns whose byte ranges can be
@@ -1158,6 +1195,10 @@ Keep the corpus layered:
 * Run `clang-format` on modified source files once code exists.
 * Prefer simple fixed-capacity data structures initially. Overflow should be a
   diagnostic, not silent corruption.
+* Prefer structural dissociation between instrumentation modes when optimization
+  pressure exists. This project is partly a prototype for a future assembly
+  effort, so letting `subgroup-level` do the right thing for itself matters more
+  than minimizing every line of duplicated code.
 * Keep every emitted diagnostic conservative. If the tool cannot prove a
   conflict inside its model, prefer no diagnostic.
 * Document every unsupported case as a false-negative risk, not as a bug in the
