@@ -66,6 +66,12 @@ foundation:
   hip-moi instrumented kernel second. The standalone `.hip` programs serve as
   compiled companions. The matmul tutorial presents the data-tiled layout
   through per-lane vector fragment loads and stores.
+* `docs/coalescing.md` explains the current coalescing model: users opt in with
+  nonzero `site_id` values, default zero-site accesses remain exact-only, the
+  current thread-level implementation emits summary metadata at epoch
+  boundaries without changing exact diagnostics, and the detected patterns are
+  currently limited to simple contiguous or fixed-stride thread-to-address
+  shapes.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
