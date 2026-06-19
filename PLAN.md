@@ -35,7 +35,7 @@ accesses and synchronization.
 
 The initial single-subgroup MVP exists. The next priority is to generalize it
 toward multi-subgroup workgroups and to design a second, lower-overhead
-cross-subgroup-only instrumentation mode before spending much more effort on
+`subgroup-level` instrumentation mode before spending much more effort on
 diagnostic polish.
 
 ## Current status
@@ -154,8 +154,8 @@ foundation:
   tests, looped epoch tests, tiled LDS tests, simple matmul-like tests,
   pipeline-like matmul tests, and RDNA4 WMMA row-major/data-tiled tests exist.
   Epoch-local access-log lifetime now exists. Multi-subgroup workgroups,
-  cross-subgroup-only mode, diagnostic quality work, and low-overhead
-  per-thread logs are still future work.
+  `subgroup-level` mode, diagnostic quality work, and low-overhead per-thread
+  logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -163,7 +163,7 @@ the library actually supports the corresponding behavior.
 
 Next implementation slice: multi-subgroup groundwork and instrumentation-mode
 design. The immediate goal is to make subgroup identity operational, then decide
-how a thread-precise HIP mode and a lower-overhead cross-subgroup-only mode
+how a `thread-level` HIP mode and a lower-overhead `subgroup-level` mode
 coexist without compromising either contract.
 
 ## Foundations
@@ -248,7 +248,7 @@ The MVP is the smallest useful library that can be built and tested today.
 
 ### MVP contract
 
-The existing MVP diagnoses only this thread-precise HIP-language model:
+The existing MVP diagnoses only this `thread-level` HIP-language model:
 
 * Memory scope: LDS/shared memory only.
 * Threading scope: one workgroup only.
@@ -273,7 +273,7 @@ Within this contract:
 This intentionally accepts many false negatives outside the model. The key MVP
 quality bar is that any diagnostic it does emit should be trustworthy.
 
-The planned cross-subgroup-only mode will have a different, explicitly narrower
+The planned `subgroup-level` mode will have a different, explicitly narrower
 contract:
 
 * It is not a full HIP-language race detector.
@@ -305,6 +305,11 @@ struct config {
 struct access_record;
 struct diagnostic;
 struct subgroup_state;
+
+enum class instrumentation_mode {
+  thread_level,
+  subgroup_level,
+};
 
 // Non-owning view of detector metadata buffers. Buffers may live in global
 // memory or in __shared__ memory.
@@ -407,11 +412,13 @@ Notes:
   subgroup modes may allow a partial final subgroup, where
   `threads_per_subgroup * subgroup_count >= thread_count`.
 * The next API design pass needs an explicit instrumentation-mode story. The
-  current mode is thread-precise: every participating thread can log accesses,
-  and records need enough identity to distinguish threads. A cross-subgroup-only
-  mode should be able to use subgroup identity instead of thread identity and
-  may eventually use subgroup-representative instrumentation, such as only the
-  0-th thread of each subgroup recording a subgroup-level access summary.
+  mode names should be `thread_level` and `subgroup_level` in code, and
+  `thread-level` and `subgroup-level` in prose. The `thread-level` mode lets
+  every participating thread log accesses, and records need enough identity to
+  distinguish threads. The `subgroup-level` mode should be able to use subgroup
+  identity instead of thread identity and may eventually use
+  subgroup-representative instrumentation, such as only the 0-th thread of each
+  subgroup recording a subgroup-level access summary.
 * Do not silently make the existing per-thread `lds_load`/`lds_store` wrappers
   mean "only subgroup leader logs" until the contract is clear. Arbitrary
   per-thread accesses are not necessarily summarized by the leader's address.
@@ -497,14 +504,14 @@ Each instrumented LDS access records:
 * address or LDS-relative byte offset,
 * byte size,
 * access kind: load or store,
-* thread id in thread-precise mode,
+* thread id in `thread-level` mode,
 * subgroup id,
 * epoch id,
 * optional source id,
 * whether the slot is valid.
 
-Cross-subgroup-only mode should have a compact record form that can omit
-thread id if diagnostics never distinguish threads within one subgroup.
+`subgroup-level` mode should have a compact record form that can omit thread id
+if diagnostics never distinguish threads within one subgroup.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -515,10 +522,10 @@ On every `lds_load<T>` or `lds_store<T>`:
 Conflict checking may happen immediately or be deferred. The preferred MVP
 direction is deferred checking from per-thread access logs, so the common access
 path does not need detector-created cross-thread synchronization. Whenever
-checking runs in thread-precise mode, if byte ranges overlap, thread ids differ,
-and either access is a write, record a diagnostic. In cross-subgroup-only mode,
-the corresponding predicate uses subgroup ids instead of thread ids and ignores
-same-subgroup conflicts by contract.
+checking runs in `thread-level` mode, if byte ranges overlap, thread ids
+differ, and either access is a write, record a diagnostic. In `subgroup-level`
+mode, the corresponding predicate uses subgroup ids instead of thread ids and
+ignores same-subgroup conflicts by contract.
 
 On `ctx.syncthreads()`:
 
@@ -612,9 +619,9 @@ Required early tests:
 
 * a 64-thread workgroup split into two 32-thread subgroups,
 * a cross-subgroup same-epoch LDS conflict that reports,
-* a same-subgroup same-epoch LDS conflict that reports in thread-precise mode,
+* a same-subgroup same-epoch LDS conflict that reports in `thread-level` mode,
 * the same same-subgroup conflict intentionally not reporting in
-  cross-subgroup-only mode,
+  `subgroup-level` mode,
 * cross-subgroup accesses separated by `ctx.syncthreads()` not reporting.
 
 ### MVP diagnostics
@@ -819,10 +826,10 @@ Incremental instrumented test growth:
     diagnostic-positive matmul-shaped races. Done.
 13. Add RDNA4-gated real WMMA tests for both conventional row-major LDS tiles
     and data-tiled packed fragments. Done.
-14. Add thread-precise multi-subgroup tests: at least two subgroups in one
+14. Add `thread-level` multi-subgroup tests: at least two subgroups in one
     workgroup, cross-subgroup conflicts, same-subgroup conflicts, and
     full-workgroup synchronization separating subgroups.
-15. Add cross-subgroup-only mode tests: cross-subgroup conflicts still report,
+15. Add `subgroup-level` mode tests: cross-subgroup conflicts still report,
     same-subgroup conflicts intentionally do not report, and the mode contract
     is visible in diagnostic metadata and host reports.
 16. Prototype lower-overhead subgroup-representative logging for tile-shaped
@@ -874,12 +881,12 @@ library teaches us the right subgroup abstractions.
      all subgroup epochs together.
    * Add two-subgroup tests using one workgroup.
 
-2. Preserve the existing thread-precise HIP mode.
+2. Preserve the existing `thread-level` HIP mode.
    * Continue detecting same-epoch conflicts between any two different threads.
    * Include same-subgroup and cross-subgroup diagnostic-positive tests.
    * Keep this mode principled in the HIP/LLVM memory model.
 
-3. Design the cross-subgroup-only mode.
+3. Design the `subgroup-level` mode.
    * Define the mode as intentionally ignoring same-subgroup conflicts.
    * Decide whether mode selection is a runtime enum, a separate context type,
      a storage policy, or some other zero-overhead-in-practice shape.
@@ -887,11 +894,11 @@ library teaches us the right subgroup abstractions.
    * Decide whether the first implementation logs all thread accesses and
      filters by subgroup id, or introduces a subgroup-representative API.
 
-4. Prototype the cross-subgroup-only mode.
+4. Prototype the `subgroup-level` mode.
    * Produce deterministic diagnostics for cross-subgroup conflicts.
    * Produce no diagnostic for same-subgroup conflicts by contract.
    * Measure or at least inspect the metadata footprint difference from
-     thread-precise mode.
+     `thread-level` mode.
    * Investigate whether thread id can be removed from the hot access record in
      this mode.
 
@@ -910,7 +917,7 @@ library teaches us the right subgroup abstractions.
    * Add first-conflict preservation so later conflicts do not hide the useful
      one.
    * Add clearer mode-aware host diagnostics, especially for
-     cross-subgroup-only false negatives by design.
+     `subgroup-level` false negatives by design.
 
 7. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
@@ -926,14 +933,14 @@ After the refined MVP, widen scope in small semantic steps. Each step should add
 one new kind of happens-before edge or one new class of instrumented access, with
 tests that prove both positive and negative cases.
 
-### Step 1: Multi-subgroup thread-precise HIP mode
+### Step 1: Multi-subgroup `thread-level` HIP mode
 
 Allow a workgroup to contain multiple tracked subgroups without changing the
 HIP-language diagnostic contract.
 
 * Add multiple epoch counters per workgroup.
 * Compute subgroup id and thread rank within subgroup from `config`.
-* Preserve thread-precise diagnostics within and across subgroups.
+* Preserve `thread-level` diagnostics within and across subgroups.
 * Treat `ctx.syncthreads()` as a full-workgroup epoch boundary that advances all
   subgroup epochs.
 * Test subgroup A and subgroup B operating independently on non-overlapping LDS
@@ -942,14 +949,16 @@ HIP-language diagnostic contract.
 * Test data crossing subgroup boundaries only after an explicit full-workgroup
   synchronization.
 
-### Step 2: Cross-subgroup-only mode design
+### Step 2: `subgroup-level` mode design
 
 Design a second instrumentation mode that intentionally ignores conflicts among
 threads in the same subgroup.
 
-* Name the mode and document its false-negative contract.
+* Use `subgroup_level` as the code-facing mode name and `subgroup-level` in
+  prose.
+* Document its false-negative contract.
 * Decide how users select the mode.
-* Decide whether the mode shares `context` with thread-precise mode or uses a
+* Decide whether the mode shares `context` with `thread-level` mode or uses a
   separate context/storage wrapper.
 * Decide whether mode selection must be compile-time for the hot path or can be
   a runtime value that clang optimizes away in local use.
@@ -958,7 +967,7 @@ threads in the same subgroup.
 * Decide how diagnostics should report "subgroup A vs subgroup B" without
   pretending to identify exact threads.
 
-### Step 3: Cross-subgroup-only mode prototype
+### Step 3: `subgroup-level` mode prototype
 
 Build the narrow mode before pursuing more esoteric synchronization semantics.
 
@@ -971,8 +980,8 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
   operations.
 * Measure or inspect metadata size, access-record fields, atomic usage, and
   generated code for both modes.
-* Add paired tests showing the same kernel reports in thread-precise mode but
-  intentionally does not report same-subgroup conflicts in cross-subgroup-only
+* Add paired tests showing the same kernel reports in `thread-level` mode but
+  intentionally does not report same-subgroup conflicts in `subgroup-level`
   mode.
 * Add matmul-shaped cross-subgroup conflicts, because this is the main bridge to
   the future assembly-level effort.
@@ -989,7 +998,7 @@ Broaden the corpus before broadening the memory model too much.
 * Keep RDNA4/gfx12-specific WMMA coverage split by input layout: conventional
   row-major tiles and data-tiled packed fragments.
 * For each useful real-kernel idiom, decide whether it belongs in
-  thread-precise mode, cross-subgroup-only mode, or both.
+  `thread-level` mode, `subgroup-level` mode, or both.
 * Keep atomics out of these tests until the atomic model exists.
 
 ### Step 5: Hard synchronization negative tests
@@ -1122,9 +1131,9 @@ Keep the corpus layered:
 * Real-kernel idioms: keep kernels small enough to understand in one screen,
   preserve original LDS access patterns, and replace only relevant LDS accesses
   with `ctx.lds_*`.
-* Multi-subgroup mode tests: use the same logical kernels in thread-precise and
-  cross-subgroup-only modes when possible, so the mode contract is visible in
-  the expected diagnostics.
+* Multi-subgroup mode tests: use the same logical kernels in `thread-level` and
+  `subgroup-level` modes when possible, so the mode contract is visible in the
+  expected diagnostics.
 * Cross-subgroup matmul idioms: include cases where different subgroups in one
   workgroup cooperate through LDS tiles, because these are the strongest bridge
   to the future assembly-level project.
@@ -1144,5 +1153,5 @@ Keep the corpus layered:
 * Document every unsupported case as a false-negative risk, not as a bug in the
   MVP.
 * Keep instrumentation modes explicit. A false negative that is unacceptable in
-  thread-precise HIP mode may be the intended contract in cross-subgroup-only
+  `thread-level` HIP mode may be the intended contract in `subgroup-level`
   mode.
