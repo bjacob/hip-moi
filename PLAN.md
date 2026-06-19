@@ -43,8 +43,9 @@ foundation:
   architectures are gfx12-family targets.
 * `docs/tutorial/` contains self-contained numbered HIP example programs, a
   README, and a CMake subtree that builds the examples and registers them as
-  CTests. The tutorial CTests include both a passing synchronized example and
-  expected-failing diagnosed examples.
+  CTests. The tutorial CTests include both a passing synchronized example,
+  expected-failing diagnosed examples, and a gfx12-gated real RDNA4
+  data-tiled WMMA matmul example.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -720,6 +721,7 @@ docs/tutorial/
   001_passing_syncthreads.hip
   002_failing_same_epoch_race.hip
   003_destructor_fallback.hip
+  004_rdna4_wmma_data_tiled_matmul.hip
 ```
 
 Incremental instrumented test growth:

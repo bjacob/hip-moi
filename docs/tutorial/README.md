@@ -16,6 +16,10 @@ tests:
 * `002_failing_same_epoch_race.hip`: a race diagnosed by `HIP_MOI_CHECK`.
 * `003_destructor_fallback.hip`: the same race diagnosed by the scope-based
   `hip_moi::host_context` destructor path.
+* `004_rdna4_wmma_data_tiled_matmul.hip`: a real RDNA4/gfx12 WMMA matmul
+  example using data-tiled packed A/B fragments and host-reference output
+  checking. This example is built and registered only for gfx12-family HIP
+  offload architectures.
 
 Run them through CTest:
 
@@ -114,3 +118,42 @@ hip-moi: unconsumed diagnostics in host_context destructor; aborting
 The destructor style is less precise than `HIP_MOI_CHECK(moi)`, but it is a
 legitimate concise mode for users who want checked scopes with minimal host-side
 ceremony.
+
+## RDNA4 Data-Tiled WMMA Matmul
+
+`004_rdna4_wmma_data_tiled_matmul.hip` is a larger example that looks more like
+a real kernel. It uses all 32 threads in one workgroup, stages per-lane
+`f16x8_t` fragments through LDS, calls the RDNA4 WMMA builtin, and checks the
+full 16x16 output tile against a host-side reference matmul.
+
+The A/B inputs are in data-tiled layout: each lane owns one contiguous fragment
+for each matrix. For `_Float16` WMMA fragments, that means lane `i` starts at
+byte offset `i * 16`:
+
+```c++
+int offset = lane * kFragmentElements + idx;
+a[offset]  = static_cast<_Float16>(a_value(m, k));
+b[offset]  = static_cast<_Float16>(b_value(n, k));
+```
+
+The kernel instruments the LDS fragment stores and loads, then uses the real
+RDNA4 intrinsic:
+
+```c++
+ctx.lds_store(&a_shared[lane], load_global_fragment(a_global, lane));
+ctx.lds_store(&b_shared[lane], load_global_fragment(b_global, lane));
+
+ctx.syncthreads();
+
+f16x8_t a = ctx.lds_load(&a_shared[lane]);
+f16x8_t b = ctx.lds_load(&b_shared[lane]);
+acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, acc);
+```
+
+The example is CMake-gated because the builtin is RDNA4/gfx12-specific. On a
+gfx12 build it appears as:
+
+```sh
+ctest --test-dir /home/benoit/workspace/hip-moi-build \
+  -R HipMoiTutorial.004Rdna4WmmaDataTiledMatmul --output-on-failure
+```

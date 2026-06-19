@@ -60,6 +60,13 @@ function(hip_moi_add_failing_tutorial_test test_name target_name)
   endif()
 endfunction()
 
+set(_hip_moi_build_rdna4_tutorials TRUE)
+foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
+  if(NOT _hip_moi_arch MATCHES "^gfx12")
+    set(_hip_moi_build_rdna4_tutorials FALSE)
+  endif()
+endforeach()
+
 hip_moi_add_tutorial(hip_moi_tutorial_001_passing_syncthreads
                      001_passing_syncthreads.hip)
 hip_moi_add_tutorial(hip_moi_tutorial_002_failing_same_epoch_race
@@ -77,3 +84,11 @@ hip_moi_add_failing_tutorial_test(HipMoiTutorial.003DestructorFallback
                                   hip_moi_tutorial_003_destructor_fallback
                                   "kind=access_conflict"
                                   "unconsumed diagnostics")
+
+if(_hip_moi_build_rdna4_tutorials)
+  hip_moi_add_tutorial(hip_moi_tutorial_004_rdna4_wmma_data_tiled_matmul
+                       004_rdna4_wmma_data_tiled_matmul.hip)
+  hip_moi_add_passing_tutorial_test(
+    HipMoiTutorial.004Rdna4WmmaDataTiledMatmul
+    hip_moi_tutorial_004_rdna4_wmma_data_tiled_matmul)
+endif()
