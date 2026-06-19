@@ -76,8 +76,9 @@ small integer-valued `_Float16` inputs that compare exactly against a host-side
 reference matmul.
 
 `014_rdna4_wmma_data_tiled_test.hip` is also gated to RDNA4/gfx12 targets. It
-uses the same intrinsic but with data-tiled packed LDS fragments, where each
-thread's matrix fragment is a contiguous 16-byte object at byte offset
-`lane * 16`, plus a diagnostic-positive neighbor-fragment overwrite. The packed
-fragments are generated from logical A/B tiles and checked against the same
-exact host-side reference matmul.
+uses the same intrinsic but with data-tiled packed fragments. Each thread's A/B
+fragment is a contiguous 16-byte object at byte offset `lane * 16`, and each
+thread's C accumulator fragment is a contiguous 32-byte object at byte offset
+`lane * 32`. The test includes a diagnostic-positive neighbor-fragment
+overwrite. The packed A/B/C fragments are generated from logical tiles and
+checked against the same exact host-side reference matmul.

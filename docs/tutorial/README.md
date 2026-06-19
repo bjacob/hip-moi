@@ -194,12 +194,12 @@ The compiled companion is `003_destructor_fallback.hip`.
 ## A Real Matmul Kernel
 
 The larger example is a real single-workgroup 16x16x16 matmul using the RDNA4
-WMMA builtin. RDNA4 and the data-tiled input layout are details of this concrete
+WMMA builtin. RDNA4 and the data-tiled layout are details of this concrete
 example; the tutorial point is how a real LDS-staging kernel changes when
 instrumented.
 
 The plain kernel stages each thread's A and B fragments through LDS, runs the
-WMMA instruction, and writes the accumulator elements to C:
+WMMA instruction, and writes each thread's C accumulator fragment contiguously:
 
 ```c++
 __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
@@ -223,28 +223,32 @@ __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
 
     __syncthreads();
 
-    int n = lane & 15;
     for(int elem = 0; elem < 8; ++elem)
     {
-        int m                              = rdna4_wmma_acc_m(lane, elem);
-        c_global[row_major(m, n, kTileN)] = acc[elem];
+        c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
     }
 }
 ```
 
-The input layout is data-tiled: each lane owns one contiguous fragment for A and
-one for B. For `_Float16` WMMA fragments, lane `i` starts at byte offset
-`i * 16`:
+The matrix layout is data-tiled: each lane owns one contiguous fragment of A, B,
+and C. For `_Float16` A/B WMMA fragments, lane `i` starts at byte offset
+`i * 16`; for `float` C accumulator fragments, lane `i` starts at byte offset
+`i * 32`. In element units, the helper is the same:
 
 ```c++
-int offset = lane * kFragmentElements + idx;
+__host__ __device__ int data_tiled_fragment_offset(int lane, int elem)
+{
+    return lane * kFragmentElements + elem;
+}
+
+int offset = data_tiled_fragment_offset(lane, idx);
 a[offset]  = static_cast<_Float16>(a_value(m, k));
 b[offset]  = static_cast<_Float16>(b_value(n, k));
 ```
 
 The instrumented version changes only the LDS-related operations and the
-barriers. Global input loads, WMMA, accumulator writes, and the host-side
-reference matmul stay ordinary code:
+barriers. Global A/B loads, WMMA, packed C stores, and the host-side reference
+matmul stay ordinary code:
 
 ```c++
 __global__ void instrumented_data_tiled_wmma_kernel(
@@ -273,18 +277,16 @@ __global__ void instrumented_data_tiled_wmma_kernel(
 
     ctx.syncthreads();
 
-    int n = lane & 15;
     for(int elem = 0; elem < 8; ++elem)
     {
-        int m                              = rdna4_wmma_acc_m(lane, elem);
-        c_global[row_major(m, n, kTileN)] = acc[elem];
+        c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
     }
 }
 ```
 
 The companion program runs both the plain and instrumented kernels and checks
-both outputs against the same host-side reference matmul. It is CMake-gated
-because the builtin is RDNA4/gfx12-specific:
+both packed outputs against the same host-side reference matmul. It is
+CMake-gated because the builtin is RDNA4/gfx12-specific:
 
 ```sh
 ctest --test-dir /home/benoit/workspace/hip-moi-build \

@@ -3,8 +3,8 @@
 //
 // tests/instrumented/014_rdna4_wmma_data_tiled_test.hip
 //
-// RDNA4 WMMA tests using data-tiled LDS fragments. Each thread owns one
-// contiguous 16-byte fragment per matrix, at byte offset lane * 16.
+// RDNA4 WMMA tests using data-tiled matrix fragments. Each thread owns one
+// contiguous fragment per matrix, at byte offset lane * fragment_size.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -16,12 +16,10 @@
 namespace
 {
     constexpr int kThreadCount        = 32;
-    constexpr int kTileM              = 16;
-    constexpr int kTileN              = 16;
     constexpr int kTileK              = 16;
     constexpr int kFragmentElements   = 8;
     constexpr int kPackedTileElements = kThreadCount * kFragmentElements;
-    constexpr int kOutputElementCount = 16 * 16;
+    constexpr int kOutputElementCount = kPackedTileElements;
     constexpr int kDiagnosticCapacity = 64;
 
     using f16x8_t = _Float16 __attribute__((ext_vector_type(8)));
@@ -33,11 +31,6 @@ namespace
         int                 diagnostic_count;
         hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
     };
-
-    __host__ __device__ int row_major(int row, int col, int cols)
-    {
-        return col + cols * row;
-    }
 
     __host__ __device__ int matmul_a_value(int tile_id, int m, int k)
     {
@@ -56,9 +49,14 @@ namespace
         return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
     }
 
-    __device__ int rdna4_wmma_acc_m(int lane, int elem)
+    __host__ __device__ int rdna4_wmma_acc_m(int lane, int elem)
     {
         return elem + 8 * (lane >> 4);
+    }
+
+    __host__ __device__ int data_tiled_fragment_offset(int lane, int elem)
+    {
+        return lane * kFragmentElements + elem;
     }
 
     float reference_matmul_value(int tile_count, int m, int n)
@@ -122,11 +120,9 @@ namespace
     __device__ void store_accumulator(const f32x8_t& acc, float* out)
     {
         int lane = static_cast<int>(threadIdx.x) & 31;
-        int n    = lane & 15;
         for(int elem = 0; elem < 8; ++elem)
         {
-            int m                         = rdna4_wmma_acc_m(lane, elem);
-            out[row_major(m, n, kTileN)] = acc[elem];
+            out[data_tiled_fragment_offset(lane, elem)] = acc[elem];
         }
     }
 
@@ -239,9 +235,10 @@ namespace
                 for(int idx = 0; idx < kFragmentElements; ++idx)
                 {
                     int k      = rdna4_wmma_f16_k(lane, idx);
-                    int offset = tile_id * kPackedTileElements + lane * kFragmentElements + idx;
-                    a[offset]  = static_cast<_Float16>(matmul_a_value(tile_id, m, k));
-                    b[offset]  = static_cast<_Float16>(matmul_b_value(tile_id, n, k));
+                    int offset = tile_id * kPackedTileElements
+                                 + data_tiled_fragment_offset(lane, idx);
+                    a[offset] = static_cast<_Float16>(matmul_a_value(tile_id, m, k));
+                    b[offset] = static_cast<_Float16>(matmul_b_value(tile_id, n, k));
                 }
             }
         }
@@ -252,11 +249,13 @@ namespace
         float output[kOutputElementCount] = {};
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-        for(int m = 0; m < kTileM; ++m)
+        for(int lane = 0; lane < kThreadCount; ++lane)
         {
-            for(int n = 0; n < kTileN; ++n)
+            int n = lane & 15;
+            for(int elem = 0; elem < kFragmentElements; ++elem)
             {
-                EXPECT_EQ(output[row_major(m, n, kTileN)],
+                int m = rdna4_wmma_acc_m(lane, elem);
+                EXPECT_EQ(output[data_tiled_fragment_offset(lane, elem)],
                           reference_matmul_value(tile_count, m, n));
             }
         }

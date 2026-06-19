@@ -124,10 +124,12 @@ foundation:
   small integer-valued `_Float16` inputs and exact host-reference outputs.
 * `tests/instrumented/014_rdna4_wmma_data_tiled_test.hip` is the matching
   gfx12-gated packed-layout test. It uses the same WMMA intrinsic, but each
-  thread's A/B fragment is a contiguous 16-byte LDS object at byte offset
-  `lane * 16`, with a diagnostic-positive neighbor-fragment overwrite. The
-  packed fragments are generated from logical A/B tiles and checked against the
-  same exact host-reference matmul.
+  thread's A/B fragment is a contiguous 16-byte object at byte offset
+  `lane * 16`, and each thread's C accumulator fragment is a contiguous
+  32-byte object at byte offset `lane * 32`. The test includes a
+  diagnostic-positive neighbor-fragment overwrite. The packed A/B/C fragments
+  are generated from logical tiles and checked against the same exact
+  host-reference matmul.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -709,8 +711,8 @@ buffer reuse cases.
 using all 32 threads, conventional row-major LDS tiles, non-uniform exact
 inputs, and host-reference output checks.
 `014_rdna4_wmma_data_tiled_test.hip` asserts the matching RDNA4/gfx12 WMMA
-coverage for packed fragments laid out at `lane * fragment_size` byte offsets,
-with the packed input generated from a logical tile and checked against a
+coverage for packed A/B/C fragments laid out at `lane * fragment_size` byte
+offsets, with packed data generated from logical tiles and checked against a
 host-reference matmul.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
