@@ -21,7 +21,7 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
     __host__ __device__ int matmul_a_value(int tile_id, int m, int k)
@@ -86,9 +86,9 @@ namespace
         return acc;
     }
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -134,7 +134,7 @@ namespace
     }
 
     __global__ void double_buffered_matmul_2x2_k2x3_kernel(
-        const int* a_global, const int* b_global, int* out, hip_moi::context_storage_ref storage)
+        const int* a_global, const int* b_global, int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int a_shared[2][2 * 2];
         __shared__ int b_shared[2][2 * 2];
@@ -171,7 +171,7 @@ namespace
     }
 
     __global__ void preloaded_ping_pong_matmul_2x2_k2x3_kernel(
-        const int* a_global, const int* b_global, int* out, hip_moi::context_storage_ref storage)
+        const int* a_global, const int* b_global, int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int a_shared[2][2 * 2];
         __shared__ int b_shared[2][2 * 2];
@@ -218,7 +218,7 @@ namespace
     }
 
     __global__ void single_output_reuse_without_barrier_kernel(
-        const int* a_global, const int* b_global, hip_moi::context_storage_ref storage)
+        const int* a_global, const int* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int a_shared[2];
         __shared__ int b_shared[2];
@@ -257,7 +257,7 @@ namespace
     }
 
     __global__ void partial_a_tile_overwrite_without_barrier_kernel(
-        const int* a_global, const int* b_global, hip_moi::context_storage_ref storage)
+        const int* a_global, const int* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int a_shared[2 * 2];
         __shared__ int b_shared[2 * 2];
@@ -286,7 +286,7 @@ namespace
     }
 
     __global__ void partial_b_tile_overwrite_without_barrier_kernel(
-        const int* a_global, const int* b_global, hip_moi::context_storage_ref storage)
+        const int* a_global, const int* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int a_shared[2 * 2];
         __shared__ int b_shared[2 * 2];

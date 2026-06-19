@@ -21,12 +21,12 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -34,7 +34,7 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void all_threads_write_own_slot_kernel(hip_moi::context_storage_ref storage)
+    __global__ void all_threads_write_own_slot_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
@@ -46,7 +46,7 @@ namespace
     }
 
     __global__ void all_threads_write_read_own_slot_kernel(
-        int* out, hip_moi::context_storage_ref storage)
+        int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
@@ -62,7 +62,7 @@ namespace
     }
 
     __global__ void all_threads_neighbor_read_kernel(int*                         out,
-                                                     hip_moi::context_storage_ref storage)
+                                                     hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
@@ -79,7 +79,7 @@ namespace
     }
 
     __global__ void all_threads_neighbor_read_without_barrier_kernel(
-        hip_moi::context_storage_ref storage)
+        hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 

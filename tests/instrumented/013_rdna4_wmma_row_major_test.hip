@@ -28,7 +28,7 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
     __host__ __device__ int row_major(int row, int col, int cols)
@@ -71,9 +71,9 @@ namespace
         return static_cast<float>(acc);
     }
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -133,7 +133,7 @@ namespace
     __global__ void row_major_single_buffer_kernel(const _Float16*             a_global,
                                                    const _Float16*             b_global,
                                                    float*                      out,
-                                                   hip_moi::context_storage_ref storage)
+                                                   hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ _Float16 a_shared[kTileM * kTileK];
         __shared__ _Float16 b_shared[kTileN * kTileK];
@@ -152,7 +152,7 @@ namespace
     __global__ void row_major_double_buffer_kernel(const _Float16*             a_global,
                                                    const _Float16*             b_global,
                                                    float*                      out,
-                                                   hip_moi::context_storage_ref storage)
+                                                   hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ _Float16 a_shared[2][kTileM * kTileK];
         __shared__ _Float16 b_shared[2][kTileN * kTileK];
@@ -174,7 +174,7 @@ namespace
     }
 
     __global__ void row_major_reuse_without_barrier_kernel(
-        const _Float16* a_global, const _Float16* b_global, hip_moi::context_storage_ref storage)
+        const _Float16* a_global, const _Float16* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ _Float16 a_shared[kTileM * kTileK];
         __shared__ _Float16 b_shared[kTileN * kTileK];

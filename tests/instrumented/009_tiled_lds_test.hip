@@ -21,7 +21,7 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
     __host__ __device__ int wrap_power_of_two(int value, int modulus)
@@ -29,9 +29,9 @@ namespace
         return value & (modulus - 1);
     }
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -39,7 +39,7 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void row_major_copy_kernel(int* out, hip_moi::context_storage_ref storage)
+    __global__ void row_major_copy_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[4][8];
 
@@ -57,7 +57,7 @@ namespace
     }
 
     __global__ void transpose_4x8_to_8x4_kernel(int*                         out,
-                                                hip_moi::context_storage_ref storage)
+                                                hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[4][8];
 
@@ -77,7 +77,7 @@ namespace
     }
 
     __global__ void skewed_row_stride_kernel(int*                         out,
-                                             hip_moi::context_storage_ref storage)
+                                             hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[4 * 9];
 
@@ -96,7 +96,7 @@ namespace
     }
 
     __global__ void blocked_2x2_layout_kernel(int*                         out,
-                                              hip_moi::context_storage_ref storage)
+                                              hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[32];
 
@@ -117,7 +117,7 @@ namespace
         out[tid] = ctx.lds_load(&tile[index]);
     }
 
-    __global__ void diagonal_gather_kernel(int* out, hip_moi::context_storage_ref storage)
+    __global__ void diagonal_gather_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[4][8];
 
@@ -135,7 +135,7 @@ namespace
     }
 
     __global__ void striped_load_store_kernel(int*                         out,
-                                              hip_moi::context_storage_ref storage)
+                                              hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[32];
 
@@ -162,7 +162,7 @@ namespace
         }
     }
 
-    __global__ void transpose_without_barrier_kernel(hip_moi::context_storage_ref storage)
+    __global__ void transpose_without_barrier_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int tile[4][8];
 
@@ -202,7 +202,7 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    void expect_access_conflict(const hip_moi::diagnostic& diagnostic)
+    void expect_access_conflict(const hip_moi::thread_level_context::diagnostic& diagnostic)
     {
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));

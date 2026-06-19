@@ -50,11 +50,11 @@ namespace
         }
     }
 
-    __global__ void same_epoch_race_kernel(int* out, hip_moi::context_storage_ref storage)
+    __global__ void same_epoch_race_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,

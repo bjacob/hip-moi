@@ -26,12 +26,12 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[4];
+        hip_moi::thread_level_context::diagnostic diagnostics[4];
     };
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -39,7 +39,7 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void same_address_read_read_kernel(int* out, hip_moi::context_storage_ref storage)
+    __global__ void same_address_read_read_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -62,7 +62,7 @@ namespace
         }
     }
 
-    __global__ void same_address_write_write_kernel(hip_moi::context_storage_ref storage)
+    __global__ void same_address_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -79,7 +79,7 @@ namespace
         }
     }
 
-    __global__ void non_overlapping_write_write_kernel(hip_moi::context_storage_ref storage)
+    __global__ void non_overlapping_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[4];
 
@@ -96,7 +96,7 @@ namespace
         }
     }
 
-    __global__ void adjacent_byte_ranges_write_write_kernel(hip_moi::context_storage_ref storage)
+    __global__ void adjacent_byte_ranges_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int_pair value;
 
@@ -113,7 +113,7 @@ namespace
         }
     }
 
-    __global__ void overlapping_subobject_write_write_kernel(hip_moi::context_storage_ref storage)
+    __global__ void overlapping_subobject_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int_pair value;
 
@@ -158,15 +158,15 @@ namespace
         EXPECT_EQ(observed.access_count, 2);
         ASSERT_EQ(observed.diagnostic_count, 1);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
         EXPECT_EQ(diagnostic.epoch, 0u);
 
-        bool threads_are_zero_and_one = (diagnostic.writer_or_first_thread_id == 0u
-                                         && diagnostic.reader_or_second_thread_id == 1u)
-                                        || (diagnostic.writer_or_first_thread_id == 1u
-                                            && diagnostic.reader_or_second_thread_id == 0u);
+        bool threads_are_zero_and_one = (diagnostic.first_thread_id == 0u
+                                         && diagnostic.second_thread_id == 1u)
+                                        || (diagnostic.first_thread_id == 1u
+                                            && diagnostic.second_thread_id == 0u);
         EXPECT_TRUE(threads_are_zero_and_one);
     }
 
@@ -223,7 +223,7 @@ namespace
 
         expect_one_access_conflict(observed);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.first_addr, diagnostic.second_addr);
         EXPECT_EQ(diagnostic.first_size, sizeof(int));
         EXPECT_EQ(diagnostic.second_size, sizeof(int));
@@ -287,7 +287,7 @@ namespace
 
         expect_one_access_conflict(observed);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_NE(diagnostic.first_addr, diagnostic.second_addr);
 
         bool sizes_are_pair_and_int

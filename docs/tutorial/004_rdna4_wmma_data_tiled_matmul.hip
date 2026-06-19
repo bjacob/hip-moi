@@ -156,9 +156,9 @@ namespace
         store_global_fragment(c_global, lane, acc);
     }
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -169,7 +169,7 @@ namespace
     __global__ void instrumented_data_tiled_wmma_kernel(const _Float16*             a_global,
                                                         const _Float16*             b_global,
                                                         float*                      c_global,
-                                                        hip_moi::context_storage_ref storage)
+                                                        hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];

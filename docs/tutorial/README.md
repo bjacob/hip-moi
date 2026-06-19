@@ -47,11 +47,11 @@ To instrument the same kernel, pass a hip-moi storage view, create a
 `ctx.lds_load`, and replace the barrier with `ctx.syncthreads()`:
 
 ```c++
-__global__ void producer_consumer_kernel(int* out, hip_moi::context_storage_ref storage)
+__global__ void producer_consumer_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
 {
     __shared__ int value;
 
-    hip_moi::config cfg{
+    hip_moi::thread_level_context::config cfg{
         /*thread_count=*/static_cast<int>(blockDim.x),
         /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
         /*subgroup_count=*/1,
@@ -124,11 +124,11 @@ The instrumented version is structurally the same, but the accesses go through
 the context:
 
 ```c++
-__global__ void same_epoch_race_kernel(int* out, hip_moi::context_storage_ref storage)
+__global__ void same_epoch_race_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
 {
     __shared__ int value;
 
-    hip_moi::config cfg{
+    hip_moi::thread_level_context::config cfg{
         /*thread_count=*/static_cast<int>(blockDim.x),
         /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
         /*subgroup_count=*/1,
@@ -254,7 +254,7 @@ __global__ void instrumented_data_tiled_wmma_kernel(
     const _Float16* a_global,
     const _Float16* b_global,
     float* c_global,
-    hip_moi::context_storage_ref storage)
+    hip_moi::thread_level_context::storage_ref storage)
 {
     __shared__ f16x8_t a_shared[kThreadCount];
     __shared__ f16x8_t b_shared[kThreadCount];

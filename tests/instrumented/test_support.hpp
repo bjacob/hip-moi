@@ -23,15 +23,20 @@
 
 namespace hip_moi::test
 {
-    class device_context_storage
+    template <typename Context>
+    class device_context_storage_for
     {
     public:
-        device_context_storage() = default;
+        using access_record = typename Context::access_record;
+        using diagnostic    = typename Context::diagnostic;
+        using storage_ref   = typename Context::storage_ref;
 
-        device_context_storage(const device_context_storage&)            = delete;
-        device_context_storage& operator=(const device_context_storage&) = delete;
+        device_context_storage_for() = default;
 
-        ~device_context_storage()
+        device_context_storage_for(const device_context_storage_for&)            = delete;
+        device_context_storage_for& operator=(const device_context_storage_for&) = delete;
+
+        ~device_context_storage_for()
         {
             release();
         }
@@ -53,9 +58,9 @@ namespace hip_moi::test
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&diagnostic_count_, sizeof(int)));
         }
 
-        context_storage_ref ref() const
+        storage_ref ref() const
         {
-            return context_storage_ref{
+            return storage_ref{
                 access_records_,
                 access_record_capacity_,
                 diagnostics_,
@@ -68,12 +73,12 @@ namespace hip_moi::test
             };
         }
 
-        hip_moi::diagnostic* diagnostics_device() const
+        diagnostic* diagnostics_device() const
         {
             return diagnostics_;
         }
 
-        hip_moi::access_record* access_records_device() const
+        access_record* access_records_device() const
         {
             return access_records_;
         }
@@ -133,6 +138,12 @@ namespace hip_moi::test
         int             diagnostic_capacity_    = 0;
         int             subgroup_capacity_      = 0;
     };
+
+    using thread_level_device_context_storage
+        = device_context_storage_for<hip_moi::thread_level_context>;
+    using device_context_storage = thread_level_device_context_storage;
+    using subgroup_level_device_context_storage
+        = device_context_storage_for<hip_moi::subgroup_level_context>;
 } // namespace hip_moi::test
 
 #endif // HIP_MOI_TESTS_INSTRUMENTED_TEST_SUPPORT_HPP

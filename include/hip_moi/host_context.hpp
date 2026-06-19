@@ -7,7 +7,7 @@
 #ifndef HIP_MOI_HOST_CONTEXT_HPP
 #define HIP_MOI_HOST_CONTEXT_HPP
 
-#include "hip_moi/common.hpp"
+#include "hip_moi/thread_level_context.hpp"
 
 #include <cstddef>
 #include <cstdio>
@@ -65,10 +65,10 @@ namespace hip_moi
             release();
         }
 
-        context_storage_ref device_ref()
+        thread_level_context::storage_ref device_ref()
         {
             diagnostics_consumed_ = false;
-            return context_storage_ref{
+            return thread_level_context::storage_ref{
                 access_records_,
                 options_.access_record_capacity,
                 diagnostics_,
@@ -81,7 +81,7 @@ namespace hip_moi
             };
         }
 
-        context_storage_ref ref()
+        thread_level_context::storage_ref ref()
         {
             return device_ref();
         }
@@ -127,10 +127,11 @@ namespace hip_moi
                 stored_count = options_.diagnostic_capacity;
             }
 
-            diagnostic* host_diagnostics = new diagnostic[stored_count];
-            status                       = hipMemcpy(host_diagnostics,
+            thread_level_context::diagnostic* host_diagnostics
+                = new thread_level_context::diagnostic[stored_count];
+            status = hipMemcpy(host_diagnostics,
                                diagnostics_,
-                               stored_count * sizeof(diagnostic),
+                               stored_count * sizeof(thread_level_context::diagnostic),
                                hipMemcpyDeviceToHost);
             if(status != hipSuccess)
             {
@@ -201,10 +202,10 @@ namespace hip_moi
             std::fflush(stream);
         }
 
-        static void report_diagnostics(std::FILE*        stream,
-                                       const diagnostic* diagnostics,
-                                       int               stored_count,
-                                       int               diagnostic_count)
+        static void report_diagnostics(std::FILE*                              stream,
+                                       const thread_level_context::diagnostic* diagnostics,
+                                       int                                     stored_count,
+                                       int                                     diagnostic_count)
         {
             if(!stream)
             {
@@ -214,7 +215,7 @@ namespace hip_moi
             std::fprintf(stream, "hip-moi: %d diagnostic(s)\n", diagnostic_count);
             for(int i = 0; i < stored_count; ++i)
             {
-                const diagnostic& diagnostic_record = diagnostics[i];
+                const thread_level_context::diagnostic& diagnostic_record = diagnostics[i];
                 std::fprintf(stream,
                              "hip-moi diagnostic %d: kind=%s epoch=%u "
                              "first_thread=%u second_thread=%u "
@@ -223,8 +224,8 @@ namespace hip_moi
                              i,
                              diagnostic_kind_name(diagnostic_record.kind),
                              diagnostic_record.epoch,
-                             diagnostic_record.writer_or_first_thread_id,
-                             diagnostic_record.reader_or_second_thread_id,
+                             diagnostic_record.first_thread_id,
+                             diagnostic_record.second_thread_id,
                              static_cast<unsigned long long>(diagnostic_record.first_addr),
                              static_cast<unsigned long long>(diagnostic_record.second_addr),
                              diagnostic_record.first_size,
@@ -259,10 +260,13 @@ namespace hip_moi
         void allocate_or_abort()
         {
             hip_allocate_or_abort(&access_records_,
-                                  options_.access_record_capacity * sizeof(access_record),
+                                  options_.access_record_capacity
+                                      * sizeof(thread_level_context::access_record),
                                   "access_records");
-            hip_allocate_or_abort(
-                &diagnostics_, options_.diagnostic_capacity * sizeof(diagnostic), "diagnostics");
+            hip_allocate_or_abort(&diagnostics_,
+                                  options_.diagnostic_capacity
+                                      * sizeof(thread_level_context::diagnostic),
+                                  "diagnostics");
             hip_allocate_or_abort(&subgroup_states_,
                                   options_.subgroup_capacity * sizeof(subgroup_state),
                                   "subgroup_states");
@@ -275,10 +279,14 @@ namespace hip_moi
         {
             hip_memset_or_abort(access_records_,
                                 0,
-                                options_.access_record_capacity * sizeof(access_record),
+                                options_.access_record_capacity
+                                    * sizeof(thread_level_context::access_record),
                                 "access_records");
-            hip_memset_or_abort(
-                diagnostics_, 0, options_.diagnostic_capacity * sizeof(diagnostic), "diagnostics");
+            hip_memset_or_abort(diagnostics_,
+                                0,
+                                options_.diagnostic_capacity
+                                    * sizeof(thread_level_context::diagnostic),
+                                "diagnostics");
             hip_memset_or_abort(subgroup_states_,
                                 0,
                                 options_.subgroup_capacity * sizeof(subgroup_state),
@@ -361,8 +369,8 @@ namespace hip_moi
         bool                 destructor_aborts_     = true;
         std::FILE*           diagnostic_stream_     = stderr;
         int                  last_diagnostic_count_ = 0;
-        access_record*       access_records_        = nullptr;
-        diagnostic*          diagnostics_           = nullptr;
+        thread_level_context::access_record* access_records_        = nullptr;
+        thread_level_context::diagnostic*    diagnostics_           = nullptr;
         subgroup_state*      subgroup_states_       = nullptr;
         int*                 access_count_          = nullptr;
         int*                 epoch_access_count_    = nullptr;

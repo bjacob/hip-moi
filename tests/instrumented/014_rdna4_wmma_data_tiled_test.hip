@@ -29,7 +29,7 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
     __host__ __device__ int matmul_a_value(int tile_id, int m, int k)
@@ -72,9 +72,9 @@ namespace
         return static_cast<float>(acc);
     }
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -126,7 +126,7 @@ namespace
     __global__ void data_tiled_single_buffer_kernel(const _Float16*             a_global,
                                                     const _Float16*             b_global,
                                                     float*                      out,
-                                                    hip_moi::context_storage_ref storage)
+                                                    hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];
@@ -145,7 +145,7 @@ namespace
 
     __global__ void data_tiled_preloaded_ping_pong_kernel(
         const _Float16* a_global, const _Float16* b_global, float* out,
-        hip_moi::context_storage_ref storage)
+        hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ f16x8_t a_shared[2][kThreadCount];
         __shared__ f16x8_t b_shared[2][kThreadCount];
@@ -179,7 +179,7 @@ namespace
     }
 
     __global__ void data_tiled_neighbor_fragment_overwrite_without_barrier_kernel(
-        const _Float16* a_global, const _Float16* b_global, hip_moi::context_storage_ref storage)
+        const _Float16* a_global, const _Float16* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];
@@ -269,7 +269,7 @@ namespace
         EXPECT_EQ(observed.access_count, 129);
         ASSERT_EQ(observed.diagnostic_count, 1);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
         EXPECT_EQ(diagnostic.epoch, 1u);

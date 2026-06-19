@@ -24,13 +24,13 @@ namespace
     {
         int                    access_count;
         int                    diagnostic_count;
-        hip_moi::diagnostic    diagnostics[kDiagnosticCapacity];
-        hip_moi::access_record access_records[kAccessCapacity];
+        hip_moi::thread_level_context::diagnostic    diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::access_record access_records[kAccessCapacity];
     };
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
@@ -39,7 +39,7 @@ namespace
     }
 
     __global__ void subgroup_identity_kernel(uint32_t*                    out,
-                                             hip_moi::context_storage_ref storage)
+                                             hip_moi::thread_level_context::storage_ref storage)
     {
         hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
@@ -51,7 +51,7 @@ namespace
         out[base + 2] = ctx.thread_rank_in_subgroup();
     }
 
-    __global__ void independent_subgroup_slots_kernel(hip_moi::context_storage_ref storage)
+    __global__ void independent_subgroup_slots_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kSubgroupCount];
 
@@ -65,7 +65,7 @@ namespace
         }
     }
 
-    __global__ void cross_subgroup_same_epoch_kernel(hip_moi::context_storage_ref storage)
+    __global__ void cross_subgroup_same_epoch_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -82,7 +82,7 @@ namespace
         }
     }
 
-    __global__ void same_subgroup_same_epoch_kernel(hip_moi::context_storage_ref storage)
+    __global__ void same_subgroup_same_epoch_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -100,7 +100,7 @@ namespace
     }
 
     __global__ void cross_subgroup_separated_by_syncthreads_kernel(
-        int* out, hip_moi::context_storage_ref storage)
+        int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -164,12 +164,12 @@ namespace
         bool found_expected_conflict = false;
         for(int i = 0; i < stored_count; ++i)
         {
-            const hip_moi::diagnostic& diagnostic = observed.diagnostics[i];
+            const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[i];
             bool has_expected_threads =
-                (diagnostic.writer_or_first_thread_id == first_thread
-                 && diagnostic.reader_or_second_thread_id == second_thread)
-                || (diagnostic.writer_or_first_thread_id == second_thread
-                    && diagnostic.reader_or_second_thread_id == first_thread);
+                (diagnostic.first_thread_id == first_thread
+                 && diagnostic.second_thread_id == second_thread)
+                || (diagnostic.first_thread_id == second_thread
+                    && diagnostic.second_thread_id == first_thread);
             found_expected_conflict |=
                 diagnostic.kind == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
                 && diagnostic.epoch == 0u && diagnostic.first_addr == diagnostic.second_addr

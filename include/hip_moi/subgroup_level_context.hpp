@@ -16,7 +16,78 @@ namespace hip_moi
     class subgroup_level_context
     {
     public:
-        __device__ subgroup_level_context(context_storage_ref storage, config cfg)
+        struct config
+        {
+            int thread_count;
+            int threads_per_subgroup;
+            int subgroup_count;
+        };
+
+        struct access_record
+        {
+            uintptr_t address;
+            uint32_t  byte_count;
+            uint32_t  subgroup_id;
+            uint32_t  epoch;
+            uint32_t  kind;
+            uint32_t  valid;
+        };
+
+        struct diagnostic
+        {
+            uint32_t  kind;
+            uint32_t  epoch;
+            uint32_t  first_subgroup_id;
+            uint32_t  second_subgroup_id;
+            uintptr_t first_addr;
+            uintptr_t second_addr;
+            uint32_t  first_size;
+            uint32_t  second_size;
+        };
+
+        struct storage_ref
+        {
+            using access_record_type = access_record;
+            using diagnostic_type    = diagnostic;
+
+            access_record*  access_records;
+            int             access_record_capacity;
+            diagnostic*     diagnostics;
+            int             diagnostic_capacity;
+            subgroup_state* subgroup_states;
+            int             subgroup_capacity;
+            int*            access_count;
+            int*            epoch_access_count;
+            int*            diagnostic_count;
+        };
+
+        template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
+        struct static_context_storage
+        {
+            access_record  access_records[AccessCapacity];
+            diagnostic     diagnostics[DiagnosticCapacity];
+            subgroup_state subgroup_states[SubgroupCapacity];
+            int            access_count;
+            int            epoch_access_count;
+            int            diagnostic_count;
+
+            __device__ storage_ref ref()
+            {
+                return storage_ref{
+                    access_records,
+                    AccessCapacity,
+                    diagnostics,
+                    DiagnosticCapacity,
+                    subgroup_states,
+                    SubgroupCapacity,
+                    &access_count,
+                    &epoch_access_count,
+                    &diagnostic_count,
+                };
+            }
+        };
+
+        __device__ subgroup_level_context(storage_ref storage, config cfg)
             : storage_(storage)
             , cfg_(cfg)
         {
@@ -154,7 +225,6 @@ namespace hip_moi
             access_record record{
                 reinterpret_cast<uintptr_t>(ptr),
                 byte_count,
-                thread_id(),
                 subgroup,
                 detail::current_epoch(storage_, subgroup),
                 static_cast<uint32_t>(kind),
@@ -188,18 +258,48 @@ namespace hip_moi
                 access_record prior = storage_.access_records[i];
                 if(conflicts_with(prior, record))
                 {
-                    detail::emit_conflict(storage_, prior, record);
+                    emit_conflict(prior, record);
                 }
             }
 
             if(record_index >= storage_.access_record_capacity)
             {
-                detail::emit_metadata_full(storage_, record);
+                emit_metadata_full(record);
             }
         }
 
-        context_storage_ref storage_;
-        config              cfg_;
+        __device__ void emit_conflict(const access_record& first, const access_record& second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        second.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.address,
+                                        second.address,
+                                        first.byte_count,
+                                        second.byte_count,
+                                    });
+        }
+
+        __device__ void emit_metadata_full(const access_record& record) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::metadata_full),
+                                        record.epoch,
+                                        record.subgroup_id,
+                                        record.subgroup_id,
+                                        record.address,
+                                        record.address,
+                                        record.byte_count,
+                                        record.byte_count,
+                                    });
+        }
+
+        storage_ref storage_;
+        config      cfg_;
     };
 } // namespace hip_moi
 

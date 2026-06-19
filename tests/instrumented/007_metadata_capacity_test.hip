@@ -26,12 +26,12 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kStoredDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kStoredDiagnosticCapacity];
     };
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -39,7 +39,7 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void access_log_overflow_kernel(hip_moi::context_storage_ref storage)
+    __global__ void access_log_overflow_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kAccessOverflowAccessCount];
 
@@ -54,7 +54,7 @@ namespace
         }
     }
 
-    __global__ void many_neighbor_conflicts_kernel(hip_moi::context_storage_ref storage)
+    __global__ void many_neighbor_conflicts_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
@@ -83,11 +83,11 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(observed->diagnostics,
                       storage.diagnostics_device(),
-                      stored_diagnostic_count * sizeof(hip_moi::diagnostic),
+                      stored_diagnostic_count * sizeof(hip_moi::thread_level_context::diagnostic),
                       hipMemcpyDeviceToHost));
     }
 
-    void expect_access_conflict(const hip_moi::diagnostic& diagnostic)
+    void expect_access_conflict(const hip_moi::thread_level_context::diagnostic& diagnostic)
     {
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
@@ -128,12 +128,12 @@ namespace
         EXPECT_EQ(observed.access_count, kAccessOverflowAccessCount);
         ASSERT_EQ(observed.diagnostic_count, 1);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::metadata_full));
         EXPECT_EQ(diagnostic.epoch, 0u);
-        EXPECT_EQ(diagnostic.writer_or_first_thread_id, 0u);
-        EXPECT_EQ(diagnostic.reader_or_second_thread_id, 0u);
+        EXPECT_EQ(diagnostic.first_thread_id, 0u);
+        EXPECT_EQ(diagnostic.second_thread_id, 0u);
         EXPECT_EQ(diagnostic.first_size, sizeof(int));
         EXPECT_EQ(diagnostic.second_size, sizeof(int));
     }

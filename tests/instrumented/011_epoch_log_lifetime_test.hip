@@ -22,12 +22,12 @@ namespace
     {
         int                 access_count;
         int                 diagnostic_count;
-        hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::thread_level_context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::thread_level_context::storage_ref storage)
     {
-        hip_moi::config cfg{
+        hip_moi::thread_level_context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
@@ -36,7 +36,7 @@ namespace
     }
 
     __global__ void long_scalar_producer_consumer_kernel(
-        int* out, hip_moi::context_storage_ref storage)
+        int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -62,7 +62,7 @@ namespace
     }
 
     __global__ void long_all_threads_own_slot_kernel(int*                         out,
-                                                     hip_moi::context_storage_ref storage)
+                                                     hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
@@ -83,7 +83,7 @@ namespace
     }
 
     __global__ void same_epoch_overflow_then_barrier_kernel(
-        hip_moi::context_storage_ref storage)
+        hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int values[3];
 
