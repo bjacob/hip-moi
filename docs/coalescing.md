@@ -60,6 +60,7 @@ hip_moi::host_context_options options;
 options.access_record_capacity = 1024;
 options.coalesced_access_record_capacity = 1024;
 options.coalescing_proof_record_capacity = 1024;
+options.coalescing_group_record_capacity = 256;
 
 hip_moi::subgroup_level_host_context moi(options);
 ```
@@ -67,6 +68,11 @@ hip_moi::subgroup_level_host_context moi(options);
 Custom `storage_ref` users can instead populate the
 `coalescing_proof_records`, `coalescing_proof_record_capacity`,
 `coalescing_proof_count`, and `epoch_coalescing_proof_count` fields directly.
+They may also provide `coalescing_group_records`,
+`coalescing_group_record_capacity`, and `coalescing_group_count` scratch
+storage to make subgroup-level summary construction cheaper across many
+distinct sites. If group storage is absent or fills up, hip-moi falls back to
+the proof-log scan path.
 
 ## Current Overhead
 
@@ -102,10 +108,13 @@ In subgroup-level mode, an opted-in access also writes a separate proof record
 when proof storage is supplied. That proof record carries the access address and
 the thread's lane within the subgroup. The subgroup-level diagnostic
 `access_record` stays compact and does not grow a lane or thread-id field.
-At epoch close, each candidate subgroup/site/kind/size group is accumulated in
-one proof-log scan to build its lane masks and endpoint records, then validated
-in one additional scan for fixed-stride addresses. This avoids per-lane
-proof-log rescans for full-subgroup sites.
+When group scratch storage is supplied, epoch close first builds compact
+`coalescing_group_record` entries keyed by subgroup/site/kind/size. Those group
+records accumulate lane masks and endpoint addresses while walking the proof log
+once. Each group is then validated with one proof-log scan for fixed-stride
+addresses. This avoids both per-lane proof-log rescans and the older
+prior-record leader scan. When group scratch is absent or too small, hip-moi
+uses the previous proof-log scan path instead.
 
 Today, opting in therefore costs:
 
@@ -113,6 +122,8 @@ Today, opting in therefore costs:
 * a nonzero `site_id` field in those exact records,
 * in subgroup-level mode, one additional proof record per opted-in access when
   proof storage is supplied,
+* optionally, one subgroup-level group scratch record per distinct
+  subgroup/site/kind/size key in the closing epoch,
 * an epoch-boundary proof pass over exact records or proof records,
 * one coalesced summary record for each proven regular site, if summary storage
   has capacity,
@@ -126,9 +137,10 @@ records in the epoch-close conflict pass. That is the first practical
 optimization step, but it is not yet enough to make coalescing a performance
 feature users should rely on for large kernels.
 
-The remaining known cost is grouping across many distinct sites. Without an
-explicit grouping table or scratch buffer, hip-moi still discovers candidate
-groups by walking the proof log and skipping keys it has already summarized.
+The remaining known cost is that group lookup inside the scratch storage is
+currently linear in the number of groups already seen. That is still much better
+than repeatedly scanning the proof log for every candidate leader, but it is not
+yet a hash table or direct-indexed grouping structure.
 
 ## Representation
 
@@ -259,6 +271,10 @@ The current code does not summarize:
 * subgroup-level opted-in accesses when no proof storage was supplied,
 * accesses that are not visible to hip-moi because they were raw LDS loads or
   stores instead of `ctx.lds_load` / `ctx.lds_store`.
+
+The accelerated subgroup-level grouped path is not used when no group scratch
+storage was supplied or when that scratch storage fills up; those cases fall
+back to the older proof-log scan path.
 
 This means coalescing is currently most useful as a way to observe and diagnose
 simple, regular all-thread LDS access sites. It is not yet a performance

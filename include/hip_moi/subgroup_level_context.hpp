@@ -61,6 +61,23 @@ namespace hip_moi
             uint64_t  site_id;
         };
 
+        struct coalescing_group_record
+        {
+            uintptr_t first_lane_address;
+            uintptr_t last_lane_address;
+            uint64_t  site_id;
+            uint64_t  lane_mask;
+            uint64_t  repeated_lane_mask;
+            uint32_t  byte_count;
+            uint32_t  first_lane;
+            uint32_t  last_lane;
+            uint32_t  subgroup_id;
+            uint32_t  epoch;
+            uint32_t  kind;
+            uint32_t  participant_count;
+            uint32_t  valid;
+        };
+
         struct diagnostic
         {
             uint32_t  kind;
@@ -96,13 +113,17 @@ namespace hip_moi
             int                      coalescing_proof_record_capacity = 0;
             int*                     coalescing_proof_count           = nullptr;
             int*                     epoch_coalescing_proof_count     = nullptr;
+            coalescing_group_record* coalescing_group_records         = nullptr;
+            int                      coalescing_group_record_capacity = 0;
+            int*                     coalescing_group_count           = nullptr;
         };
 
         template <int AccessCapacity,
                   int DiagnosticCapacity,
                   int SubgroupCapacity        = 1,
                   int CoalescedAccessCapacity = AccessCapacity,
-                  int CoalescingProofCapacity = AccessCapacity>
+                  int CoalescingProofCapacity = AccessCapacity,
+                  int CoalescingGroupCapacity = CoalescingProofCapacity>
         struct static_context_storage
         {
             access_record           access_records[AccessCapacity];
@@ -110,12 +131,14 @@ namespace hip_moi
             subgroup_state          subgroup_states[SubgroupCapacity];
             coalesced_access_record coalesced_access_records[CoalescedAccessCapacity];
             coalescing_proof_record coalescing_proof_records[CoalescingProofCapacity];
+            coalescing_group_record coalescing_group_records[CoalescingGroupCapacity];
             int                     access_count;
             int                     epoch_access_count;
             int                     diagnostic_count;
             int                     coalesced_access_count;
             int                     coalescing_proof_count;
             int                     epoch_coalescing_proof_count;
+            int                     coalescing_group_count;
 
             __device__ storage_ref ref()
             {
@@ -136,6 +159,9 @@ namespace hip_moi
                     CoalescingProofCapacity,
                     &coalescing_proof_count,
                     &epoch_coalescing_proof_count,
+                    coalescing_group_records,
+                    CoalescingGroupCapacity,
+                    &coalescing_group_count,
                 };
             }
         };
@@ -174,6 +200,10 @@ namespace hip_moi
                 {
                     *storage_.epoch_coalescing_proof_count = 0;
                 }
+                if(storage_.coalescing_group_count)
+                {
+                    *storage_.coalescing_group_count = 0;
+                }
                 for(int i = 0; storage_.subgroup_states && i < storage_.subgroup_capacity; ++i)
                 {
                     storage_.subgroup_states[i].epoch = 0;
@@ -193,6 +223,12 @@ namespace hip_moi
                     ++i)
                 {
                     storage_.coalescing_proof_records[i].valid = 0;
+                }
+                for(int i = 0; storage_.coalescing_group_records
+                               && i < storage_.coalescing_group_record_capacity;
+                    ++i)
+                {
+                    storage_.coalescing_group_records[i].valid = 0;
                 }
                 __threadfence();
             }
@@ -404,6 +440,118 @@ namespace hip_moi
                    && first.byte_count == second.byte_count;
         }
 
+        __device__ bool same_coalescing_key(const coalescing_group_record& group,
+                                            const coalescing_proof_record& proof) const
+        {
+            return group.valid && proof.valid && group.site_id != 0
+                   && group.site_id == proof.site_id && group.epoch == proof.epoch
+                   && group.subgroup_id == proof.subgroup_id && group.kind == proof.kind
+                   && group.byte_count == proof.byte_count;
+        }
+
+        __device__ int find_coalescing_group(const coalescing_proof_record& proof,
+                                             int                            group_count) const
+        {
+            for(int i = 0; i < group_count; ++i)
+            {
+                if(same_coalescing_key(storage_.coalescing_group_records[i], proof))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        __device__ void initialize_coalescing_group(int                            group_index,
+                                                    const coalescing_proof_record& proof) const
+        {
+            storage_.coalescing_group_records[group_index] = coalescing_group_record{
+                proof.address,
+                proof.address,
+                proof.site_id,
+                0,
+                0,
+                proof.byte_count,
+                proof.lane,
+                proof.lane,
+                proof.subgroup_id,
+                proof.epoch,
+                proof.kind,
+                0,
+                1,
+            };
+        }
+
+        __device__ bool update_coalescing_group(coalescing_group_record*       group,
+                                                const coalescing_proof_record& proof) const
+        {
+            if(proof.lane >= 64)
+            {
+                return false;
+            }
+
+            uint64_t lane_bit = 1ull << proof.lane;
+            if(group->lane_mask & lane_bit)
+            {
+                group->repeated_lane_mask |= lane_bit;
+            }
+            else
+            {
+                group->lane_mask |= lane_bit;
+            }
+
+            ++group->participant_count;
+            if(proof.lane < group->first_lane)
+            {
+                group->first_lane         = proof.lane;
+                group->first_lane_address = proof.address;
+            }
+            if(proof.lane > group->last_lane)
+            {
+                group->last_lane         = proof.lane;
+                group->last_lane_address = proof.address;
+            }
+            return true;
+        }
+
+        __device__ bool build_coalescing_groups(int scan_limit) const
+        {
+            if(!storage_.coalescing_group_records || !storage_.coalescing_group_count
+               || storage_.coalescing_group_record_capacity <= 0)
+            {
+                return false;
+            }
+
+            *storage_.coalescing_group_count = 0;
+            for(int i = 0; i < scan_limit; ++i)
+            {
+                coalescing_proof_record proof = storage_.coalescing_proof_records[i];
+                if(!proof.valid || proof.site_id == 0)
+                {
+                    continue;
+                }
+
+                int group_count = *storage_.coalescing_group_count;
+                int group_index = find_coalescing_group(proof, group_count);
+                if(group_index < 0)
+                {
+                    if(group_count >= storage_.coalescing_group_record_capacity)
+                    {
+                        return false;
+                    }
+                    group_index = group_count;
+                    initialize_coalescing_group(group_index, proof);
+                    ++(*storage_.coalescing_group_count);
+                }
+
+                if(!update_coalescing_group(&storage_.coalescing_group_records[group_index], proof))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         __device__ bool has_prior_coalescing_leader(const coalescing_proof_record& record,
                                                     int                            record_index,
                                                     int                            scan_limit) const
@@ -416,6 +564,123 @@ namespace hip_moi
                 }
             }
             return false;
+        }
+
+        __device__ bool build_coalesced_access_record(const coalescing_group_record& group,
+                                                      int                            scan_limit,
+                                                      coalesced_access_record*       result) const
+        {
+            if(!group.valid || group.participant_count < 2 || group.repeated_lane_mask != 0)
+            {
+                return false;
+            }
+
+            uint32_t lane_span = group.last_lane - group.first_lane + 1;
+            if(lane_span != group.participant_count)
+            {
+                return false;
+            }
+
+            uint64_t expected_mask
+                = lane_span == 64 ? UINT64_MAX : ((1ull << lane_span) - 1ull) << group.first_lane;
+            if(group.lane_mask != expected_mask)
+            {
+                return false;
+            }
+
+            bool     descending_address = group.last_lane_address < group.first_lane_address;
+            uint64_t absolute_delta
+                = descending_address
+                      ? static_cast<uint64_t>(group.first_lane_address - group.last_lane_address)
+                      : static_cast<uint64_t>(group.last_lane_address - group.first_lane_address);
+            int64_t lane_delta = static_cast<int64_t>(group.last_lane - group.first_lane);
+            if(lane_delta == 0 || absolute_delta > static_cast<uint64_t>(INT64_MAX)
+               || absolute_delta % static_cast<uint64_t>(lane_delta) != 0)
+            {
+                return false;
+            }
+
+            int64_t address_stride = static_cast<int64_t>(absolute_delta) / lane_delta;
+            if(descending_address)
+            {
+                address_stride = -address_stride;
+            }
+            int64_t stride_magnitude = address_stride < 0 ? -address_stride : address_stride;
+            if(stride_magnitude < static_cast<int64_t>(group.byte_count))
+            {
+                return false;
+            }
+
+            for(int i = 0; i < scan_limit; ++i)
+            {
+                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
+                if(!same_coalescing_key(group, candidate))
+                {
+                    continue;
+                }
+
+                uint32_t lane_offset = candidate.lane - group.first_lane;
+                if(lane_offset != 0
+                   && static_cast<uint64_t>(stride_magnitude)
+                          > UINT64_MAX / static_cast<uint64_t>(lane_offset))
+                {
+                    return false;
+                }
+                uint64_t step
+                    = static_cast<uint64_t>(lane_offset) * static_cast<uint64_t>(stride_magnitude);
+                uintptr_t expected_address = group.first_lane_address;
+                if(address_stride >= 0)
+                {
+                    if(step > UINTPTR_MAX - expected_address)
+                    {
+                        return false;
+                    }
+                    expected_address += static_cast<uintptr_t>(step);
+                }
+                else
+                {
+                    if(step > expected_address)
+                    {
+                        return false;
+                    }
+                    expected_address -= static_cast<uintptr_t>(step);
+                }
+
+                if(candidate.address != expected_address)
+                {
+                    return false;
+                }
+            }
+
+            uintptr_t lower_address = group.first_lane_address;
+            uintptr_t upper_address = group.last_lane_address;
+            if(address_stride < 0)
+            {
+                lower_address = group.last_lane_address;
+                upper_address = group.first_lane_address;
+            }
+
+            uint64_t span = static_cast<uint64_t>(upper_address - lower_address)
+                            + static_cast<uint64_t>(group.byte_count);
+            if(span > UINT32_MAX)
+            {
+                return false;
+            }
+
+            *result = coalesced_access_record{
+                group.first_lane_address,
+                group.byte_count,
+                static_cast<uint32_t>(span),
+                group.first_lane,
+                group.subgroup_id,
+                group.epoch,
+                group.kind,
+                group.participant_count,
+                1,
+                address_stride,
+                group.site_id,
+            };
+            return true;
         }
 
         __device__ bool build_coalesced_access_record(const coalescing_proof_record& key,
@@ -580,6 +845,36 @@ namespace hip_moi
             return true;
         }
 
+        __device__ void append_coalesced_access_record(const coalesced_access_record& record) const
+        {
+            int output_index = *storage_.coalesced_access_count;
+            ++(*storage_.coalesced_access_count);
+            if(output_index < storage_.coalesced_access_record_capacity)
+            {
+                storage_.coalesced_access_records[output_index] = record;
+            }
+        }
+
+        __device__ bool collect_coalesced_access_records_from_groups(int scan_limit) const
+        {
+            if(!build_coalescing_groups(scan_limit))
+            {
+                return false;
+            }
+
+            int group_count = *storage_.coalescing_group_count;
+            for(int i = 0; i < group_count; ++i)
+            {
+                coalesced_access_record coalesced_record{};
+                if(build_coalesced_access_record(
+                       storage_.coalescing_group_records[i], scan_limit, &coalesced_record))
+                {
+                    append_coalesced_access_record(coalesced_record);
+                }
+            }
+            return true;
+        }
+
         __device__ void collect_coalesced_access_records() const
         {
             if(!storage_.coalesced_access_records || !storage_.coalesced_access_count
@@ -593,6 +888,11 @@ namespace hip_moi
             if(scan_limit > storage_.coalescing_proof_record_capacity)
             {
                 scan_limit = storage_.coalescing_proof_record_capacity;
+            }
+
+            if(collect_coalesced_access_records_from_groups(scan_limit))
+            {
+                return;
             }
 
             for(int i = 0; i < scan_limit; ++i)
@@ -610,12 +910,7 @@ namespace hip_moi
                     continue;
                 }
 
-                int output_index = *storage_.coalesced_access_count;
-                ++(*storage_.coalesced_access_count);
-                if(output_index < storage_.coalesced_access_record_capacity)
-                {
-                    storage_.coalesced_access_records[output_index] = coalesced_record;
-                }
+                append_coalesced_access_record(coalesced_record);
             }
         }
 
