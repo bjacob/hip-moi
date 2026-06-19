@@ -15,11 +15,11 @@
 namespace
 {
     constexpr int kThreadsPerSubgroup = 32;
-    constexpr int kSubgroupCount      = 2;
+    constexpr int kSubgroupCount      = 4;
     constexpr int kThreadCount        = kThreadsPerSubgroup * kSubgroupCount;
-    constexpr int kAccessCapacity     = 160;
-    constexpr int kProofCapacity      = 160;
-    constexpr int kGroupCapacity      = 16;
+    constexpr int kAccessCapacity     = 320;
+    constexpr int kProofCapacity      = 320;
+    constexpr int kGroupCapacity      = 32;
     constexpr int kDiagnosticCapacity = 8;
 
     constexpr hip_moi::site_id kContiguousSite(0x201u);
@@ -32,6 +32,11 @@ namespace
     constexpr hip_moi::site_id kManySite1(0x208u);
     constexpr hip_moi::site_id kManySite2(0x209u);
     constexpr hip_moi::site_id kManySite3(0x20au);
+    constexpr hip_moi::site_id kManySite4(0x20bu);
+    constexpr hip_moi::site_id kManySite5(0x20cu);
+    constexpr hip_moi::site_id kManySite6(0x20du);
+    constexpr hip_moi::site_id kManySite7(0x20eu);
+    constexpr hip_moi::site_id kMixedKindSite(0x20fu);
 
     struct observed_metadata
     {
@@ -164,7 +169,7 @@ namespace
 
     __global__ void many_site_kernel(hip_moi::subgroup_level_context::storage_ref storage)
     {
-        __shared__ int values[4][kThreadsPerSubgroup];
+        __shared__ int values[8][kThreadsPerSubgroup];
 
         hip_moi::subgroup_level_context ctx = make_context(storage);
         ctx.init_workgroup();
@@ -176,6 +181,26 @@ namespace
             ctx.lds_store(&values[1][lane], lane, kManySite1);
             ctx.lds_store(&values[2][lane], lane, kManySite2);
             ctx.lds_store(&values[3][lane], lane, kManySite3);
+            ctx.lds_store(&values[4][lane], lane, kManySite4);
+            ctx.lds_store(&values[5][lane], lane, kManySite5);
+            ctx.lds_store(&values[6][lane], lane, kManySite6);
+            ctx.lds_store(&values[7][lane], lane, kManySite7);
+        }
+        ctx.syncthreads();
+    }
+
+    __global__ void mixed_kind_site_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadsPerSubgroup];
+
+        hip_moi::subgroup_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        int lane = static_cast<int>(ctx.lane_in_subgroup());
+        if(ctx.subgroup_id() == 0)
+        {
+            ctx.lds_store(&values[lane], lane, kMixedKindSite);
+            values[lane] = ctx.lds_load(&values[lane], kMixedKindSite);
         }
         ctx.syncthreads();
     }
@@ -281,7 +306,8 @@ namespace
                      hip_moi::site_id         expected_site,
                      uint32_t                 expected_subgroup,
                      int64_t                  expected_stride,
-                     uint32_t                 expected_span)
+                     uint32_t                 expected_span,
+                     hip_moi::access_kind     expected_kind = hip_moi::access_kind::store)
     {
         int summary_count = stored_summary_count(observed);
         for(int i = 0; i < summary_count; ++i)
@@ -292,8 +318,8 @@ namespace
                && record.subgroup_id == expected_subgroup && record.first_lane == 0
                && record.participant_count == static_cast<uint32_t>(kThreadsPerSubgroup)
                && record.byte_count == static_cast<uint32_t>(sizeof(int))
-               && record.kind == static_cast<uint32_t>(hip_moi::access_kind::store)
-               && record.epoch == 0u && record.address_stride == expected_stride
+               && record.kind == static_cast<uint32_t>(expected_kind) && record.epoch == 0u
+               && record.address_stride == expected_stride
                && record.span_byte_count == expected_span)
             {
                 return true;
@@ -425,10 +451,10 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(many_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, 4 * kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, 4 * kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_group_count, 4);
-        EXPECT_EQ(observed.coalesced_access_count, 4);
+        EXPECT_EQ(observed.access_count, 8 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_proof_count, 8 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_group_count, 8);
+        EXPECT_EQ(observed.coalesced_access_count, 8);
         EXPECT_EQ(observed.diagnostic_count, 0);
         EXPECT_TRUE(has_summary(observed,
                                 kManySite0,
@@ -454,6 +480,56 @@ namespace
                                 /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
                                 /*expected_span=*/
                                 static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
+        EXPECT_TRUE(has_summary(observed,
+                                kManySite4,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
+        EXPECT_TRUE(has_summary(observed,
+                                kManySite5,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
+        EXPECT_TRUE(has_summary(observed,
+                                kManySite6,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
+        EXPECT_TRUE(has_summary(observed,
+                                kManySite7,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
+    }
+
+    TEST(HipMoiSubgroupLevelCoalescing, SameSiteLoadAndStoreProduceSeparateGroups)
+    {
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(mixed_kind_site_kernel, &observed));
+
+        EXPECT_EQ(observed.access_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_proof_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_group_count, 2);
+        EXPECT_EQ(observed.coalesced_access_count, 2);
+        EXPECT_EQ(observed.diagnostic_count, 0);
+        EXPECT_TRUE(has_summary(observed,
+                                kMixedKindSite,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int)),
+                                /*expected_kind=*/hip_moi::access_kind::store));
+        EXPECT_TRUE(has_summary(observed,
+                                kMixedKindSite,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int)),
+                                /*expected_kind=*/hip_moi::access_kind::load));
     }
 
     TEST(HipMoiSubgroupLevelCoalescing, GroupCapacityOverflowFallsBackToProofScan)

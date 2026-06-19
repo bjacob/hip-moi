@@ -449,17 +449,65 @@ namespace hip_moi
                    && group.byte_count == proof.byte_count;
         }
 
-        __device__ int find_coalescing_group(const coalescing_proof_record& proof,
-                                             int                            group_count) const
+        __device__ uint64_t mix_coalescing_hash(uint64_t value) const
         {
-            for(int i = 0; i < group_count; ++i)
+            value ^= value >> 33;
+            value *= 0xff51afd7ed558ccdull;
+            value ^= value >> 33;
+            value *= 0xc4ceb9fe1a85ec53ull;
+            value ^= value >> 33;
+            return value;
+        }
+
+        __device__ int coalescing_group_hash(const coalescing_proof_record& proof) const
+        {
+            uint64_t hash = proof.site_id;
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.epoch) + 0x9e3779b97f4a7c15ull);
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.subgroup_id)
+                                        + 0xbf58476d1ce4e5b9ull);
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.kind) + 0x94d049bb133111ebull);
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.byte_count)
+                                        + 0x2545f4914f6cdd1dull);
+            return static_cast<int>(
+                hash % static_cast<uint64_t>(storage_.coalescing_group_record_capacity));
+        }
+
+        __device__ bool find_or_insert_coalescing_group(const coalescing_proof_record& proof,
+                                                        int* group_index) const
+        {
+            int capacity = storage_.coalescing_group_record_capacity;
+            int start    = coalescing_group_hash(proof);
+
+            for(int probe = 0; probe < capacity; ++probe)
             {
-                if(same_coalescing_key(storage_.coalescing_group_records[i], proof))
+                int index = start + probe;
+                if(index >= capacity)
                 {
-                    return i;
+                    index -= capacity;
+                }
+
+                if(same_coalescing_key(storage_.coalescing_group_records[index], proof))
+                {
+                    *group_index = index;
+                    return true;
+                }
+
+                if(!storage_.coalescing_group_records[index].valid)
+                {
+                    int group_count = *storage_.coalescing_group_count;
+                    if(group_count >= capacity)
+                    {
+                        return false;
+                    }
+
+                    initialize_coalescing_group(index, proof);
+                    ++(*storage_.coalescing_group_count);
+                    *group_index = index;
+                    return true;
                 }
             }
-            return -1;
+
+            return false;
         }
 
         __device__ void initialize_coalescing_group(int                            group_index,
@@ -523,6 +571,11 @@ namespace hip_moi
             }
 
             *storage_.coalescing_group_count = 0;
+            for(int i = 0; i < storage_.coalescing_group_record_capacity; ++i)
+            {
+                storage_.coalescing_group_records[i].valid = 0;
+            }
+
             for(int i = 0; i < scan_limit; ++i)
             {
                 coalescing_proof_record proof = storage_.coalescing_proof_records[i];
@@ -531,17 +584,10 @@ namespace hip_moi
                     continue;
                 }
 
-                int group_count = *storage_.coalescing_group_count;
-                int group_index = find_coalescing_group(proof, group_count);
-                if(group_index < 0)
+                int group_index = 0;
+                if(!find_or_insert_coalescing_group(proof, &group_index))
                 {
-                    if(group_count >= storage_.coalescing_group_record_capacity)
-                    {
-                        return false;
-                    }
-                    group_index = group_count;
-                    initialize_coalescing_group(group_index, proof);
-                    ++(*storage_.coalescing_group_count);
+                    return false;
                 }
 
                 if(!update_coalescing_group(&storage_.coalescing_group_records[group_index], proof))
@@ -863,8 +909,17 @@ namespace hip_moi
             }
 
             int group_count = *storage_.coalescing_group_count;
-            for(int i = 0; i < group_count; ++i)
+            int seen_groups = 0;
+            for(int i = 0;
+                i < storage_.coalescing_group_record_capacity && seen_groups < group_count;
+                ++i)
             {
+                if(!storage_.coalescing_group_records[i].valid)
+                {
+                    continue;
+                }
+                ++seen_groups;
+
                 coalesced_access_record coalesced_record{};
                 if(build_coalesced_access_record(
                        storage_.coalescing_group_records[i], scan_limit, &coalesced_record))

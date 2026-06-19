@@ -109,12 +109,13 @@ when proof storage is supplied. That proof record carries the access address and
 the thread's lane within the subgroup. The subgroup-level diagnostic
 `access_record` stays compact and does not grow a lane or thread-id field.
 When group scratch storage is supplied, epoch close first builds compact
-`coalescing_group_record` entries keyed by subgroup/site/kind/size. Those group
-records accumulate lane masks and endpoint addresses while walking the proof log
-once. Each group is then validated with one proof-log scan for fixed-stride
-addresses. This avoids both per-lane proof-log rescans and the older
-prior-record leader scan. When group scratch is absent or too small, hip-moi
-uses the previous proof-log scan path instead.
+`coalescing_group_record` entries keyed by subgroup/site/kind/size in an
+open-addressed scratch table. Those group records accumulate lane masks and
+endpoint addresses while walking the proof log once. Each group is then
+validated with one proof-log scan for fixed-stride addresses. This avoids both
+per-lane proof-log rescans and the older prior-record leader scan. When group
+scratch is absent or too small, hip-moi uses the previous proof-log scan path
+instead.
 
 Today, opting in therefore costs:
 
@@ -137,10 +138,11 @@ records in the epoch-close conflict pass. That is the first practical
 optimization step, but it is not yet enough to make coalescing a performance
 feature users should rely on for large kernels.
 
-The remaining known cost is that group lookup inside the scratch storage is
-currently linear in the number of groups already seen. That is still much better
-than repeatedly scanning the proof log for every candidate leader, but it is not
-yet a hash table or direct-indexed grouping structure.
+The remaining known subgroup-level cost is the validation scan per candidate
+group, plus the fact that exact access records and proof records are still
+written on the hot path. The group scratch table is fixed-capacity and
+open-addressed, so unusually high collision pressure or too little scratch
+capacity falls back to the older proof-log scan path.
 
 ## Representation
 

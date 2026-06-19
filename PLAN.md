@@ -268,9 +268,9 @@ foundation:
   lane masks and endpoints in one scan and validating the fixed-stride pattern
   in one additional scan. Subgroup-level mode also has optional epoch-close
   grouping scratch storage: when supplied, it builds one group record per
-  subgroup/site/kind/size key before summary validation, avoiding the older
-  prior-record leader scan across many distinct sites. Neither mode has hot-path
-  access compression yet.
+  subgroup/site/kind/size key in an open-addressed scratch table before summary
+  validation, avoiding the older prior-record leader scan across many distinct
+  sites. Neither mode has hot-path access compression yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -280,10 +280,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, decide whether subgroup-level group lookup needs
-a hash/direct-indexed structure instead of the current small linear scratch
-table, and start recording lowering notes for `ctx.syncthreads()` and
-lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, reduce remaining subgroup-level coalescing costs
+where that can be done without weakening correctness, and start recording
+lowering notes for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -1305,9 +1304,14 @@ Incremental instrumented test growth:
     summaries from those groups. If group scratch is absent or full, it falls
     back to the older proof-log scan.
 33. Decide whether subgroup-level group lookup needs a hash/direct-indexed
-    structure. The current grouping scratch avoids proof-log leader rescans, but
-    finding an existing group is still a linear scan of the already-built group
-    table.
+    structure. Done: subgroup-level group scratch now uses the
+    `coalescing_group_record` array as an open-addressed table keyed by
+    subgroup/epoch/site/kind/byte-size. If the table fills or probing cannot
+    find a slot, the collector falls back to the older proof-log scan.
+34. Reduce the remaining subgroup-level coalescing costs. The next costs are
+    per-group proof-log validation scans and hot-path traffic: exact access
+    records and proof records are still written before any summary can replace
+    them in the epoch-close conflict pass.
 
 Layer 1: toy deterministic kernels.
 
@@ -1439,8 +1443,11 @@ library teaches us the right subgroup abstractions.
       within one candidate group. Done.
     * Subgroup-level summary construction now has optional epoch-close grouping
       scratch storage across many distinct sites. Done.
-    * Hot-path compression can come later, after group lookup itself is
-      efficient enough to be a credible optimization for broad kernels.
+    * Subgroup-level group scratch now uses open addressing instead of scanning
+      the existing groups for every proof record. Done.
+    * Hot-path compression can come later, after the remaining epoch-close costs
+      are small enough to make coalescing a credible optimization for broad
+      kernels.
 
 ## Plan beyond the MVP
 

@@ -143,7 +143,9 @@ records, opted-in sites write one proof record per lane, contiguous and
 fixed-stride lane patterns summarize in both increasing and decreasing address
 order, repeated lanes are rejected, and independent subgroups produce separate
 summaries. It also covers many distinct sites sharing one epoch and the fallback
-path when optional group scratch storage is too small.
+path when optional group scratch storage is too small. The many-site coverage
+now uses the open-addressed subgroup grouping path and checks that the same site
+with load and store accesses produces separate groups.
 
 `023_subgroup_level_coalesced_conflict_test.hip` starts using subgroup-level
 coalesced summaries in deferred epoch-close conflict detection. It checks
