@@ -102,8 +102,10 @@ foundation:
   user-facing host diagnostics tests. It exercises `hip_moi::host_context`,
   `HIP_MOI_CHECK`, explicit nonfatal diagnostic consumption, the default
   scope-based destructor handling of unconsumed diagnostics, and the destructor
-  reporting/abort opt-outs. It now also checks stderr diagnostic text and abort
-  behavior using GTest stderr capture and death tests.
+  reporting/abort opt-outs. It also exercises
+  `hip_moi::subgroup_level_host_context`, whose diagnostics print subgroup ids
+  instead of representative or scaled thread ids. The tests check stderr
+  diagnostic text and abort behavior using GTest stderr capture and death tests.
 * `tests/instrumented/004_basic_conflict_predicate_test.hip` broadens the raw
   detector-contract coverage for same-epoch byte ranges: read/read same address,
   write/write same address, non-overlapping writes, adjacent byte ranges, and an
@@ -163,6 +165,12 @@ foundation:
   type, uses subgroup-specific access records and diagnostics, reports
   cross-subgroup same-epoch conflicts, and intentionally ignores same-subgroup
   conflicts.
+* `tests/instrumented/017_subgroup_level_multisubgroup_test.hip` broadens
+  `subgroup-level` coverage to a 128-thread, four-subgroup workgroup. It covers
+  independent subgroup LDS slots, cross-subgroup array conflicts, barriers that
+  separate cross-subgroup communication, looped conflict epochs, tiled row
+  layouts, tiled row collisions, and matmul-shaped cooperative tile sharing with
+  both safe and missing-barrier cases.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -174,17 +182,19 @@ foundation:
   pipeline-like matmul tests, RDNA4 WMMA row-major/data-tiled tests, and first
   multi-subgroup `thread-level` and `subgroup-level` tests exist. Epoch-local
   access-log lifetime now exists. Dissociated `subgroup-level` records and
-  diagnostics now exist, but mode-aware host reporting, diagnostic quality work,
-  and low-overhead subgroup-representative logs are still future work.
+  diagnostics now exist. Mode-aware subgroup-level host reporting now exists.
+  Diagnostic quality work and low-overhead subgroup-representative logs are
+  still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: make `subgroup-level` diagnostics user-facing rather
-than test-only. The mode now has its own device metadata types, so the next goal
-is a clean host/reporting story and then a lower-overhead subgroup-representative
-logging experiment for tile-shaped accesses.
+Next implementation slice: design the lower-overhead subgroup-representative
+recording path for tile-shaped accesses. The current `subgroup-level` mode still
+logs each instrumented access call; the next question is what explicit API can
+summarize a known collective/tile-shaped LDS footprint once per subgroup without
+pretending to summarize arbitrary per-thread pointer accesses.
 
 ## Foundations
 
@@ -865,6 +875,8 @@ tests/instrumented/
   013_rdna4_wmma_row_major_test.hip
   014_rdna4_wmma_data_tiled_test.hip
   015_thread_level_subgroup_test.hip
+  016_subgroup_level_bootstrap_test.hip
+  017_subgroup_level_multisubgroup_test.hip
   test_support.hpp
 ```
 
@@ -904,6 +916,12 @@ host-reference matmul.
 `thread-level` behavior: helper-derived subgroup identity, per-record subgroup
 ids, same-subgroup diagnostics, cross-subgroup diagnostics, and full-workgroup
 barrier separation across subgroups.
+`016_subgroup_level_bootstrap_test.hip` asserts the first `subgroup-level`
+behavior: cross-subgroup conflicts report, same-subgroup conflicts intentionally
+do not report, and the explicit `subgroup_level_context` surface is exercised.
+`017_subgroup_level_multisubgroup_test.hip` asserts richer subgroup-level
+multi-subgroup behavior: array, loop, tiled, and matmul-shaped cross-subgroup
+LDS sharing across a four-subgroup workgroup.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -953,11 +971,13 @@ Incremental instrumented test growth:
     id from the hot metadata when the mode contract does not need it. Done.
 17. Add mode-aware host support for `subgroup-level` mode, so reports can
     identify subgroup-to-subgroup conflicts without pretending to identify exact
-    causative threads.
-18. Prototype lower-overhead subgroup-representative logging for tile-shaped
+    causative threads. Done.
+18. Add richer multi-subgroup `subgroup-level` tests covering arrays, loops,
+    tiled layouts, and matmul-shaped cross-subgroup LDS sharing. Done.
+19. Prototype lower-overhead subgroup-representative logging for tile-shaped
     accesses if the design is clear enough; otherwise document the blockers and
     keep using all-thread logging filtered by subgroup id.
-19. Improve diagnostic quality with labels/source locations and first-conflict
+20. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.
@@ -1037,14 +1057,22 @@ library teaches us the right subgroup abstractions.
    * Measure or inspect metadata footprint, atomic usage, and generated code for
      both modes.
 
-6. Add mode-aware host support for `subgroup-level` diagnostics.
+6. Add mode-aware host support for `subgroup-level` diagnostics. Done.
    * Provide a host ownership/reporting path for `subgroup_level_context`.
    * Print subgroup ids for subgroup-level diagnostics instead of representative
      or scaled thread ids.
    * Keep the default `host_context` name thread-level for compatibility unless a
      clearer naming split is introduced.
 
-7. Explore subgroup-representative instrumentation.
+7. Add richer `subgroup-level` multi-subgroup coverage. Done for the first
+   arrays/loops/tiles/matmul-shaped slice.
+   * Exercise more than two subgroups in one workgroup.
+   * Include no-diagnostic independent subgroup slots and barrier-separated
+     communication.
+   * Include diagnostic-positive cross-subgroup array, tiled, looped-epoch, and
+     matmul-shaped cases.
+
+8. Explore subgroup-representative instrumentation.
    * Candidate direction: only the 0-th thread of each subgroup records a
      subgroup-level access summary.
    * Do this only for access patterns where the representative can describe the
@@ -1054,14 +1082,14 @@ library teaches us the right subgroup abstractions.
    * Determine whether this can reduce atomics or eliminate them from the common
      access path.
 
-8. Then resume diagnostic quality work.
+9. Then resume diagnostic quality work.
    * Add source/location IDs or stringless labels.
    * Add first-conflict preservation so later conflicts do not hide the useful
      one.
    * Add clearer mode-aware host diagnostics, especially for
      `subgroup-level` false negatives by design.
 
-9. Keep synchronization lowering notes on the horizon.
+10. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
      `__builtin_amdgcn_s_barrier`, and `__builtin_amdgcn_fence`.
    * Save or document their LLVM IR shape for the HIP-language model.
@@ -1110,7 +1138,7 @@ threads in the same subgroup.
 * Use a compact `subgroup-level` access record that tracks subgroup id but omits
   thread id. Done.
 * Report "subgroup A vs subgroup B" diagnostics without pretending to identify
-  exact threads. Done in device/test diagnostics; host reporting remains next.
+  exact threads. Done in device/test diagnostics and host reporting.
 * Share only leaf helpers that are naturally common, such as byte-range overlap,
   subgroup-index arithmetic, host-side diagnostic formatting, and storage
   ownership.
@@ -1123,8 +1151,8 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 
 * First implementation logs all instrumented access calls but stores them in the
   `subgroup-level` record shape, so the hot record omits thread id. Done.
-* Next, add host ownership/reporting for the `subgroup-level` diagnostic shape.
-* Then investigate subgroup-representative logging where only the 0-th thread
+* Host ownership/reporting for the `subgroup-level` diagnostic shape exists.
+* Next, investigate subgroup-representative logging where only the 0-th thread
   of each subgroup records a subgroup-level access summary.
 * Use representative logging only for access patterns whose byte ranges can be
   summarized by a subgroup leader, such as cooperative tile or fragment
@@ -1135,7 +1163,8 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
   intentionally does not report same-subgroup conflicts in `subgroup-level`
   mode.
 * Add matmul-shaped cross-subgroup conflicts, because this is the main bridge to
-  the future assembly-level effort.
+  the future assembly-level effort. Done for the first non-WMMA subgroup-level
+  slice.
 
 ### Step 4: Real-kernel LDS coverage under both modes
 
