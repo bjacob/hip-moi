@@ -56,3 +56,7 @@ unsynchronized transpose diagnostic case.
 
 `010_matmul_like_test.hip` covers small cooperative LDS matmul idioms: simple
 2x2 and 4x4 tiles, a chunked K loop, and a scalar missing-barrier diagnostic.
+
+`011_epoch_log_lifetime_test.hip` verifies that access-log storage is reused at
+epoch boundaries, so long synchronized loops can run with capacity sized for one
+epoch rather than the whole kernel.

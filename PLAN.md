@@ -101,6 +101,9 @@ foundation:
 * `tests/instrumented/010_matmul_like_test.hip` covers small cooperative LDS
   matmul idioms: simple 2x2 and 4x4 tiles, a chunked K loop, and a scalar
   missing-barrier diagnostic.
+* `tests/instrumented/011_epoch_log_lifetime_test.hip` verifies that access-log
+  storage is reused at epoch boundaries, so long synchronized loops can run with
+  capacity sized for one epoch rather than the whole kernel.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -109,14 +112,15 @@ foundation:
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
   tests, looped epoch tests, tiled LDS tests, and simple matmul-like tests
-  exist. Epoch clearing and low-overhead per-thread logs are still future work.
+  exist. Epoch-local access-log lifetime now exists. Diagnostic quality work and
+  low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: make access-log lifetime epoch-local so long
-synchronized loops do not consume capacity forever.
+Next implementation slice: improve diagnostic quality, starting with compact
+source/location labels or first-conflict preservation.
 
 ## Foundations
 
@@ -245,6 +249,7 @@ struct context_storage_ref {
   subgroup_state* subgroup_states;
   int subgroup_capacity;
   int* access_count;
+  int* epoch_access_count;
   int* diagnostic_count;
 };
 
@@ -643,6 +648,7 @@ tests/instrumented/
   008_loop_epoch_test.hip
   009_tiled_lds_test.hip
   010_matmul_like_test.hip
+  011_epoch_log_lifetime_test.hip
   test_support.hpp
 ```
 
@@ -665,6 +671,8 @@ safe barriers and repeated missing-barrier diagnostics.
 unsynchronized transpose diagnostic.
 `010_matmul_like_test.hip` asserts cooperative LDS matmul-like access patterns
 and a scalar missing-barrier diagnostic.
+`011_epoch_log_lifetime_test.hip` asserts that access-log capacity is scoped to
+the active epoch rather than the cumulative kernel trace.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -697,7 +705,9 @@ Incremental instrumented test growth:
    Done.
 10. Add matmul-like LDS cases. Done.
 11. Add epoch-local access-log lifetime so long synchronized loops do not fill
-    the log with obsolete epochs.
+    the log with obsolete epochs. Done.
+12. Improve diagnostic quality with labels/source locations and first-conflict
+    preservation.
 
 Layer 1: toy deterministic kernels.
 

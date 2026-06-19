@@ -74,6 +74,7 @@ namespace hip_moi
         subgroup_state* subgroup_states;
         int             subgroup_capacity;
         int*            access_count;
+        int*            epoch_access_count;
         int*            diagnostic_count;
     };
 
@@ -84,6 +85,7 @@ namespace hip_moi
         diagnostic     diagnostics[DiagnosticCapacity];
         subgroup_state subgroup_states[SubgroupCapacity];
         int            access_count;
+        int            epoch_access_count;
         int            diagnostic_count;
 
         __device__ context_storage_ref ref()
@@ -96,6 +98,7 @@ namespace hip_moi
                 subgroup_states,
                 SubgroupCapacity,
                 &access_count,
+                &epoch_access_count,
                 &diagnostic_count,
             };
         }
@@ -117,6 +120,10 @@ namespace hip_moi
                 if(storage_.access_count)
                 {
                     *storage_.access_count = 0;
+                }
+                if(storage_.epoch_access_count)
+                {
+                    *storage_.epoch_access_count = 0;
                 }
                 if(storage_.diagnostic_count)
                 {
@@ -158,6 +165,10 @@ namespace hip_moi
             __syncthreads();
             if(threadIdx.x == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
+                if(storage_.epoch_access_count)
+                {
+                    *storage_.epoch_access_count = 0;
+                }
                 ++storage_.subgroup_states[0].epoch;
                 __threadfence();
             }
@@ -279,7 +290,7 @@ namespace hip_moi
 
         __device__ void record_access(const void* ptr, uint32_t byte_count, access_kind kind)
         {
-            if(!storage_.access_records || !storage_.access_count
+            if(!storage_.access_records || !storage_.access_count || !storage_.epoch_access_count
                || storage_.access_record_capacity <= 0)
             {
                 return;
@@ -296,7 +307,8 @@ namespace hip_moi
                 1,
             };
 
-            int record_index = atomicAdd(storage_.access_count, 1);
+            (void)atomicAdd(storage_.access_count, 1);
+            int record_index = atomicAdd(storage_.epoch_access_count, 1);
 
             if(record_index < storage_.access_record_capacity)
             {
@@ -308,7 +320,7 @@ namespace hip_moi
                 __threadfence();
             }
 
-            int scan_limit = atomicAdd(storage_.access_count, 0);
+            int scan_limit = atomicAdd(storage_.epoch_access_count, 0);
             if(scan_limit > storage_.access_record_capacity)
             {
                 scan_limit = storage_.access_record_capacity;
@@ -397,6 +409,7 @@ namespace hip_moi
                 subgroup_states_,
                 options_.subgroup_capacity,
                 access_count_,
+                epoch_access_count_,
                 diagnostic_count_,
             };
         }
@@ -587,6 +600,7 @@ namespace hip_moi
                                   options_.subgroup_capacity * sizeof(subgroup_state),
                                   "subgroup_states");
             hip_allocate_or_abort(&access_count_, sizeof(int), "access_count");
+            hip_allocate_or_abort(&epoch_access_count_, sizeof(int), "epoch_access_count");
             hip_allocate_or_abort(&diagnostic_count_, sizeof(int), "diagnostic_count");
         }
 
@@ -603,6 +617,7 @@ namespace hip_moi
                                 options_.subgroup_capacity * sizeof(subgroup_state),
                                 "subgroup_states");
             hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
+            hip_memset_or_abort(epoch_access_count_, 0, sizeof(int), "epoch_access_count");
             hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
         }
 
@@ -661,6 +676,11 @@ namespace hip_moi
                 (void)hipFree(access_count_);
                 access_count_ = nullptr;
             }
+            if(epoch_access_count_)
+            {
+                (void)hipFree(epoch_access_count_);
+                epoch_access_count_ = nullptr;
+            }
             if(diagnostic_count_)
             {
                 (void)hipFree(diagnostic_count_);
@@ -679,6 +699,7 @@ namespace hip_moi
         diagnostic*     diagnostics_      = nullptr;
         subgroup_state* subgroup_states_  = nullptr;
         int*            access_count_     = nullptr;
+        int*            epoch_access_count_ = nullptr;
         int*            diagnostic_count_ = nullptr;
     };
 

@@ -94,3 +94,5 @@ hip_moi_add_gtest(hip_moi_instrumented_tiled_lds_test
                   instrumented/009_tiled_lds_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_matmul_like_test
                   instrumented/010_matmul_like_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_epoch_log_lifetime_test
+                  instrumented/011_epoch_log_lifetime_test.hip)
