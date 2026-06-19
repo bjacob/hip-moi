@@ -215,8 +215,8 @@ foundation:
   intra-subgroup races. Real multi-subgroup RDNA4 WMMA bridge tests now exist
   for both data-tiled and row-major layouts under both modes. Diagnostic quality
   work, access-level multi-subgroup refinement, and synchronization lowering
-  notes are still future work. Low-overhead subgroup-representative logs are a
-  possible later optimization, not the immediate implementation direction.
+  notes are still future work. Automatic coalescing of regular access records is
+  a possible later optimization, keyed by explicit nonzero `site_id` values.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -224,7 +224,7 @@ the library actually supports the corresponding behavior.
 
 Next implementation slice: improve the existing access-level instrumentation
 path before adding a new user contract. The near-term work should add labels or
-source IDs, improve first-conflict preservation and host reporting, keep
+`site_id` values, improve first-conflict preservation and host reporting, keep
 expanding multi-subgroup tests that replace real LDS accesses with
 `ctx.lds_load`/`ctx.lds_store`, and start recording synchronization-lowering
 notes for `ctx.syncthreads()` and lower-level builtins.
@@ -471,6 +471,16 @@ class subgroup_level_context {
   // Provides the same user-facing operations as thread_level_context.
 };
 
+class site_id {
+ public:
+  constexpr site_id() = default;
+  explicit constexpr site_id(uint64_t value);
+  constexpr uint64_t value() const;
+  constexpr bool allows_coalescing() const;
+};
+
+inline constexpr site_id no_site_id{};
+
 // Temporary compatibility alias while older examples migrate.
 using context = thread_level_context;
 
@@ -504,6 +514,8 @@ class host_context {
 
 #define HIP_MOI_CHECK(context) ...
 
+#define HIP_MOI_SITE_ID() ...
+
 }  // namespace hip_moi
 ```
 
@@ -535,6 +547,26 @@ Notes:
   `thread-level` and `subgroup-level` in prose. Users select a mode by choosing
   `thread_level_context` or `subgroup_level_context`, not by setting a runtime
   mode field.
+* `lds_load` and `lds_store` should take an optional `site_id` argument with
+  default value `hip_moi::no_site_id`. The default `site_id{0}` means exact
+  logging only and does not allow coalescing. A nonzero site id opts that
+  access site into possible future automatic coalescing, while preserving exact
+  diagnostic semantics as the fallback.
+* `site_id` should be a tiny explicit wrapper around `uint64_t`, not a naked
+  integer in the public API. The explicit constructor and getter prevent
+  accidental argument-order mixups, especially in `lds_store(ptr, value, site)`.
+* Provide one source-site macro, `HIP_MOI_SITE_ID()`, that expands to a
+  `hip_moi::site_id`. Do not hide the whole `lds_load` or `lds_store` operation
+  behind macros. A user should write, for example,
+  `ctx.lds_load(&lds[i], HIP_MOI_SITE_ID())`.
+* `HIP_MOI_SITE_ID()` should be implemented with Clang/GCC-compatible
+  compile-time source-location data. Prefer Clang's source-location builtins
+  where available, especially `__builtin_LINE()`, `__builtin_COLUMN()`, and
+  `__COUNTER__`, with `__FILE__` hashed into the id for cross-file
+  discrimination. Use a pattern such as
+  `detail::site_id_constant<detail::make_site_id(...)>::value` so
+  `make_site_id` is required to constant-evaluate; filename hashing must not
+  become a runtime device-side string loop.
 * The `thread-level` mode lets every participating thread log accesses, and
   records keep enough identity to distinguish threads. The `subgroup-level`
   mode uses subgroup identity instead of thread identity in its hot record and
@@ -542,12 +574,11 @@ Notes:
   instrumentation: users replace the LDS loads and stores they wrote with
   `ctx.lds_load` and `ctx.lds_store`.
 * Do not silently make the existing per-thread `lds_load`/`lds_store` wrappers
-  mean "only subgroup leader logs" until the contract is clear. Arbitrary
-  per-thread accesses are not necessarily summarized by the leader's address.
-  A lower-overhead subgroup-representative mode is only a possible future API
-  for accesses that are explicitly known to be collective/tile-shaped. It is a
-  departure from the "instrument the HIP accesses you wrote" premise and should
-  not be the immediate path.
+  mean "only subgroup leader logs". Arbitrary per-thread accesses are not
+  necessarily summarized by the leader's address. Any lower-overhead path should
+  be automatic, implicit, and conservative: the user still instruments actual
+  HIP LDS accesses, while the detector may coalesce records only when it proves
+  a regularity pattern for a nonzero `site_id`.
 * The target design is plain dissociation of mode-specific hot metadata:
   `thread-level` keeps per-thread identity in its records, while
   `subgroup-level` uses records and diagnostics shaped around
@@ -567,8 +598,9 @@ Notes:
   easiest way to make real progress today.
 * The namespace should avoid claiming to replace HIP builtins. It is a separate
   diagnostic API.
-* The API should eventually support labels/source locations, but MVP diagnostics
-  can start with compact numeric records.
+* The API should eventually support labels/source locations. The first concrete
+  step is the compact numeric `site_id`, which can support both diagnostics and
+  later automatic access-log coalescing.
 * End users should not have to manually copy `diagnostic_count` or the raw
   diagnostic buffer. There are two first-class host-side consumption patterns.
   The explicit pattern is `hip_moi::host_context` plus `HIP_MOI_CHECK(moi)`,
@@ -643,7 +675,7 @@ Each instrumented LDS access records:
 * thread id in `thread-level` mode,
 * subgroup id,
 * epoch id,
-* optional source id,
+* optional compact `site_id`,
 * whether the slot is valid.
 
 `subgroup-level` mode uses a distinct compact record that tracks subgroup ids
@@ -653,15 +685,20 @@ instrumented access call. That is intentional for now because it keeps the API
 close to ordinary HIP code: users instrument the LDS accesses they actually
 wrote.
 
-A possible later subgroup-representative path may summarize a known
-collective/tile-shaped access with one record per subgroup. Treat that as an
-optimization/research direction with a different user contract, not as the
-current implementation plan.
+A possible later optimization may automatically coalesce multiple exact
+access-level records when they share a nonzero `site_id` and obey a provable
+regularity pattern, such as contiguous, fixed-stride, or known tile-shaped
+thread-to-address mappings. This should remain implicit: users still instrument
+the LDS accesses they actually wrote. If the detector cannot prove that
+coalescing is safe for a site in an epoch, it must fall back to exact records.
+Dynamic instance identity is intentionally out of scope at first. If the same
+thread/subgroup/site appears more than once in one epoch, treat that site as
+non-coalescible for that epoch.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
 1. Compute the byte range.
-2. Record the new access in the active epoch.
+2. Record the new access in the active epoch, including `site_id.value()`.
 3. Perform the real load or store.
 
 Conflict checking may happen immediately or be deferred. The preferred MVP
@@ -1037,16 +1074,20 @@ Incremental instrumented test growth:
 21. Add real multi-subgroup RDNA4 WMMA coverage under both `thread-level` and
     `subgroup-level` modes. Done for data-tiled and row-major double-buffered
     fragment-staging slices.
-22. Improve diagnostic quality with labels/source locations and first-conflict
-    preservation.
-23. Keep broadening ordinary access-level multi-subgroup coverage where it
+22. Add the `site_id` wrapper, optional `site_id` arguments to `lds_load` and
+    `lds_store`, and the `HIP_MOI_SITE_ID()` macro. Store compact site ids in
+    access records and diagnostics without changing exact detector behavior.
+23. Improve diagnostic quality with site ids, labels/source locations, and
+    first-conflict preservation.
+24. Keep broadening ordinary access-level multi-subgroup coverage where it
     exercises real HIP code shapes.
-24. Start synchronization-lowering notes for `ctx.syncthreads()` and lower-level
+25. Start synchronization-lowering notes for `ctx.syncthreads()` and lower-level
     builtins, while keeping naked fences paired with atomics as a later
     memory-model widening step.
-25. Consider lower-overhead subgroup-representative logging only after the
-    access-level path is solid and only for tile-shaped operations whose full
-    subgroup footprint can be stated explicitly.
+26. Explore automatic coalescing of access records only after site ids exist.
+    Coalescing must be conservative, implicit, and keyed by nonzero site ids; if
+    a site has repeated dynamic instances in one epoch or no recognized
+    regularity pattern, keep exact records.
 
 Layer 1: toy deterministic kernels.
 
@@ -1155,16 +1196,21 @@ library teaches us the right subgroup abstractions.
      assembly-level model.
    * Do not infer HIP-level cross-thread synchronization from naked fences.
 
-10. Keep subgroup-representative instrumentation as a possible later direction.
-    * Candidate direction: a separate API where only one thread per subgroup
-      records an explicit subgroup-level access summary.
-    * Do this only for access patterns where the summary can describe the whole
-      subgroup's memory footprint, such as tile-shaped or fragment-shaped
-      operations.
-    * Do not pretend this summarizes arbitrary per-thread pointer accesses.
-    * Treat this as a departure from access-level HIP instrumentation, useful
-      mainly as an optional optimization or a bridge to assembly-level
-      experiments.
+10. Keep automatic access coalescing as a possible later optimization.
+    * The user-facing API remains access-level: users call `ctx.lds_load` and
+      `ctx.lds_store` at the places where HIP code actually loads and stores
+      LDS.
+    * A nonzero `site_id` marks an access site as eligible for possible
+      coalescing. `site_id{0}` means exact logging only.
+    * Coalescing is allowed only when the detector proves a regularity pattern
+      for records sharing epoch, subgroup, access kind, byte size, and site id.
+      Candidate patterns include contiguous, fixed-stride, and eventually
+      tile-shaped thread-to-address mappings.
+    * If a static site executes multiple dynamic instances in one epoch, leave
+      it uncoalesced for that epoch. This keeps the initial model safe without
+      solving dynamic instance identity.
+    * The first implementation should only record site ids and optionally report
+      coalescing opportunities; hot-path compression can come later.
 
 ## Plan beyond the MVP
 
@@ -1232,10 +1278,9 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 * Add matmul-shaped cross-subgroup conflicts, because this is the main bridge to
   the future assembly-level effort. Done for the first non-WMMA subgroup-level
   slice.
-* Later, consider subgroup-representative logging only as a separate explicit
-  API for cooperative tile or fragment operations whose byte ranges can be
-  summarized. Do not make it the default interpretation of `lds_load` or
-  `lds_store`.
+* Later, consider automatic coalescing of records from regular access sites.
+  This should be keyed by explicit nonzero `site_id` values but should not
+  require a separate user-facing summary API.
 
 ### Step 4: Real-kernel LDS coverage under both modes
 
