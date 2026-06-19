@@ -224,6 +224,7 @@ namespace
                               static_cast<_Float16>(2.0f));
             }
         }
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

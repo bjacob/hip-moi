@@ -144,7 +144,7 @@ fixed-stride lane patterns summarize, repeated lanes are rejected, and
 independent subgroups produce separate summaries.
 
 `023_subgroup_level_coalesced_conflict_test.hip` starts using subgroup-level
-coalesced summaries in conflict detection. It checks summary-vs-summary
-diagnostics, summary-vs-exact diagnostics, read/read silence, disjoint
-summaries, and fixed-stride gaps that overlap in span but not in represented
-per-lane byte ranges.
+coalesced summaries in deferred epoch-close conflict detection. It checks
+summary-vs-summary diagnostics, summary-vs-exact diagnostics, read/read
+silence, disjoint summaries, and fixed-stride gaps that overlap in span but not
+in represented per-lane byte ranges.

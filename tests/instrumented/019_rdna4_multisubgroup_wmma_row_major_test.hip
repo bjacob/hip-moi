@@ -293,6 +293,7 @@ namespace
     {
         hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
         run_cross_subgroup_missing_barrier_body(ctx, a_global, b_global);
+        ctx.finish();
     }
 
     void fill_row_major_inputs(_Float16* a, _Float16* b)

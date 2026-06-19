@@ -147,6 +147,7 @@ namespace
         {
             ctx.lds_store(&value, 20);
         }
+        ctx.finish();
     }
 
     __global__ void overlapping_subobject_write_write_subgroup_level_kernel(
@@ -166,6 +167,7 @@ namespace
         {
             ctx.lds_store(&value.second, 30);
         }
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

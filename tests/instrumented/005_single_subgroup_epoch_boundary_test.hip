@@ -166,6 +166,7 @@ namespace
         {
             (void)ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     __global__ void same_epoch_conflict_after_barrier_subgroup_level_kernel(
@@ -192,6 +193,7 @@ namespace
         {
             (void)ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

@@ -122,6 +122,7 @@ namespace
         {
             (void)ctx.lds_load(&value, HIP_MOI_SITE_ID());
         }
+        ctx.finish();
     }
 
     template <typename Storage, typename Observed>

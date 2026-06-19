@@ -114,6 +114,7 @@ namespace
         {
             out[0] = ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     __global__ void subgroup_level_cross_subgroup_race_kernel(
@@ -132,6 +133,7 @@ namespace
         {
             out[0] = ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     void require_hip_success(hipError_t status, const char* expression)

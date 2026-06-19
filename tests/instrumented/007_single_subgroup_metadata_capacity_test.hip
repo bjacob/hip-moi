@@ -82,6 +82,7 @@ namespace
 
         int neighbor = (tid + 1) % kThreadCount;
         (void)ctx.lds_load(&values[neighbor]);
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

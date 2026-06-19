@@ -196,6 +196,7 @@ namespace
         int out_row = tid / 4;
         int out_col = tid - 4 * out_row;
         (void)ctx.lds_load(&tile[out_col][out_row]);
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

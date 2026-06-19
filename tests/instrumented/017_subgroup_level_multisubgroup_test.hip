@@ -75,6 +75,7 @@ namespace
         {
             out[subgroup] = ctx.lds_load(&values[subgroup]);
         }
+        ctx.finish();
     }
 
     __global__ void cross_subgroup_array_overlap_kernel(
@@ -101,6 +102,7 @@ namespace
         {
             (void)ctx.lds_load(&values[1]);
         }
+        ctx.finish();
     }
 
     __global__ void cross_subgroup_array_separated_kernel(
@@ -130,6 +132,7 @@ namespace
         {
             out[1] = ctx.lds_load(&values[1]);
         }
+        ctx.finish();
     }
 
     __global__ void looped_cross_subgroup_conflict_kernel(
@@ -176,6 +179,7 @@ namespace
         {
             out[subgroup * kTileCols + rank] = ctx.lds_load(&tile[subgroup][rank]);
         }
+        ctx.finish();
     }
 
     __global__ void tiled_cross_subgroup_row_collision_kernel(
@@ -196,6 +200,7 @@ namespace
         {
             (void)ctx.lds_load(&row[rank]);
         }
+        ctx.finish();
     }
 
     __global__ void matmul_shape_cooperative_tile_kernel(
@@ -235,6 +240,7 @@ namespace
             }
             out[m * kMatmulN + n] = acc;
         }
+        ctx.finish();
     }
 
     __global__ void matmul_shape_missing_barrier_kernel(
@@ -270,6 +276,7 @@ namespace
                 (void)ctx.lds_load(&b_tile[k][n]);
             }
         }
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::subgroup_level_device_context_storage& storage,

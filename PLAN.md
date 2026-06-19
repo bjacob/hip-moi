@@ -100,7 +100,11 @@ foundation:
   `syncthreads()` executes a real barrier while advancing epoch slots. Detector
   metadata initialization and epoch increments use detector-internal device
   fences before releasing the workgroup so global-memory metadata is visible to
-  the participating threads.
+  the participating threads. `subgroup_level_context` now checks conflicts at
+  epoch close instead of scanning prior records on every access: `lds_load<T>`
+  and `lds_store<T>` append exact records, `ctx.syncthreads()` closes the
+  just-ended epoch, and a final uniform `ctx.finish()`/`ctx.close_epoch()` is
+  available for kernels whose last epoch is not followed by another barrier.
 * Instrumented tests that are intentionally limited to a one-subgroup workgroup
   now use `single_subgroup` near the start of the file name.
   Diagnostic-positive single-subgroup race tests have subgroup-level companion
@@ -186,7 +190,8 @@ foundation:
   `subgroup-level` coverage. It uses `subgroup_level_context` as a separate
   type, uses subgroup-specific access records and diagnostics, reports
   cross-subgroup same-epoch conflicts, and intentionally ignores same-subgroup
-  conflicts.
+  conflicts. It also verifies that subgroup-level conflicts are deferred until
+  `ctx.finish()` when there is no intervening `ctx.syncthreads()`.
 * `tests/instrumented/017_subgroup_level_multisubgroup_test.hip` broadens
   `subgroup-level` coverage to a 128-thread, four-subgroup workgroup. It covers
   independent subgroup LDS slots, cross-subgroup array conflicts, barriers that
@@ -253,8 +258,12 @@ foundation:
   subgroup-level proof-log pass now exists: nonzero-site subgroup accesses can
   write optional lane/address proof records, and `ctx.syncthreads()` summarizes
   proven contiguous or fixed-stride lane-to-address patterns. Subgroup-level
-  coalesced summaries now drive an epoch-close conflict pass, while thread-level
-  summaries remain opportunity metadata and neither mode has hot-path
+  conflict detection is now deferred to epoch close: newly emitted summaries are
+  compared with other summaries and with unsummarized exact records, then
+  remaining unsummarized exact records are compared with each other. Covered
+  exact records are skipped in that pass, so subgroup-level coalescing now
+  suppresses redundant exact pairwise work for summarized sites. Thread-level
+  summaries remain opportunity metadata, and neither mode has hot-path access
   compression yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
@@ -265,10 +274,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, decide whether subgroup-level coalesced
-summaries should remain an additional diagnostic layer or start replacing some
-redundant exact pairwise scans, and start recording lowering notes for
-`ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, improve the subgroup-level coalescing proof pass
+so it spends less epoch-close work finding summaries, and start recording
+lowering notes for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -842,19 +850,35 @@ On every `lds_load<T>` or `lds_store<T>`:
 2. Record the new access in the active epoch, including `site_id.value()`.
 3. Perform the real load or store.
 
-Conflict checking may happen immediately or be deferred. The preferred MVP
-direction is deferred checking from per-thread access logs, so the common access
-path does not need detector-created cross-thread synchronization. Whenever
-checking runs in `thread-level` mode, if byte ranges overlap, thread ids
-differ, and either access is a write, record a diagnostic. In `subgroup-level`
-mode, the corresponding predicate uses subgroup ids instead of thread ids and
-ignores same-subgroup conflicts by contract.
+Conflict checking is mode-specific. `thread-level` mode currently checks the
+new exact record against prior exact records immediately. `subgroup-level` mode
+defers conflict checking until epoch close, so the common access path only
+publishes exact records and optional nonzero-site proof records. Whenever
+checking runs in `thread-level` mode, if byte ranges overlap, thread ids differ,
+and either access is a write, record a diagnostic. In `subgroup-level` mode, the
+corresponding predicate uses subgroup ids instead of thread ids and ignores
+same-subgroup conflicts by contract.
 
-On `ctx.syncthreads()`:
+On `ctx.syncthreads()` in `subgroup-level` mode:
 
 1. Execute the real full-workgroup synchronization.
-2. Check the epoch that just ended for conflicts, or preserve enough records to
-   check it later.
+2. Summarize nonzero-site proof records for the epoch that just ended.
+3. Check newly emitted summaries against other summaries and unsummarized exact
+   records.
+4. Check remaining unsummarized exact records against each other.
+5. Advance the epoch.
+6. Clear or logically invalidate access/proof records from the previous epoch.
+7. Ensure detector metadata updates are complete before returning, using
+   detector-internal synchronization if needed.
+
+`ctx.finish()`/`ctx.close_epoch()` performs the same subgroup-level epoch-close
+work for a final epoch that is not followed by another real user barrier. It
+must be called uniformly by all threads in the workgroup.
+
+On `ctx.syncthreads()` in `thread-level` mode:
+
+1. Execute the real full-workgroup synchronization.
+2. Emit coalescing-opportunity summaries for nonzero-site exact records.
 3. Advance the epoch.
 4. Clear or logically invalidate access records from the previous epoch.
 5. Ensure detector metadata updates are complete before returning, using
@@ -898,7 +922,7 @@ Preferred implementation direction:
   detector-internal bookkeeping only. Use the weakest ordering sufficient for
   detector correctness.
 
-Current fallback/debug implementation:
+Current `thread-level` fallback/debug implementation:
 
 1. Atomically reserve an access-record slot.
 2. Publish the access record with a valid bit.
@@ -906,9 +930,19 @@ Current fallback/debug implementation:
 4. Atomically reserve diagnostic slots for any conflicts.
 5. Perform the user's real LDS load or store.
 
-This fallback may perturb scheduling and may introduce extra ordering in the
-instrumented executable, but diagnostics must still be computed from the shadow
-model that ignores detector-created happens-before edges.
+Current `subgroup-level` implementation:
+
+1. Atomically reserve an exact access-record slot.
+2. Publish the compact subgroup-level access record with a valid bit.
+3. For nonzero-site accesses with proof storage, publish one optional proof
+   record carrying lane and address.
+4. Perform the user's real LDS load or store.
+5. At epoch close, check summaries and unsummarized exact records for
+   cross-subgroup conflicts.
+
+These implementations may perturb scheduling and may introduce extra ordering
+in the instrumented executable, but diagnostics must still be computed from the
+shadow model that ignores detector-created happens-before edges.
 
 This intentionally diagnoses unordered same-epoch conflicting accesses based on
 the program order expressed through hip-moi calls, not on a particular hardware
@@ -1246,8 +1280,16 @@ Incremental instrumented test growth:
     changing the hot access-log path. Done: summaries are compared against other
     summaries and against unsummarized exact records at epoch close.
 30. Decide whether coalesced summaries should start driving actual access-log
-    compression or exact-scan suppression. Do this separately for thread-level
-    and subgroup-level modes, since their proof paths differ.
+    compression or exact-scan suppression. Done for the subgroup-level exact
+    scan: conflict detection is deferred to epoch close, and exact records
+    covered by a new coalesced summary are skipped by the fallback exact-record
+    pairwise pass. Thread-level remains immediate/exact for now, and neither
+    mode compresses the hot access log yet.
+31. Optimize subgroup-level summary construction. The current proof builder is
+    deliberately simple and may spend too much epoch-close work grouping proof
+    records; the next optimization target is making summary construction closer
+    to linear in proof-log size for the simple all-lane contiguous/fixed-stride
+    patterns we care about first.
 
 Layer 1: toy deterministic kernels.
 
@@ -1373,9 +1415,10 @@ library teaches us the right subgroup abstractions.
       epoch boundaries in a separate summary buffer. Done.
     * Subgroup-level proof metadata and summary-based conflict detection now
       exist. Done.
-    * Hot-path compression can come later, after summary diagnostics have been
-      useful in tests and after we decide which exact pairwise scans can be
-      safely skipped.
+    * Subgroup-level exact pairwise work is now skipped for exact records covered
+      by a coalesced summary. Done.
+    * Hot-path compression can come later, after summary construction itself is
+      efficient enough to be a credible optimization.
 
 ## Plan beyond the MVP
 

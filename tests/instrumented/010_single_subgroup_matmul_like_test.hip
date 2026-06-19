@@ -268,6 +268,7 @@ namespace
             int b = ctx.lds_load(&b_shared);
             (void)(a * b);
         }
+        ctx.finish();
     }
 
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,

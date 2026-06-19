@@ -294,6 +294,7 @@ namespace
             ctx.lds_store(&b_shared[0], b_global[matmul_b_offset<1, 2>(1, 0, 0)]);
             ctx.lds_store(&b_shared[1], b_global[matmul_b_offset<1, 2>(1, 0, 1)]);
         }
+        ctx.finish();
     }
 
     __global__ void partial_a_tile_overwrite_without_barrier_kernel(

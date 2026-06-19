@@ -81,9 +81,11 @@ that pass observes that every site id is zero and emits no summaries. The
 per-access behavior remains exact logging; the extra work is an epoch-boundary
 scan, performed by one thread, over the exact records in that epoch.
 
-Subgroup-level mode behaves similarly when no access opts in: no proof records
-are written, no summaries are emitted, and the summary-conflict pass has no
-summary records to compare.
+Subgroup-level mode does not perform pairwise conflict checks on every access.
+It records exact accesses on the hot path, then checks the just-ended epoch at
+`ctx.syncthreads()` or at a final uniform `ctx.finish()`. When no access opts
+in, no proof records are written and no summaries are emitted, so the
+epoch-close pass falls back to exact-record conflict detection for that epoch.
 
 Users who provide their own `storage_ref` may leave the coalesced summary
 buffer pointers null. In that case the summary pass returns immediately, and no
@@ -111,13 +113,14 @@ Today, opting in therefore costs:
 * one coalesced summary record for each proven regular site, if summary storage
   has capacity,
 * in subgroup-level mode, an epoch-boundary conflict pass over the summaries
-  produced for that epoch.
+  produced for that epoch plus exact records that were not covered by a summary.
 
 The current implementation does not yet reduce the hot-path access-log traffic:
 exact records are still recorded first. For subgroup-level mode, coalescing is
-now more than metadata because proven summaries can emit diagnostics, but it is
-not yet a performance feature users should rely on to reduce instrumentation
-overhead.
+now more than metadata because proven summaries replace their covered exact
+records in the epoch-close conflict pass. That is the first practical
+optimization step, but it is not yet enough to make coalescing a performance
+feature users should rely on for large kernels.
 
 ## Representation
 
@@ -192,9 +195,13 @@ change diagnostics.
 
 Subgroup-level conflict detection has two layers:
 
-* the original exact-record scan still runs when each access is recorded;
-* at `ctx.syncthreads()`, summaries produced for the closing epoch are compared
-  with each other and with exact records that were not themselves summarized.
+* on every access, hip-moi appends an exact access record and, for opted-in
+  sites with proof storage, an optional proof record;
+* at `ctx.syncthreads()` or a final uniform `ctx.finish()`, summaries produced
+  for the closing epoch are compared with each other and with exact records
+  that were not themselves summarized;
+* exact records that are not covered by any new summary are compared with each
+  other as the fallback path.
 
 The summary overlap check uses the represented per-lane byte ranges, not merely
 the enclosing `span_byte_count`. This matters for fixed-stride patterns with
@@ -206,6 +213,10 @@ diagnostic still uses `kind=access_conflict`. The address and size fields on a
 coalesced side describe the summary's first address and enclosing span. For a
 summary-vs-exact diagnostic, the exact side keeps the exact access address and
 byte size.
+
+Because subgroup-level checking is epoch-close based, kernels whose final epoch
+contains accesses of interest should call `ctx.finish()` uniformly before
+returning unless a trailing `ctx.syncthreads()` already closed that epoch.
 
 ## Patterns Detected Today
 

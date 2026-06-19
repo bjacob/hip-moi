@@ -74,6 +74,7 @@ namespace
         {
             out[0] = ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 } // namespace
 

@@ -222,28 +222,20 @@ namespace hip_moi
         __device__ void syncthreads()
         {
             __syncthreads();
-            if(thread_id() == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
-            {
-                int exact_scan_limit        = current_epoch_access_scan_limit();
-                int first_new_summary_index = current_coalesced_access_scan_limit();
-                collect_coalesced_access_records();
-                emit_coalesced_conflicts(first_new_summary_index, exact_scan_limit);
-                if(storage_.epoch_access_count)
-                {
-                    *storage_.epoch_access_count = 0;
-                }
-                if(storage_.epoch_coalescing_proof_count)
-                {
-                    *storage_.epoch_coalescing_proof_count = 0;
-                }
-                int subgroup_count = detail::stored_subgroup_count(storage_, cfg_);
-                for(int i = 0; i < subgroup_count; ++i)
-                {
-                    ++storage_.subgroup_states[i].epoch;
-                }
-                __threadfence();
-            }
+            close_current_epoch(/*advance_epochs=*/true);
             __syncthreads();
+        }
+
+        __device__ void close_epoch()
+        {
+            __syncthreads();
+            close_current_epoch(/*advance_epochs=*/true);
+            __syncthreads();
+        }
+
+        __device__ void finish()
+        {
+            close_epoch();
         }
 
         __device__ bool has_error() const
@@ -362,24 +354,6 @@ namespace hip_moi
                 storage_.access_records[record_index].valid = 1;
                 __threadfence();
                 record_coalescing_proof(record);
-            }
-
-            int scan_limit = atomicAdd(storage_.epoch_access_count, 0);
-            if(scan_limit > storage_.access_record_capacity)
-            {
-                scan_limit = storage_.access_record_capacity;
-            }
-            for(int i = 0; i < scan_limit; ++i)
-            {
-                if(i == record_index)
-                {
-                    continue;
-                }
-                access_record prior = storage_.access_records[i];
-                if(conflicts_with(prior, record))
-                {
-                    emit_conflict(prior, record);
-                }
             }
 
             if(record_index >= storage_.access_record_capacity)
@@ -804,50 +778,103 @@ namespace hip_moi
             return false;
         }
 
-        __device__ void emit_coalesced_conflicts(int first_summary_index,
-                                                 int exact_scan_limit) const
+        __device__ void emit_deferred_conflicts(int first_summary_index, int exact_scan_limit) const
         {
-            if(!storage_.coalesced_access_records || first_summary_index < 0)
+            int summary_scan_limit = current_coalesced_access_scan_limit();
+            if(storage_.coalesced_access_records && first_summary_index >= 0)
+            {
+                for(int i = first_summary_index; i < summary_scan_limit; ++i)
+                {
+                    coalesced_access_record first = storage_.coalesced_access_records[i];
+                    if(!first.valid)
+                    {
+                        continue;
+                    }
+
+                    for(int j = i + 1; j < summary_scan_limit; ++j)
+                    {
+                        coalesced_access_record second = storage_.coalesced_access_records[j];
+                        if(coalesced_conflicts_with(first, second))
+                        {
+                            emit_conflict(first, second);
+                        }
+                    }
+
+                    if(!storage_.access_records)
+                    {
+                        continue;
+                    }
+
+                    for(int j = 0; j < exact_scan_limit; ++j)
+                    {
+                        access_record exact = storage_.access_records[j];
+                        if(exact_record_has_coalesced_summary(
+                               exact, first_summary_index, summary_scan_limit))
+                        {
+                            continue;
+                        }
+                        if(coalesced_conflicts_with(first, exact))
+                        {
+                            emit_conflict(first, exact);
+                        }
+                    }
+                }
+            }
+
+            if(!storage_.access_records)
             {
                 return;
             }
 
-            int summary_scan_limit = current_coalesced_access_scan_limit();
-            for(int i = first_summary_index; i < summary_scan_limit; ++i)
+            for(int i = 0; i < exact_scan_limit; ++i)
             {
-                coalesced_access_record first = storage_.coalesced_access_records[i];
-                if(!first.valid)
+                access_record first = storage_.access_records[i];
+                if(exact_record_has_coalesced_summary(
+                       first, first_summary_index, summary_scan_limit))
                 {
                     continue;
                 }
-
-                for(int j = i + 1; j < summary_scan_limit; ++j)
+                for(int j = i + 1; j < exact_scan_limit; ++j)
                 {
-                    coalesced_access_record second = storage_.coalesced_access_records[j];
-                    if(coalesced_conflicts_with(first, second))
+                    access_record second = storage_.access_records[j];
+                    if(exact_record_has_coalesced_summary(
+                           second, first_summary_index, summary_scan_limit))
+                    {
+                        continue;
+                    }
+                    if(conflicts_with(first, second))
                     {
                         emit_conflict(first, second);
                     }
                 }
+            }
+        }
 
-                if(!storage_.access_records)
+        __device__ void close_current_epoch(bool advance_epochs) const
+        {
+            if(thread_id() == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
+            {
+                int exact_scan_limit        = current_epoch_access_scan_limit();
+                int first_new_summary_index = current_coalesced_access_scan_limit();
+                collect_coalesced_access_records();
+                emit_deferred_conflicts(first_new_summary_index, exact_scan_limit);
+                if(storage_.epoch_access_count)
                 {
-                    continue;
+                    *storage_.epoch_access_count = 0;
                 }
-
-                for(int j = 0; j < exact_scan_limit; ++j)
+                if(storage_.epoch_coalescing_proof_count)
                 {
-                    access_record exact = storage_.access_records[j];
-                    if(exact_record_has_coalesced_summary(
-                           exact, first_summary_index, summary_scan_limit))
+                    *storage_.epoch_coalescing_proof_count = 0;
+                }
+                if(advance_epochs)
+                {
+                    int subgroup_count = detail::stored_subgroup_count(storage_, cfg_);
+                    for(int i = 0; i < subgroup_count; ++i)
                     {
-                        continue;
-                    }
-                    if(coalesced_conflicts_with(first, exact))
-                    {
-                        emit_conflict(first, exact);
+                        ++storage_.subgroup_states[i].epoch;
                     }
                 }
+                __threadfence();
             }
         }
 

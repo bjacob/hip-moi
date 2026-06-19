@@ -87,6 +87,7 @@ namespace
         {
             (void)ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     __global__ void same_subgroup_same_epoch_thread_level_kernel(
@@ -123,6 +124,7 @@ namespace
         {
             (void)ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 
     __global__ void cross_subgroup_separated_by_syncthreads_kernel(
@@ -143,6 +145,36 @@ namespace
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
             (void)ctx.lds_load(&value);
+        }
+        ctx.finish();
+    }
+
+    __global__ void cross_subgroup_deferred_until_finish_kernel(
+        uint32_t* out, hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        ctx.init_workgroup();
+
+        if(ctx.thread_id() == 0)
+        {
+            ctx.lds_store(&value, 17);
+        }
+        if(ctx.thread_id() == kThreadsPerSubgroup)
+        {
+            (void)ctx.lds_load(&value);
+        }
+        if(ctx.thread_id() == 0)
+        {
+            out[0] = static_cast<uint32_t>(ctx.error_count());
+        }
+
+        ctx.finish();
+
+        if(ctx.thread_id() == 0)
+        {
+            out[1] = static_cast<uint32_t>(ctx.error_count());
         }
     }
 
@@ -373,6 +405,44 @@ namespace
             observed, /*expected_access_count=*/2, /*first_subgroup=*/0,
             /*second_subgroup=*/1);
         expect_accesses_from_subgroups(observed, /*first_subgroup=*/0, /*second_subgroup=*/1);
+    }
+
+    TEST(HipMoiSubgroupLevelBootstrap, CrossSubgroupConflictIsDeferredUntilFinish)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/kAccessCapacity,
+            /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/kSubgroupCount));
+
+        uint32_t* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 2 * sizeof(uint32_t)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMemset(device_output, 0, 2 * sizeof(uint32_t)));
+
+        hipLaunchKernelGGL(cross_subgroup_deferred_until_finish_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           device_output,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        uint32_t output[2] = {};
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+        EXPECT_EQ(output[0], 0u);
+        EXPECT_GT(output[1], 0u);
+
+        observed_subgroup_level_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
+        expect_conflict_between_subgroups(observed,
+                                          /*expected_access_count=*/2,
+                                          /*first_subgroup=*/0,
+                                          /*second_subgroup=*/1);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
     TEST(HipMoiSubgroupLevelBootstrap, CrossSubgroupSyncthreadsSeparationDoesNotReport)

@@ -258,8 +258,15 @@ __global__ void cross_subgroup_race_kernel(
     {
         out[0] = ctx.lds_load(&value);
     }
+    ctx.finish();
 }
 ```
+
+`subgroup_level_context` performs conflict detection at epoch close. A
+`ctx.syncthreads()` closes the epoch before advancing past a real workgroup
+barrier. When the interesting final epoch is not followed by another barrier,
+call `ctx.finish()` uniformly before the kernel returns so hip-moi can check
+that final epoch.
 
 The host uses `hip_moi::subgroup_level_host_context`:
 
