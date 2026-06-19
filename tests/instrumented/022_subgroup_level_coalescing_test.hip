@@ -26,6 +26,7 @@ namespace
     constexpr hip_moi::site_id kRepeatedSite(0x203u);
     constexpr hip_moi::site_id kIrregularSite(0x204u);
     constexpr hip_moi::site_id kTwoSubgroupSite(0x205u);
+    constexpr hip_moi::site_id kDescendingSite(0x206u);
 
     struct observed_metadata
     {
@@ -137,6 +138,21 @@ namespace
         int lane     = static_cast<int>(ctx.lane_in_subgroup());
         int subgroup = static_cast<int>(ctx.subgroup_id());
         ctx.lds_store(&values[subgroup * kThreadsPerSubgroup + lane], lane, kTwoSubgroupSite);
+        ctx.syncthreads();
+    }
+
+    __global__ void descending_site_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadsPerSubgroup];
+
+        hip_moi::subgroup_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        int lane = static_cast<int>(ctx.lane_in_subgroup());
+        if(ctx.subgroup_id() == 0)
+        {
+            ctx.lds_store(&values[kThreadsPerSubgroup - 1 - lane], lane, kDescendingSite);
+        }
         ctx.syncthreads();
     }
 
@@ -306,6 +322,20 @@ namespace
                         /*expected_stride=*/static_cast<int64_t>(2 * sizeof(int)),
                         /*expected_span=*/
                         static_cast<uint32_t>((2 * (kThreadsPerSubgroup - 1) + 1) * sizeof(int))));
+    }
+
+    TEST(HipMoiSubgroupLevelCoalescing, DescendingLanePatternProducesSummary)
+    {
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(descending_site_kernel, &observed));
+
+        EXPECT_EQ(observed.coalesced_access_count, 1);
+        EXPECT_TRUE(has_summary(observed,
+                                kDescendingSite,
+                                /*expected_subgroup=*/0,
+                                /*expected_stride=*/-static_cast<int64_t>(sizeof(int)),
+                                /*expected_span=*/
+                                static_cast<uint32_t>(kThreadsPerSubgroup * sizeof(int))));
     }
 
     TEST(HipMoiSubgroupLevelCoalescing, RepeatedLaneSiteStaysExactOnly)

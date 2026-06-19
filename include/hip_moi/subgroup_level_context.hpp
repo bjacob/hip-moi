@@ -418,37 +418,18 @@ namespace hip_moi
             return false;
         }
 
-        __device__ bool find_record_for_lane(const coalescing_proof_record& key,
-                                             int                            scan_limit,
-                                             uint32_t                       lane,
-                                             coalescing_proof_record*       record) const
-        {
-            bool found = false;
-            for(int i = 0; i < scan_limit; ++i)
-            {
-                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
-                if(same_coalescing_key(candidate, key) && candidate.lane == lane)
-                {
-                    if(found)
-                    {
-                        return false;
-                    }
-                    *record = candidate;
-                    found   = true;
-                }
-            }
-            return found;
-        }
-
         __device__ bool build_coalesced_access_record(const coalescing_proof_record& key,
                                                       int                            scan_limit,
                                                       coalesced_access_record*       result) const
         {
-            uint32_t min_lane           = key.lane;
-            uint32_t max_lane           = key.lane;
-            int      count              = 0;
-            uint64_t lane_mask          = 0;
-            uint64_t repeated_lane_mask = 0;
+            uint32_t                min_lane           = 0;
+            uint32_t                max_lane           = 0;
+            int                     count              = 0;
+            uint64_t                lane_mask          = 0;
+            uint64_t                repeated_lane_mask = 0;
+            bool                    found              = false;
+            coalescing_proof_record first_lane_record{};
+            coalescing_proof_record last_lane_record{};
 
             for(int i = 0; i < scan_limit; ++i)
             {
@@ -473,14 +454,17 @@ namespace hip_moi
                 }
 
                 ++count;
-                if(candidate.lane < min_lane)
+                if(!found || candidate.lane < min_lane)
                 {
-                    min_lane = candidate.lane;
+                    min_lane          = candidate.lane;
+                    first_lane_record = candidate;
                 }
-                if(candidate.lane > max_lane)
+                if(!found || candidate.lane > max_lane)
                 {
-                    max_lane = candidate.lane;
+                    max_lane         = candidate.lane;
+                    last_lane_record = candidate;
                 }
+                found = true;
             }
 
             if(count < 2 || repeated_lane_mask != 0)
@@ -497,14 +481,6 @@ namespace hip_moi
             uint64_t expected_mask
                 = lane_span == 64 ? UINT64_MAX : ((1ull << lane_span) - 1ull) << min_lane;
             if(lane_mask != expected_mask)
-            {
-                return false;
-            }
-
-            coalescing_proof_record first_lane_record{};
-            coalescing_proof_record last_lane_record{};
-            if(!find_record_for_lane(key, scan_limit, min_lane, &first_lane_record)
-               || !find_record_for_lane(key, scan_limit, max_lane, &last_lane_record))
             {
                 return false;
             }
@@ -532,17 +508,23 @@ namespace hip_moi
                 return false;
             }
 
-            for(uint32_t offset = 0; offset < lane_span; ++offset)
+            for(int i = 0; i < scan_limit; ++i)
             {
-                uint32_t                lane = min_lane + offset;
-                coalescing_proof_record candidate{};
-                if(!find_record_for_lane(key, scan_limit, lane, &candidate))
+                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
+                if(!same_coalescing_key(candidate, key))
+                {
+                    continue;
+                }
+
+                uint32_t lane_offset = candidate.lane - min_lane;
+                if(lane_offset != 0
+                   && static_cast<uint64_t>(stride_magnitude)
+                          > UINT64_MAX / static_cast<uint64_t>(lane_offset))
                 {
                     return false;
                 }
-
                 uint64_t step
-                    = static_cast<uint64_t>(offset) * static_cast<uint64_t>(stride_magnitude);
+                    = static_cast<uint64_t>(lane_offset) * static_cast<uint64_t>(stride_magnitude);
                 uintptr_t expected_address = first_lane_record.address;
                 if(address_stride >= 0)
                 {

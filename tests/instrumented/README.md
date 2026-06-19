@@ -140,8 +140,9 @@ patterns remain exact-only.
 `022_subgroup_level_coalescing_test.hip` covers subgroup-level coalescing proof
 logs and summaries. It verifies that default site ids do not write proof
 records, opted-in sites write one proof record per lane, contiguous and
-fixed-stride lane patterns summarize, repeated lanes are rejected, and
-independent subgroups produce separate summaries.
+fixed-stride lane patterns summarize in both increasing and decreasing address
+order, repeated lanes are rejected, and independent subgroups produce separate
+summaries.
 
 `023_subgroup_level_coalesced_conflict_test.hip` starts using subgroup-level
 coalesced summaries in deferred epoch-close conflict detection. It checks

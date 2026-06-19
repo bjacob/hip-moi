@@ -102,6 +102,10 @@ In subgroup-level mode, an opted-in access also writes a separate proof record
 when proof storage is supplied. That proof record carries the access address and
 the thread's lane within the subgroup. The subgroup-level diagnostic
 `access_record` stays compact and does not grow a lane or thread-id field.
+At epoch close, each candidate subgroup/site/kind/size group is accumulated in
+one proof-log scan to build its lane masks and endpoint records, then validated
+in one additional scan for fixed-stride addresses. This avoids per-lane
+proof-log rescans for full-subgroup sites.
 
 Today, opting in therefore costs:
 
@@ -121,6 +125,10 @@ now more than metadata because proven summaries replace their covered exact
 records in the epoch-close conflict pass. That is the first practical
 optimization step, but it is not yet enough to make coalescing a performance
 feature users should rely on for large kernels.
+
+The remaining known cost is grouping across many distinct sites. Without an
+explicit grouping table or scratch buffer, hip-moi still discovers candidate
+groups by walking the proof log and skipping keys it has already summarized.
 
 ## Representation
 

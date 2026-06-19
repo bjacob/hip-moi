@@ -263,8 +263,10 @@ foundation:
   remaining unsummarized exact records are compared with each other. Covered
   exact records are skipped in that pass, so subgroup-level coalescing now
   suppresses redundant exact pairwise work for summarized sites. Thread-level
-  summaries remain opportunity metadata, and neither mode has hot-path access
-  compression yet.
+  summaries remain opportunity metadata. The subgroup-level proof builder now
+  avoids per-lane proof-log rescans for each candidate group by accumulating
+  lane masks and endpoints in one scan and validating the fixed-stride pattern
+  in one additional scan. Neither mode has hot-path access compression yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -274,9 +276,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, improve the subgroup-level coalescing proof pass
-so it spends less epoch-close work finding summaries, and start recording
-lowering notes for `ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, decide whether subgroup-level coalescing needs
+explicit epoch-close grouping scratch storage across many distinct sites, and
+start recording lowering notes for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -1287,9 +1289,15 @@ Incremental instrumented test growth:
     mode compresses the hot access log yet.
 31. Optimize subgroup-level summary construction. The current proof builder is
     deliberately simple and may spend too much epoch-close work grouping proof
-    records; the next optimization target is making summary construction closer
-    to linear in proof-log size for the simple all-lane contiguous/fixed-stride
-    patterns we care about first.
+    records. Done for the first per-group pass: one accumulation scan builds
+    lane masks and endpoint records, and one validation scan checks the
+    fixed-stride address relation, avoiding the previous per-lane proof-log
+    rescans for full-subgroup sites.
+32. Decide whether subgroup-level summary construction needs explicit
+    epoch-close grouping scratch storage. The remaining cost is across many
+    distinct sites: without a grouping table, the collector still walks prior
+    records to identify the first proof record for each key and then scans the
+    proof log per candidate group.
 
 Layer 1: toy deterministic kernels.
 
@@ -1417,8 +1425,10 @@ library teaches us the right subgroup abstractions.
       exist. Done.
     * Subgroup-level exact pairwise work is now skipped for exact records covered
       by a coalesced summary. Done.
-    * Hot-path compression can come later, after summary construction itself is
-      efficient enough to be a credible optimization.
+    * Subgroup-level summary construction now avoids per-lane proof-log rescans
+      within one candidate group. Done.
+    * Hot-path compression can come later, after summary construction across
+      many distinct sites is efficient enough to be a credible optimization.
 
 ## Plan beyond the MVP
 
