@@ -178,7 +178,7 @@ foundation:
 * `tests/instrumented/015_thread_level_subgroup_test.hip` starts
   multi-subgroup `thread-level` coverage. It uses a 64-thread workgroup split
   into two 32-thread subgroups, checks the `thread_level_context`
-  thread/subgroup/rank helpers, verifies subgroup ids recorded in access
+  thread/subgroup/lane helpers, verifies subgroup ids recorded in access
   records, and asserts same-subgroup and cross-subgroup same-epoch diagnostics.
 * `tests/instrumented/016_subgroup_level_bootstrap_test.hip` starts
   `subgroup-level` coverage. It uses `subgroup_level_context` as a separate
@@ -248,9 +248,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, continue the coalescing line by designing
-subgroup-level proof metadata, and start recording synchronization-lowering notes
-for `ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, continue the coalescing line by implementing
+lane-based subgroup-level proof logs, and start recording lowering notes for
+`ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -270,6 +270,10 @@ Use common HIP/AMDGPU terminology consistently:
   useful for future finer-grained epoch tracking. A subgroup may correspond to a
   wavefront in some modes, especially assembly-oriented modes, but the plan
   should say so explicitly when that is intended.
+* Lane: a thread's local position within a subgroup. When a modeled subgroup
+  corresponds to a wavefront, this is the usual AMDGPU lane concept. For now the
+  implementation computes it from `thread_id % threads_per_subgroup`; future
+  code should prefer names such as `lane_in_subgroup` over "rank".
 
 ### Memory-model ground rules
 
@@ -774,9 +778,40 @@ exact access log.
 
 `subgroup_level_context` already has separate summary storage in its public
 shape, but it does not yet produce summaries. Because subgroup-level hot records
-intentionally omit thread id, subgroup-level coalescing needs separate proof
-metadata, likely a compact participating-rank mask or equivalent, rather than
-reintroducing per-thread identity into the subgroup-level access record.
+intentionally omit thread id, subgroup-level coalescing needs a separate proof
+path rather than reintroducing per-thread identity into the subgroup-level
+access record. That preserves the "pay only for what you use" invariant:
+ordinary subgroup-level diagnostics keep compact subgroup-shaped access records,
+while nonzero-site accesses may optionally write lane-level proof records.
+
+The planned subgroup-level proof-log path:
+
+* Keep `subgroup_level_context::access_record` as diagnostic truth. It records
+  address, byte size, subgroup id, epoch, kind, validity, and site id, but not
+  thread id or lane.
+* Add a separate optional `coalescing_proof_record` log, used only when
+  `site_id != 0` and the caller supplied proof storage. A proof record stores
+  the same grouping key plus `lane` and address:
+  `(epoch, subgroup_id, site_id, kind, byte_count, lane, address)`.
+* Compute `lane` transiently in the executing thread from
+  `thread_id() % threads_per_subgroup` at first. This does not put thread id or
+  lane into the subgroup-level diagnostic record; it only populates optional
+  proof metadata for coalescing.
+* At `ctx.syncthreads()`, scan proof records by
+  `(epoch, subgroup_id, site_id, kind, byte_count)`. Build a `lane_mask` and a
+  `repeated_lane_mask` from those proof records. For 32- or 64-lane subgroups,
+  a `uint64_t` mask is enough; larger modeled subgroups can conservatively
+  disable coalescing until a multiword mask exists.
+* Emit a subgroup-level coalesced summary only when there is no repeated lane,
+  the lane mask is contiguous, and the addresses follow a fixed signed stride
+  over lane order with non-overlapping individual accesses.
+* Reset the epoch proof-log count at the same modeled epoch boundary as the
+  exact access log.
+
+This design keeps the layers separate: `access_record` is the exact diagnostic
+log, `coalescing_proof_record` is optional proof machinery, and
+`coalesced_access_record` is the compact summary emitted when the proof
+succeeds.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -1175,9 +1210,14 @@ Incremental instrumented test growth:
     summary-only slice: contiguous and fixed-stride nonzero-site patterns are
     summarized at epoch boundaries without changing exact diagnostics.
 27. Design subgroup-level coalescing proof metadata and only then consider
-    hot-path compression. The likely first proof artifact is a compact rank mask
-    per subgroup/site/epoch/kind, separate from the subgroup-level access
-    record so that the hot diagnostic record can keep omitting thread id.
+    hot-path compression. The first proof path should be a separate optional
+    proof log keyed by subgroup/epoch/site/kind/byte size and carrying lane plus
+    address. It should build `lane_mask` and `repeated_lane_mask` at epoch
+    boundaries, separate from the subgroup-level access record, so that the hot
+    diagnostic record can keep omitting thread id and lane.
+28. Add `lane_in_subgroup()` as the preferred helper name, migrate tests and
+    docs toward lane terminology, and keep the existing rank-named helper only
+    as a temporary compatibility spelling if needed.
 
 Layer 1: toy deterministic kernels.
 
@@ -1216,7 +1256,7 @@ The refined MVP is now defined less by diagnostic polish and more by whether the
 library teaches us the right subgroup abstractions.
 
 1. Make subgroup identity operational. Done for the first `thread-level` slice.
-   * Compute `subgroup_id` and thread rank within subgroup from runtime config.
+   * Compute `subgroup_id` and lane within subgroup from runtime config.
    * Support `subgroup_count > 1` in storage initialization and epoch state.
    * Keep `ctx.syncthreads()` as a full-workgroup operation initially, advancing
      all subgroup epochs together.
@@ -1316,7 +1356,7 @@ Allow a workgroup to contain multiple tracked subgroups without changing the
 HIP-language diagnostic contract.
 
 * Add multiple epoch counters per workgroup.
-* Compute subgroup id and thread rank within subgroup from `config`.
+* Compute subgroup id and lane within subgroup from `config`.
 * Preserve `thread-level` diagnostics within and across subgroups.
 * Treat `ctx.syncthreads()` as a full-workgroup epoch boundary that advances all
   subgroup epochs.
