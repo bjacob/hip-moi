@@ -39,6 +39,8 @@ foundation:
   fallback.
 * `HIP_MOI_CTEST_PER_CASE=ON` is the default, so CTest reports one entry per
   GTest case.
+* RDNA4 WMMA tests are registered only when the configured HIP offload
+  architectures are gfx12-family targets.
 * `docs/tutorial/` contains self-contained numbered HIP example programs, a
   README, and a CMake subtree that builds the examples and registers them as
   CTests. The tutorial CTests include both a passing synchronized example and
@@ -107,6 +109,15 @@ foundation:
 * `tests/instrumented/012_matmul_pipeline_test.hip` covers double-buffered and
   pipeline-like matmul LDS idioms: safe ping-pong buffering plus
   diagnostic-positive buffer reuse and partial tile overwrite cases.
+* `tests/instrumented/013_rdna4_wmma_row_major_test.hip` is a gfx12-gated real
+  RDNA4 WMMA smoke test using
+  `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, all 32 threads,
+  conventional row-major LDS tiles, single-buffer and double-buffer safe cases,
+  and a diagnostic-positive row overwrite.
+* `tests/instrumented/014_rdna4_wmma_data_tiled_test.hip` is the matching
+  gfx12-gated packed-layout test. It uses the same WMMA intrinsic, but each
+  thread's A/B fragment is a contiguous 16-byte LDS object at byte offset
+  `lane * 16`, with a diagnostic-positive neighbor-fragment overwrite.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -114,10 +125,10 @@ foundation:
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
-  tests, looped epoch tests, tiled LDS tests, simple matmul-like tests, and
-  pipeline-like matmul tests exist. Epoch-local access-log lifetime now exists.
-  Diagnostic quality work and low-overhead per-thread logs are still future
-  work.
+  tests, looped epoch tests, tiled LDS tests, simple matmul-like tests,
+  pipeline-like matmul tests, and RDNA4 WMMA row-major/data-tiled tests exist.
+  Epoch-local access-log lifetime now exists. Diagnostic quality work and
+  low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -654,6 +665,8 @@ tests/instrumented/
   010_matmul_like_test.hip
   011_epoch_log_lifetime_test.hip
   012_matmul_pipeline_test.hip
+  013_rdna4_wmma_row_major_test.hip
+  014_rdna4_wmma_data_tiled_test.hip
   test_support.hpp
 ```
 
@@ -680,6 +693,10 @@ and a scalar missing-barrier diagnostic.
 the active epoch rather than the cumulative kernel trace.
 `012_matmul_pipeline_test.hip` asserts double-buffered and pipeline-like matmul
 LDS patterns, including diagnostic-positive buffer reuse cases.
+`013_rdna4_wmma_row_major_test.hip` asserts RDNA4/gfx12 WMMA intrinsic coverage
+using all 32 threads and conventional row-major LDS tiles.
+`014_rdna4_wmma_data_tiled_test.hip` asserts the matching RDNA4/gfx12 WMMA
+coverage for packed fragments laid out at `lane * fragment_size` byte offsets.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -715,7 +732,9 @@ Incremental instrumented test growth:
     the log with obsolete epochs. Done.
 12. Add double-buffered and pipeline-like matmul LDS cases, including more
     diagnostic-positive matmul-shaped races. Done.
-13. Improve diagnostic quality with labels/source locations and first-conflict
+13. Add RDNA4-gated real WMMA tests for both conventional row-major LDS tiles
+    and data-tiled packed fragments. Done.
+14. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.
@@ -799,6 +818,8 @@ Broaden the corpus before broadening the memory model too much.
 * Cover vectorized LDS accesses.
 * Cover double-buffered LDS.
 * Cover repeated tile loops with multiple synchronization phases.
+* Keep RDNA4/gfx12-specific WMMA coverage split by input layout: conventional
+  row-major tiles and data-tiled packed fragments.
 * Keep atomics out of these tests until the atomic model exists.
 
 ### Step 2: Hard synchronization negative tests

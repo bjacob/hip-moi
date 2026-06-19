@@ -72,6 +72,13 @@ function(hip_moi_add_gtest name)
   endif()
 endfunction()
 
+set(_hip_moi_build_rdna4_tests TRUE)
+foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
+  if(NOT _hip_moi_arch MATCHES "^gfx12")
+    set(_hip_moi_build_rdna4_tests FALSE)
+  endif()
+endforeach()
+
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
 hip_moi_add_gtest(hip_moi_instrumented_safe_mvp_test
@@ -98,3 +105,9 @@ hip_moi_add_gtest(hip_moi_instrumented_epoch_log_lifetime_test
                   instrumented/011_epoch_log_lifetime_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_matmul_pipeline_test
                   instrumented/012_matmul_pipeline_test.hip)
+if(_hip_moi_build_rdna4_tests)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_row_major_test
+                    instrumented/013_rdna4_wmma_row_major_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_data_tiled_test
+                    instrumented/014_rdna4_wmma_data_tiled_test.hip)
+endif()

@@ -64,3 +64,13 @@ epoch rather than the whole kernel.
 `012_matmul_pipeline_test.hip` covers double-buffered and pipeline-like matmul
 LDS patterns, including safe ping-pong buffering and diagnostic-positive buffer
 reuse/partial-overwrite cases.
+
+`013_rdna4_wmma_row_major_test.hip` is gated to RDNA4/gfx12 targets. It uses a
+real `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12` intrinsic with all 32
+threads, conventional row-major LDS tiles, single-buffer and double-buffer safe
+cases, and a diagnostic-positive row overwrite.
+
+`014_rdna4_wmma_data_tiled_test.hip` is also gated to RDNA4/gfx12 targets. It
+uses the same intrinsic but with data-tiled packed LDS fragments, where each
+thread's matrix fragment is a contiguous 16-byte object at byte offset
+`lane * 16`, plus a diagnostic-positive neighbor-fragment overwrite.
