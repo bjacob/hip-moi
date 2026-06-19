@@ -124,7 +124,7 @@ namespace
         return 2 + tile_id + n + 3 * k;
     }
 
-    __host__ __device__ int matmul_expected_value(int tile_id, int m, int n, int k_size)
+    int reference_matmul_value(int tile_id, int m, int n, int k_size)
     {
         int acc = 0;
         for(int k = 0; k < k_size; ++k)
@@ -142,7 +142,7 @@ namespace
             for(int n = 0; n < NTile; ++n)
             {
                 expected[output_offset + n + NTile * m]
-                    = matmul_expected_value(tile_id, m, n, KTile);
+                    = reference_matmul_value(tile_id, m, n, KTile);
             }
         }
     }
@@ -230,7 +230,7 @@ namespace
                 int acc = 0;
                 for(int k_outer = 0; k_outer < KOuter; ++k_outer)
                 {
-                    acc += matmul_expected_value(k_outer, m, n, KTile);
+                    acc += reference_matmul_value(k_outer, m, n, KTile);
                 }
                 expected[n + NTile * m] = acc;
             }

@@ -56,6 +56,8 @@ unsynchronized transpose diagnostic case.
 
 `010_matmul_like_test.hip` covers small cooperative LDS matmul idioms: simple
 2x2 and 4x4 tiles, a chunked K loop, and a scalar missing-barrier diagnostic.
+The output-producing kernels consume explicit small integer input matrices and
+compare against a host-side reference matmul.
 
 `011_epoch_log_lifetime_test.hip` verifies that access-log storage is reused at
 epoch boundaries, so long synchronized loops can run with capacity sized for one
@@ -63,14 +65,19 @@ epoch rather than the whole kernel.
 
 `012_matmul_pipeline_test.hip` covers double-buffered and pipeline-like matmul
 LDS patterns, including safe ping-pong buffering and diagnostic-positive buffer
-reuse/partial-overwrite cases.
+reuse/partial-overwrite cases. Safe output cases use explicit small integer
+inputs and a host-side reference matmul oracle.
 
 `013_rdna4_wmma_row_major_test.hip` is gated to RDNA4/gfx12 targets. It uses a
 real `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12` intrinsic with all 32
 threads, conventional row-major LDS tiles, single-buffer and double-buffer safe
-cases, and a diagnostic-positive row overwrite.
+cases, and a diagnostic-positive row overwrite. Safe cases use non-uniform
+small integer-valued `_Float16` inputs that compare exactly against a host-side
+reference matmul.
 
 `014_rdna4_wmma_data_tiled_test.hip` is also gated to RDNA4/gfx12 targets. It
 uses the same intrinsic but with data-tiled packed LDS fragments, where each
 thread's matrix fragment is a contiguous 16-byte object at byte offset
-`lane * 16`, plus a diagnostic-positive neighbor-fragment overwrite.
+`lane * 16`, plus a diagnostic-positive neighbor-fragment overwrite. The packed
+fragments are generated from logical A/B tiles and checked against the same
+exact host-side reference matmul.

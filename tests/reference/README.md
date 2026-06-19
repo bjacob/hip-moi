@@ -44,9 +44,10 @@ The launched no-diagnostic corpus currently includes:
 * cooperative array cases where all or most threads participate,
 * looping cases that reuse LDS across many synchronization epochs,
 * 2D tiled and pseudorandomized LDS access patterns,
-* simple matmul-inspired kernels with cooperative LDS loads,
+* simple matmul-inspired kernels with cooperative LDS loads and host-side
+  reference matmul checks,
 * more involved matmul-inspired kernels with K loops, double buffering, skewed
-  LDS layouts, and multiple workgroups.
+  LDS layouts, multiple workgroups, and host-side reference matmul checks.
 
 The compile-only diagnostic-positive corpus currently includes:
 

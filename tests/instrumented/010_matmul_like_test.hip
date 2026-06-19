@@ -34,12 +34,54 @@ namespace
         return 2 + tile_id + n + 3 * k;
     }
 
-    __host__ __device__ int matmul_expected_value(int tile_id, int m, int n, int k_size)
+    template <int MTile, int KTile>
+    __host__ __device__ int matmul_a_offset(int tile_id, int m, int k)
+    {
+        return k + KTile * (m + MTile * tile_id);
+    }
+
+    template <int NTile, int KTile>
+    __host__ __device__ int matmul_b_offset(int tile_id, int n, int k)
+    {
+        return k + KTile * (n + NTile * tile_id);
+    }
+
+    template <int MTile, int NTile, int KTile>
+    void fill_matmul_inputs(int* a, int* b, int tile_count)
+    {
+        for(int tile_id = 0; tile_id < tile_count; ++tile_id)
+        {
+            for(int m = 0; m < MTile; ++m)
+            {
+                for(int k = 0; k < KTile; ++k)
+                {
+                    a[matmul_a_offset<MTile, KTile>(tile_id, m, k)]
+                        = matmul_a_value(tile_id, m, k);
+                }
+            }
+            for(int n = 0; n < NTile; ++n)
+            {
+                for(int k = 0; k < KTile; ++k)
+                {
+                    b[matmul_b_offset<NTile, KTile>(tile_id, n, k)]
+                        = matmul_b_value(tile_id, n, k);
+                }
+            }
+        }
+    }
+
+    template <int MTile, int NTile, int KTile>
+    int reference_matmul_value(
+        const int* a, const int* b, int tile_count, int m, int n)
     {
         int acc = 0;
-        for(int k = 0; k < k_size; ++k)
+        for(int tile_id = 0; tile_id < tile_count; ++tile_id)
         {
-            acc += matmul_a_value(tile_id, m, k) * matmul_b_value(tile_id, n, k);
+            for(int k = 0; k < KTile; ++k)
+            {
+                acc += a[matmul_a_offset<MTile, KTile>(tile_id, m, k)]
+                       * b[matmul_b_offset<NTile, KTile>(tile_id, n, k)];
+            }
         }
         return acc;
     }
@@ -55,21 +97,25 @@ namespace
     }
 
     template <int MTile, int NTile, int KTile>
-    __device__ void load_matmul_tile(
-        hip_moi::context& ctx, int* a_shared, int* b_shared, int tile_id)
+    __device__ void load_matmul_tile(hip_moi::context& ctx,
+                                     int*              a_shared,
+                                     int*              b_shared,
+                                     const int*        a_global,
+                                     const int*        b_global,
+                                     int               tile_id)
     {
         int tid = static_cast<int>(threadIdx.x);
         for(int idx = tid; idx < MTile * KTile; idx += kThreadCount)
         {
             int m = idx / KTile;
             int k = idx - KTile * m;
-            ctx.lds_store(&a_shared[idx], matmul_a_value(tile_id, m, k));
+            ctx.lds_store(&a_shared[idx], a_global[matmul_a_offset<MTile, KTile>(tile_id, m, k)]);
         }
         for(int idx = tid; idx < NTile * KTile; idx += kThreadCount)
         {
             int n = idx / KTile;
             int k = idx - KTile * n;
-            ctx.lds_store(&b_shared[idx], matmul_b_value(tile_id, n, k));
+            ctx.lds_store(&b_shared[idx], b_global[matmul_b_offset<NTile, KTile>(tile_id, n, k)]);
         }
     }
 
@@ -89,10 +135,17 @@ namespace
 
     template <int MTile, int NTile, int KTile>
     __device__ void run_simple_matmul_body(
-        hip_moi::context& ctx, int* out, int tile_id, int* a_shared, int* b_shared)
+        hip_moi::context& ctx,
+        const int*        a_global,
+        const int*        b_global,
+        int*              out,
+        int               tile_id,
+        int*              a_shared,
+        int*              b_shared)
     {
         int tid = static_cast<int>(threadIdx.x);
-        load_matmul_tile<MTile, NTile, KTile>(ctx, a_shared, b_shared, tile_id);
+        load_matmul_tile<MTile, NTile, KTile>(
+            ctx, a_shared, b_shared, a_global, b_global, tile_id);
 
         ctx.syncthreads();
 
@@ -106,7 +159,9 @@ namespace
         ctx.syncthreads();
     }
 
-    __global__ void simple_matmul_2x2_k3_kernel(int*                         out,
+    __global__ void simple_matmul_2x2_k3_kernel(const int*                   a_global,
+                                                const int*                   b_global,
+                                                int*                         out,
                                                 hip_moi::context_storage_ref storage)
     {
         __shared__ int a_shared[2 * 3];
@@ -114,10 +169,13 @@ namespace
 
         hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
-        run_simple_matmul_body<2, 2, 3>(ctx, out, /*tile_id=*/0, a_shared, b_shared);
+        run_simple_matmul_body<2, 2, 3>(
+            ctx, a_global, b_global, out, /*tile_id=*/0, a_shared, b_shared);
     }
 
-    __global__ void simple_matmul_4x4_k4_kernel(int*                         out,
+    __global__ void simple_matmul_4x4_k4_kernel(const int*                   a_global,
+                                                const int*                   b_global,
+                                                int*                         out,
                                                 hip_moi::context_storage_ref storage)
     {
         __shared__ int a_shared[4 * 4];
@@ -125,10 +183,13 @@ namespace
 
         hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
-        run_simple_matmul_body<4, 4, 4>(ctx, out, /*tile_id=*/0, a_shared, b_shared);
+        run_simple_matmul_body<4, 4, 4>(
+            ctx, a_global, b_global, out, /*tile_id=*/0, a_shared, b_shared);
     }
 
-    __global__ void chunked_matmul_2x2_k2x3_kernel(int*                         out,
+    __global__ void chunked_matmul_2x2_k2x3_kernel(const int*                   a_global,
+                                                   const int*                   b_global,
+                                                   int*                         out,
                                                    hip_moi::context_storage_ref storage)
     {
         __shared__ int a_shared[2 * 2];
@@ -144,7 +205,8 @@ namespace
 
         for(int tile_id = 0; tile_id < 3; ++tile_id)
         {
-            load_matmul_tile<2, 2, 2>(ctx, a_shared, b_shared, tile_id);
+            load_matmul_tile<2, 2, 2>(
+                ctx, a_shared, b_shared, a_global, b_global, tile_id);
 
             ctx.syncthreads();
 
@@ -162,7 +224,9 @@ namespace
         }
     }
 
-    __global__ void scalar_matmul_missing_barrier_kernel(hip_moi::context_storage_ref storage)
+    __global__ void scalar_matmul_missing_barrier_kernel(const int* a_global,
+                                                         const int* b_global,
+                                                         hip_moi::context_storage_ref storage)
     {
         __shared__ int a_shared;
         __shared__ int b_shared;
@@ -172,8 +236,8 @@ namespace
 
         if(threadIdx.x == 0)
         {
-            ctx.lds_store(&a_shared, 5);
-            ctx.lds_store(&b_shared, 7);
+            ctx.lds_store(&a_shared, a_global[matmul_a_offset<1, 1>(0, 0, 0)]);
+            ctx.lds_store(&b_shared, b_global[matmul_b_offset<1, 1>(0, 0, 0)]);
         }
         if(threadIdx.x == 1)
         {
@@ -207,132 +271,87 @@ namespace
     }
 
     template <int MTile, int NTile, int KTile>
-    void expect_simple_matmul_output(const int* output, int tile_id)
+    void expect_reference_matmul_output(
+        const int* output, const int* a, const int* b, int tile_count)
     {
         for(int m = 0; m < MTile; ++m)
         {
             for(int n = 0; n < NTile; ++n)
             {
-                EXPECT_EQ(output[n + NTile * m],
-                          matmul_expected_value(tile_id, m, n, KTile));
-            }
-        }
-    }
-
-    template <int MTile, int NTile, int KTile>
-    void expect_chunked_matmul_output(const int* output, int tile_count)
-    {
-        for(int m = 0; m < MTile; ++m)
-        {
-            for(int n = 0; n < NTile; ++n)
-            {
-                int expected = 0;
-                for(int tile_id = 0; tile_id < tile_count; ++tile_id)
-                {
-                    expected += matmul_expected_value(tile_id, m, n, KTile);
-                }
+                int expected
+                    = reference_matmul_value<MTile, NTile, KTile>(a, b, tile_count, m, n);
                 EXPECT_EQ(output[n + NTile * m], expected);
             }
         }
     }
 
-    TEST(HipMoiMatmulLike, Simple2x2K3DoesNotReport)
+    template <int MTile, int NTile, int KTile, int TileCount, typename Kernel>
+    void run_safe_matmul_case(Kernel kernel, int access_capacity, int expected_access_count)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/128, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            access_capacity, /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/1));
 
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 4 * sizeof(int)));
+        int host_a[TileCount * MTile * KTile];
+        int host_b[TileCount * NTile * KTile];
+        fill_matmul_inputs<MTile, NTile, KTile>(host_a, host_b, TileCount);
 
-        hipLaunchKernelGGL(simple_matmul_2x2_k3_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
+        int* device_a      = nullptr;
+        int* device_b      = nullptr;
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, MTile * NTile * sizeof(int)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(
+            kernel, dim3(1), dim3(kThreadCount), 0, 0, device_a, device_b, device_output,
+            storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
-        int output[4] = {};
+        int output[MTile * NTile] = {};
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
 
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
-        expect_simple_matmul_output<2, 2, 3>(output, /*tile_id=*/0);
-        expect_no_diagnostics(observed, /*expected_access_count=*/36);
+        expect_reference_matmul_output<MTile, NTile, KTile>(
+            output, host_a, host_b, TileCount);
+        expect_no_diagnostics(observed, expected_access_count);
 
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
+    TEST(HipMoiMatmulLike, Simple2x2K3DoesNotReport)
+    {
+        run_safe_matmul_case<2, 2, 3, 1>(
+            simple_matmul_2x2_k3_kernel,
+            /*access_capacity=*/128,
+            /*expected_access_count=*/36);
     }
 
     TEST(HipMoiMatmulLike, Simple4x4K4DoesNotReport)
     {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/256, /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/1));
-
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 16 * sizeof(int)));
-
-        hipLaunchKernelGGL(simple_matmul_4x4_k4_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        int output[16] = {};
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        expect_simple_matmul_output<4, 4, 4>(output, /*tile_id=*/0);
-        expect_no_diagnostics(observed, /*expected_access_count=*/160);
-
-        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+        run_safe_matmul_case<4, 4, 4, 1>(
+            simple_matmul_4x4_k4_kernel,
+            /*access_capacity=*/256,
+            /*expected_access_count=*/160);
     }
 
     TEST(HipMoiMatmulLike, Chunked2x2K2x3DoesNotReport)
     {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/128, /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/1));
-
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 4 * sizeof(int)));
-
-        hipLaunchKernelGGL(chunked_matmul_2x2_k2x3_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        int output[4] = {};
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        expect_chunked_matmul_output<2, 2, 2>(output, /*tile_count=*/3);
-        expect_no_diagnostics(observed, /*expected_access_count=*/72);
-
-        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+        run_safe_matmul_case<2, 2, 2, 3>(
+            chunked_matmul_2x2_k2x3_kernel,
+            /*access_capacity=*/128,
+            /*expected_access_count=*/72);
     }
 
     TEST(HipMoiMatmulLike, ScalarMissingBarrierReports)
@@ -342,11 +361,26 @@ namespace
             /*access_capacity=*/16, /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/1));
 
+        int host_a[1];
+        int host_b[1];
+        fill_matmul_inputs<1, 1, 1>(host_a, host_b, /*tile_count=*/1);
+
+        int* device_a = nullptr;
+        int* device_b = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
         hipLaunchKernelGGL(scalar_matmul_missing_barrier_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
                            0,
+                           device_a,
+                           device_b,
                            storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
@@ -362,5 +396,8 @@ namespace
                       static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
             EXPECT_EQ(observed.diagnostics[i].epoch, 0u);
         }
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
     }
 } // namespace

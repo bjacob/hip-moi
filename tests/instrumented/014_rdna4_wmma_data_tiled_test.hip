@@ -16,7 +16,9 @@
 namespace
 {
     constexpr int kThreadCount        = 32;
+    constexpr int kTileM              = 16;
     constexpr int kTileN              = 16;
+    constexpr int kTileK              = 16;
     constexpr int kFragmentElements   = 8;
     constexpr int kPackedTileElements = kThreadCount * kFragmentElements;
     constexpr int kOutputElementCount = 16 * 16;
@@ -37,9 +39,39 @@ namespace
         return col + cols * row;
     }
 
+    __host__ __device__ int matmul_a_value(int tile_id, int m, int k)
+    {
+        return ((tile_id + 2 * m + 3 * k) % 5) - 2;
+    }
+
+    __host__ __device__ int matmul_b_value(int tile_id, int n, int k)
+    {
+        return ((1 + 2 * tile_id + 3 * n + k) % 5) - 2;
+    }
+
+    __host__ __device__ int rdna4_wmma_f16_k(int lane, int idx)
+    {
+        int reg  = idx >> 1;
+        int half = idx & 1;
+        return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
+    }
+
     __device__ int rdna4_wmma_acc_m(int lane, int elem)
     {
         return elem + 8 * (lane >> 4);
+    }
+
+    float reference_matmul_value(int tile_count, int m, int n)
+    {
+        int acc = 0;
+        for(int tile_id = 0; tile_id < tile_count; ++tile_id)
+        {
+            for(int k = 0; k < kTileK; ++k)
+            {
+                acc += matmul_a_value(tile_id, m, k) * matmul_b_value(tile_id, n, k);
+            }
+        }
+        return static_cast<float>(acc);
     }
 
     __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
@@ -196,22 +228,37 @@ namespace
                                           hipMemcpyDeviceToHost));
     }
 
-    void fill_ones(_Float16* values, int count)
+    void fill_data_tiled_inputs(_Float16* a, _Float16* b, int tile_count)
     {
-        for(int i = 0; i < count; ++i)
+        for(int tile_id = 0; tile_id < tile_count; ++tile_id)
         {
-            values[i] = static_cast<_Float16>(1.0f);
+            for(int lane = 0; lane < kThreadCount; ++lane)
+            {
+                int m = lane & 15;
+                int n = lane & 15;
+                for(int idx = 0; idx < kFragmentElements; ++idx)
+                {
+                    int k      = rdna4_wmma_f16_k(lane, idx);
+                    int offset = tile_id * kPackedTileElements + lane * kFragmentElements + idx;
+                    a[offset]  = static_cast<_Float16>(matmul_a_value(tile_id, m, k));
+                    b[offset]  = static_cast<_Float16>(matmul_b_value(tile_id, n, k));
+                }
+            }
         }
     }
 
-    void expect_output_equals(float* device_output, float expected)
+    void expect_reference_output(float* device_output, int tile_count)
     {
         float output[kOutputElementCount] = {};
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-        for(float value : output)
+        for(int m = 0; m < kTileM; ++m)
         {
-            EXPECT_EQ(value, expected);
+            for(int n = 0; n < kTileN; ++n)
+            {
+                EXPECT_EQ(output[row_major(m, n, kTileN)],
+                          reference_matmul_value(tile_count, m, n));
+            }
         }
     }
 
@@ -235,7 +282,7 @@ namespace
     }
 
     template <typename Kernel>
-    void run_safe_case(Kernel kernel, int tile_count, float expected_value, int expected_access_count)
+    void run_safe_case(Kernel kernel, int tile_count, int expected_access_count)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
@@ -244,8 +291,7 @@ namespace
 
         _Float16 host_a[2 * kPackedTileElements];
         _Float16 host_b[2 * kPackedTileElements];
-        fill_ones(host_a, tile_count * kPackedTileElements);
-        fill_ones(host_b, tile_count * kPackedTileElements);
+        fill_data_tiled_inputs(host_a, host_b, tile_count);
 
         _Float16* device_a      = nullptr;
         _Float16* device_b      = nullptr;
@@ -273,7 +319,7 @@ namespace
 
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-        expect_output_equals(device_output, expected_value);
+        expect_reference_output(device_output, tile_count);
         expect_no_diagnostics(observed, expected_access_count);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
@@ -285,7 +331,6 @@ namespace
     {
         run_safe_case(data_tiled_single_buffer_kernel,
                       /*tile_count=*/1,
-                      /*expected_value=*/16.0f,
                       /*expected_access_count=*/128);
     }
 
@@ -293,7 +338,6 @@ namespace
     {
         run_safe_case(data_tiled_preloaded_ping_pong_kernel,
                       /*tile_count=*/2,
-                      /*expected_value=*/32.0f,
                       /*expected_access_count=*/256);
     }
 
@@ -306,8 +350,7 @@ namespace
 
         _Float16 host_a[kPackedTileElements];
         _Float16 host_b[kPackedTileElements];
-        fill_ones(host_a, kPackedTileElements);
-        fill_ones(host_b, kPackedTileElements);
+        fill_data_tiled_inputs(host_a, host_b, /*tile_count=*/1);
 
         _Float16* device_a = nullptr;
         _Float16* device_b = nullptr;

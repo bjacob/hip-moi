@@ -102,22 +102,28 @@ foundation:
   striped load/store, and an unsynchronized transpose diagnostic case.
 * `tests/instrumented/010_matmul_like_test.hip` covers small cooperative LDS
   matmul idioms: simple 2x2 and 4x4 tiles, a chunked K loop, and a scalar
-  missing-barrier diagnostic.
+  missing-barrier diagnostic. The numerical tests use explicit small integer
+  input matrices and compare GPU outputs against a host-side reference matmul.
 * `tests/instrumented/011_epoch_log_lifetime_test.hip` verifies that access-log
   storage is reused at epoch boundaries, so long synchronized loops can run with
   capacity sized for one epoch rather than the whole kernel.
 * `tests/instrumented/012_matmul_pipeline_test.hip` covers double-buffered and
   pipeline-like matmul LDS idioms: safe ping-pong buffering plus
-  diagnostic-positive buffer reuse and partial tile overwrite cases.
+  diagnostic-positive buffer reuse and partial tile overwrite cases. The safe
+  output cases use explicit small integer inputs and a host-side reference
+  matmul oracle.
 * `tests/instrumented/013_rdna4_wmma_row_major_test.hip` is a gfx12-gated real
   RDNA4 WMMA smoke test using
   `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, all 32 threads,
   conventional row-major LDS tiles, single-buffer and double-buffer safe cases,
-  and a diagnostic-positive row overwrite.
+  and a diagnostic-positive row overwrite. The safe cases now use non-uniform
+  small integer-valued `_Float16` inputs and exact host-reference outputs.
 * `tests/instrumented/014_rdna4_wmma_data_tiled_test.hip` is the matching
   gfx12-gated packed-layout test. It uses the same WMMA intrinsic, but each
   thread's A/B fragment is a contiguous 16-byte LDS object at byte offset
-  `lane * 16`, with a diagnostic-positive neighbor-fragment overwrite.
+  `lane * 16`, with a diagnostic-positive neighbor-fragment overwrite. The
+  packed fragments are generated from logical A/B tiles and checked against the
+  same exact host-reference matmul.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -688,15 +694,20 @@ safe barriers and repeated missing-barrier diagnostics.
 `009_tiled_lds_test.hip` asserts 2D tile layouts, tiled gathers, and an
 unsynchronized transpose diagnostic.
 `010_matmul_like_test.hip` asserts cooperative LDS matmul-like access patterns
-and a scalar missing-barrier diagnostic.
+using explicit small integer inputs, host-reference output checks, and a scalar
+missing-barrier diagnostic.
 `011_epoch_log_lifetime_test.hip` asserts that access-log capacity is scoped to
 the active epoch rather than the cumulative kernel trace.
 `012_matmul_pipeline_test.hip` asserts double-buffered and pipeline-like matmul
-LDS patterns, including diagnostic-positive buffer reuse cases.
+LDS patterns with host-reference output checks, including diagnostic-positive
+buffer reuse cases.
 `013_rdna4_wmma_row_major_test.hip` asserts RDNA4/gfx12 WMMA intrinsic coverage
-using all 32 threads and conventional row-major LDS tiles.
+using all 32 threads, conventional row-major LDS tiles, non-uniform exact
+inputs, and host-reference output checks.
 `014_rdna4_wmma_data_tiled_test.hip` asserts the matching RDNA4/gfx12 WMMA
-coverage for packed fragments laid out at `lane * fragment_size` byte offsets.
+coverage for packed fragments laid out at `lane * fragment_size` byte offsets,
+with the packed input generated from a logical tile and checked against a
+host-reference matmul.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
