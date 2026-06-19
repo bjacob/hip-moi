@@ -19,7 +19,7 @@ namespace
     constexpr int kSubgroupCount      = 2;
     constexpr int kThreadCount        = kThreadsPerSubgroup * kSubgroupCount;
     constexpr int kAccessCapacity     = 160;
-    constexpr int kProofCapacity      = 160;
+    constexpr int kCoalescingAccessCapacity = 160;
     constexpr int kDiagnosticCapacity = 512;
 
     constexpr uint32_t kContiguousSpan = kThreadsPerSubgroup * sizeof(int);
@@ -35,11 +35,13 @@ namespace
     constexpr hip_moi::site_id kReadSite0(0x2308u);
     constexpr hip_moi::site_id kReadSite1(0x2309u);
     constexpr hip_moi::site_id kSummaryExactStoreSite(0x230au);
+    constexpr hip_moi::site_id kIrregularStoreSite(0x230bu);
+    constexpr hip_moi::site_id kIrregularLoadSite(0x230cu);
 
     struct observed_metadata
     {
         int                                         access_count;
-        int                                         coalescing_proof_count;
+        int                                         coalescing_access_count;
         int                                         coalesced_access_count;
         int                                         diagnostic_count;
         hip_moi::subgroup_level_context::diagnostic diagnostics[kDiagnosticCapacity];
@@ -180,6 +182,27 @@ namespace
         ctx.syncthreads();
     }
 
+    __global__ void irregular_coalescing_access_conflict_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadsPerSubgroup + 1];
+
+        hip_moi::subgroup_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        int lane  = static_cast<int>(ctx.lane_in_subgroup());
+        int index = lane + (lane >= kThreadsPerSubgroup / 2 ? 1 : 0);
+        if(ctx.subgroup_id() == 0)
+        {
+            ctx.lds_store(&values[index], lane, kIrregularStoreSite);
+        }
+        if(ctx.subgroup_id() == 1)
+        {
+            (void)ctx.lds_load(&values[index], kIrregularLoadSite);
+        }
+        ctx.syncthreads();
+    }
+
     void copy_observed_metadata(const hip_moi::test::subgroup_level_device_context_storage& storage,
                                 observed_metadata* observed)
     {
@@ -187,9 +210,9 @@ namespace
                                           storage.access_count_device(),
                                           sizeof(observed->access_count),
                                           hipMemcpyDeviceToHost));
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_proof_count,
-                                          storage.coalescing_proof_count_device(),
-                                          sizeof(observed->coalescing_proof_count),
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_access_count,
+                                          storage.coalescing_access_count_device(),
+                                          sizeof(observed->coalescing_access_count),
                                           hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalesced_access_count,
                                           storage.coalesced_access_count_device(),
@@ -206,14 +229,16 @@ namespace
     }
 
     template <typename Kernel>
-    void run_case(Kernel kernel, observed_metadata* observed)
+    void run_case(Kernel             kernel,
+                  observed_metadata* observed,
+                  int                coalescing_access_capacity = kCoalescingAccessCapacity)
     {
         hip_moi::test::subgroup_level_device_context_storage storage;
         storage.allocate(
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
-            /*coalescing_proof_capacity=*/kProofCapacity);
+            /*coalescing_access_capacity=*/coalescing_access_capacity);
 
         hipLaunchKernelGGL(kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
@@ -285,8 +310,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(contiguous_summary_conflict_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_TRUE(has_coalesced_conflict_diagnostic(
             observed, kContiguousStoreSite, kContiguousLoadSite, kContiguousSpan, kContiguousSpan));
@@ -297,8 +322,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(disjoint_summary_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
@@ -308,8 +333,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(fixed_stride_gap_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
@@ -319,8 +344,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(fixed_stride_summary_conflict_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_TRUE(has_coalesced_conflict_diagnostic(
             observed, kStrideEvenStoreSite, kStrideEvenLoadSite, kStrideSpan, kStrideSpan));
@@ -331,8 +356,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(coalesced_read_read_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
@@ -342,10 +367,37 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(coalesced_summary_vs_exact_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadsPerSubgroup + 1);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 1);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalesced_access_count, 1);
         EXPECT_TRUE(has_coalesced_conflict_diagnostic(
             observed, kSummaryExactStoreSite, hip_moi::no_site_id, kContiguousSpan, sizeof(int)));
+    }
+
+    TEST(HipMoiSubgroupLevelCoalescedConflict, IrregularCoalescingAccessesReportConflict)
+    {
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(irregular_coalescing_access_conflict_kernel, &observed));
+
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
+        EXPECT_EQ(observed.coalesced_access_count, 0);
+        EXPECT_TRUE(has_coalesced_conflict_diagnostic(
+            observed, kIrregularStoreSite, kIrregularLoadSite, sizeof(int), sizeof(int)));
+    }
+
+    TEST(HipMoiSubgroupLevelCoalescedConflict, CoalescingAccessOverflowFallsBackToExactRecords)
+    {
+        constexpr int kTinyCoalescingAccessCapacity = 8;
+
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(contiguous_summary_conflict_kernel,
+                                         &observed,
+                                         /*coalescing_access_capacity=*/
+                                         kTinyCoalescingAccessCapacity));
+
+        EXPECT_EQ(observed.access_count, kThreadCount - kTinyCoalescingAccessCapacity);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
+        EXPECT_GT(observed.diagnostic_count, 0);
     }
 } // namespace

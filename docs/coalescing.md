@@ -16,7 +16,7 @@ coalesced access is a compact summary of multiple instrumented access records
 that the detector has proven to follow a regular pattern. Thread-level
 summaries are currently opportunity metadata. Subgroup-level summaries now also
 participate in conflict detection at epoch boundaries when nonzero site ids and
-proof-log storage are supplied.
+coalescing access storage are supplied.
 
 ## Opting In
 
@@ -51,28 +51,28 @@ ctx.lds_store(&lds[threadIdx.x], value, tile_store_site);
 Prefer `HIP_MOI_SITE_ID()` in ordinary hand-written code. Use explicit numeric
 ids only when the caller has a reason to manage identity itself.
 
-For subgroup-level summaries, a nonzero site id is necessary but not sufficient:
-the context also needs proof-log storage. `hip_moi::subgroup_level_host_context`
-can provide that storage when requested:
+For subgroup-level summaries and hot-path compression, a nonzero site id is
+necessary but not sufficient: the context also needs coalescing access storage.
+`hip_moi::subgroup_level_host_context` can provide that storage when requested:
 
 ```c++
 hip_moi::host_context_options options;
 options.access_record_capacity = 1024;
 options.coalesced_access_record_capacity = 1024;
-options.coalescing_proof_record_capacity = 1024;
+options.coalescing_access_record_capacity = 1024;
 options.coalescing_group_record_capacity = 256;
 
 hip_moi::subgroup_level_host_context moi(options);
 ```
 
 Custom `storage_ref` users can instead populate the
-`coalescing_proof_records`, `coalescing_proof_record_capacity`,
-`coalescing_proof_count`, and `epoch_coalescing_proof_count` fields directly.
+`coalescing_access_records`, `coalescing_access_record_capacity`,
+`coalescing_access_count`, and `epoch_coalescing_access_count` fields directly.
 They may also provide `coalescing_group_records`,
 `coalescing_group_record_capacity`, and `coalescing_group_count` scratch
 storage to make subgroup-level summary construction cheaper across many
 distinct sites. If group storage is absent or fills up, hip-moi falls back to
-the proof-log scan path.
+the coalescing-access scan path.
 
 ## Current Overhead
 
@@ -90,59 +90,64 @@ scan, performed by one thread, over the exact records in that epoch.
 Subgroup-level mode does not perform pairwise conflict checks on every access.
 It records exact accesses on the hot path, then checks the just-ended epoch at
 `ctx.syncthreads()` or at a final uniform `ctx.finish()`. When no access opts
-in, no proof records are written and no summaries are emitted, so the
+in, no coalescing access records are written and no summaries are emitted, so the
 epoch-close pass falls back to exact-record conflict detection for that epoch.
 
 Users who provide their own `storage_ref` may leave the coalesced summary
 buffer pointers null. In that case the summary pass returns immediately, and no
 coalescing metadata is produced. For subgroup-level mode, users may also leave
-the coalescing proof-log pointers null; then no subgroup summaries are produced.
+the coalescing access pointers null; then opted-in accesses fall back to the
+ordinary exact `access_record` path and no subgroup summaries are produced.
 
 ### Opted-In Sites
 
-For a nonzero site id, hip-moi still records exact accesses first. In
-thread-level mode, `ctx.syncthreads()` scans the just-ended exact access records
-and tries to prove that records from the same site form a regular pattern.
+For a nonzero site id in thread-level mode, hip-moi still records exact accesses
+first. `ctx.syncthreads()` scans the just-ended exact access records and tries
+to prove that records from the same site form a regular pattern.
 
-In subgroup-level mode, an opted-in access also writes a separate proof record
-when proof storage is supplied. That proof record carries the access address and
-the thread's lane within the subgroup. The subgroup-level diagnostic
-`access_record` stays compact and does not grow a lane or thread-id field.
+In subgroup-level mode, an opted-in access writes a
+`coalescing_access_record` instead of an ordinary exact `access_record` when
+coalescing access storage is supplied and has capacity. That record carries the
+access address and the thread's lane within the subgroup. If coalescing access
+storage is absent or full, the access falls back to the ordinary exact
+`access_record` path. The subgroup-level diagnostic `access_record` stays
+compact and does not grow a lane or thread-id field.
 When group scratch storage is supplied, epoch close first builds compact
 `coalescing_group_record` entries keyed by subgroup/site/kind/size in an
 open-addressed scratch table. Those group records accumulate lane masks and
-endpoint addresses while walking the proof log once. Each group is then
-validated with one proof-log scan for fixed-stride addresses. This avoids both
-per-lane proof-log rescans and the older prior-record leader scan. When group
-scratch is absent or too small, hip-moi uses the previous proof-log scan path
-instead.
+endpoint addresses while walking the coalescing access log once. Each group is
+then validated with one coalescing-access scan for fixed-stride addresses. This
+avoids both per-lane rescans and the older prior-record leader scan. When group
+scratch is absent or too small, hip-moi uses the previous coalescing-access scan
+path instead.
 
 Today, opting in therefore costs:
 
-* the same exact per-access logging as before,
-* a nonzero `site_id` field in those exact records,
-* in subgroup-level mode, one additional proof record per opted-in access when
-  proof storage is supplied,
+* in thread-level mode, the same exact per-access logging as before,
+* in subgroup-level mode, one coalescing access record per opted-in access when
+  coalescing access storage is supplied,
+* in subgroup-level mode, fallback exact logging only when coalescing access
+  storage is absent or full,
 * optionally, one subgroup-level group scratch record per distinct
   subgroup/site/kind/size key in the closing epoch,
-* an epoch-boundary proof pass over exact records or proof records,
+* an epoch-boundary summary pass over exact records or coalescing access records,
 * one coalesced summary record for each proven regular site, if summary storage
   has capacity,
 * in subgroup-level mode, an epoch-boundary conflict pass over the summaries
-  produced for that epoch plus exact records that were not covered by a summary.
+  produced for that epoch plus exact and coalescing access records that were not
+  covered by a summary.
 
-The current implementation does not yet reduce the hot-path access-log traffic:
-exact records are still recorded first. For subgroup-level mode, coalescing is
-now more than metadata because proven summaries replace their covered exact
-records in the epoch-close conflict pass. That is the first practical
-optimization step, but it is not yet enough to make coalescing a performance
-feature users should rely on for large kernels.
+For subgroup-level opted-in accesses, coalescing now reduces ordinary exact
+access-log traffic when the coalescing access log has capacity. This is still
+not the final performance story: one lane-carrying coalescing access record is
+written per participating lane, and epoch-close validation still has real work
+to do.
 
 The remaining known subgroup-level cost is the validation scan per candidate
-group, plus the fact that exact access records and proof records are still
-written on the hot path. The group scratch table is fixed-capacity and
-open-addressed, so unusually high collision pressure or too little scratch
-capacity falls back to the older proof-log scan path.
+group, plus the one coalescing access record written per opted-in lane. The
+group scratch table is fixed-capacity and open-addressed, so unusually high
+collision pressure or too little scratch capacity falls back to the older
+coalescing-access scan path.
 
 ## Representation
 
@@ -217,13 +222,15 @@ change diagnostics.
 
 Subgroup-level conflict detection has two layers:
 
-* on every access, hip-moi appends an exact access record and, for opted-in
-  sites with proof storage, an optional proof record;
+* on every default-site access, hip-moi appends an exact access record; for
+  opted-in sites with coalescing access storage, it appends a lane-carrying
+  `coalescing_access_record` instead, falling back to exact access records if
+  that storage is absent or full;
 * at `ctx.syncthreads()` or a final uniform `ctx.finish()`, summaries produced
-  for the closing epoch are compared with each other and with exact records
-  that were not themselves summarized;
-* exact records that are not covered by any new summary are compared with each
-  other as the fallback path.
+  for the closing epoch are compared with each other and with exact or
+  coalescing access records that were not themselves summarized;
+* unsummarized exact and coalescing access records are compared with each other
+  as the fallback path.
 
 The summary overlap check uses the represented per-lane byte ranges, not merely
 the enclosing `span_byte_count`. This matters for fixed-stride patterns with
@@ -246,8 +253,8 @@ The current automatic coalescing code is deliberately narrow.
 
 It only runs at `ctx.syncthreads()`. Thread-level mode proves patterns from
 exact access records. Subgroup-level mode proves patterns from the separate
-proof log. Both can emit a summary when all of the following are true for a
-group of records:
+coalescing access log. Both can emit a summary when all of the following are
+true for a group of records:
 
 * the records have a nonzero `site_id`,
 * they are in the same epoch,
@@ -270,13 +277,14 @@ The current code does not summarize:
 * tile shapes that need more than one affine stride,
 * a single summary spanning multiple subgroups; subgroup-level mode emits one
   summary per subgroup,
-* subgroup-level opted-in accesses when no proof storage was supplied,
+* subgroup-level opted-in accesses when no coalescing access storage was
+  supplied,
 * accesses that are not visible to hip-moi because they were raw LDS loads or
   stores instead of `ctx.lds_load` / `ctx.lds_store`.
 
 The accelerated subgroup-level grouped path is not used when no group scratch
 storage was supplied or when that scratch storage fills up; those cases fall
-back to the older proof-log scan path.
+back to the older coalescing-access scan path.
 
 This means coalescing is currently most useful as a way to observe and diagnose
 simple, regular all-thread LDS access sites. It is not yet a performance

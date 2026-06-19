@@ -49,7 +49,7 @@ namespace hip_moi
             uint64_t  site_id;
         };
 
-        struct coalescing_proof_record
+        struct coalescing_access_record
         {
             uintptr_t address;
             uint32_t  byte_count;
@@ -109,10 +109,10 @@ namespace hip_moi
             coalesced_access_record* coalesced_access_records         = nullptr;
             int                      coalesced_access_record_capacity = 0;
             int*                     coalesced_access_count           = nullptr;
-            coalescing_proof_record* coalescing_proof_records         = nullptr;
-            int                      coalescing_proof_record_capacity = 0;
-            int*                     coalescing_proof_count           = nullptr;
-            int*                     epoch_coalescing_proof_count     = nullptr;
+            coalescing_access_record* coalescing_access_records         = nullptr;
+            int                       coalescing_access_record_capacity = 0;
+            int*                      coalescing_access_count           = nullptr;
+            int*                      epoch_coalescing_access_count     = nullptr;
             coalescing_group_record* coalescing_group_records         = nullptr;
             int                      coalescing_group_record_capacity = 0;
             int*                     coalescing_group_count           = nullptr;
@@ -120,24 +120,24 @@ namespace hip_moi
 
         template <int AccessCapacity,
                   int DiagnosticCapacity,
-                  int SubgroupCapacity        = 1,
-                  int CoalescedAccessCapacity = AccessCapacity,
-                  int CoalescingProofCapacity = AccessCapacity,
-                  int CoalescingGroupCapacity = CoalescingProofCapacity>
+                  int SubgroupCapacity         = 1,
+                  int CoalescedAccessCapacity  = AccessCapacity,
+                  int CoalescingAccessCapacity = AccessCapacity,
+                  int CoalescingGroupCapacity  = CoalescingAccessCapacity>
         struct static_context_storage
         {
             access_record           access_records[AccessCapacity];
             diagnostic              diagnostics[DiagnosticCapacity];
             subgroup_state          subgroup_states[SubgroupCapacity];
             coalesced_access_record coalesced_access_records[CoalescedAccessCapacity];
-            coalescing_proof_record coalescing_proof_records[CoalescingProofCapacity];
+            coalescing_access_record coalescing_access_records[CoalescingAccessCapacity];
             coalescing_group_record coalescing_group_records[CoalescingGroupCapacity];
             int                     access_count;
             int                     epoch_access_count;
             int                     diagnostic_count;
             int                     coalesced_access_count;
-            int                     coalescing_proof_count;
-            int                     epoch_coalescing_proof_count;
+            int                      coalescing_access_count;
+            int                      epoch_coalescing_access_count;
             int                     coalescing_group_count;
 
             __device__ storage_ref ref()
@@ -155,10 +155,10 @@ namespace hip_moi
                     coalesced_access_records,
                     CoalescedAccessCapacity,
                     &coalesced_access_count,
-                    coalescing_proof_records,
-                    CoalescingProofCapacity,
-                    &coalescing_proof_count,
-                    &epoch_coalescing_proof_count,
+                    coalescing_access_records,
+                    CoalescingAccessCapacity,
+                    &coalescing_access_count,
+                    &epoch_coalescing_access_count,
                     coalescing_group_records,
                     CoalescingGroupCapacity,
                     &coalescing_group_count,
@@ -192,13 +192,13 @@ namespace hip_moi
                 {
                     *storage_.coalesced_access_count = 0;
                 }
-                if(storage_.coalescing_proof_count)
+                if(storage_.coalescing_access_count)
                 {
-                    *storage_.coalescing_proof_count = 0;
+                    *storage_.coalescing_access_count = 0;
                 }
-                if(storage_.epoch_coalescing_proof_count)
+                if(storage_.epoch_coalescing_access_count)
                 {
-                    *storage_.epoch_coalescing_proof_count = 0;
+                    *storage_.epoch_coalescing_access_count = 0;
                 }
                 if(storage_.coalescing_group_count)
                 {
@@ -218,11 +218,11 @@ namespace hip_moi
                 {
                     storage_.coalesced_access_records[i].valid = 0;
                 }
-                for(int i = 0; storage_.coalescing_proof_records
-                               && i < storage_.coalescing_proof_record_capacity;
+                for(int i = 0; storage_.coalescing_access_records
+                               && i < storage_.coalescing_access_record_capacity;
                     ++i)
                 {
-                    storage_.coalescing_proof_records[i].valid = 0;
+                    storage_.coalescing_access_records[i].valid = 0;
                 }
                 for(int i = 0; storage_.coalescing_group_records
                                && i < storage_.coalescing_group_record_capacity;
@@ -358,17 +358,27 @@ namespace hip_moi
                        : scan_limit;
         }
 
-        __device__ void
-            record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
+        __device__ int current_epoch_coalescing_access_scan_limit() const
         {
-            if(!storage_.access_records || !storage_.access_count || !storage_.epoch_access_count
-               || storage_.access_record_capacity <= 0)
+            if(!storage_.coalescing_access_records || !storage_.epoch_coalescing_access_count
+               || storage_.coalescing_access_record_capacity <= 0)
             {
-                return;
+                return 0;
             }
 
-            uint32_t      subgroup = subgroup_id();
-            access_record record{
+            int scan_limit = *storage_.epoch_coalescing_access_count;
+            return scan_limit > storage_.coalescing_access_record_capacity
+                       ? storage_.coalescing_access_record_capacity
+                       : scan_limit;
+        }
+
+        __device__ access_record make_access_record(const void* ptr,
+                                                    uint32_t    byte_count,
+                                                    access_kind kind,
+                                                    site_id     site) const
+        {
+            uint32_t subgroup = subgroup_id();
+            return access_record{
                 reinterpret_cast<uintptr_t>(ptr),
                 byte_count,
                 subgroup,
@@ -377,19 +387,40 @@ namespace hip_moi
                 1,
                 site.value(),
             };
+        }
+
+        __device__ void
+            record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
+        {
+            access_record record = make_access_record(ptr, byte_count, kind, site);
+            if(site.allows_coalescing() && record_coalescing_access(record))
+            {
+                return;
+            }
+
+            record_exact_access(record);
+        }
+
+        __device__ void record_exact_access(const access_record& record) const
+        {
+            if(!storage_.access_records || !storage_.access_count || !storage_.epoch_access_count
+               || storage_.access_record_capacity <= 0)
+            {
+                return;
+            }
 
             (void)atomicAdd(storage_.access_count, 1);
             int record_index = atomicAdd(storage_.epoch_access_count, 1);
 
             if(record_index < storage_.access_record_capacity)
             {
-                record.valid                                = 0;
-                storage_.access_records[record_index]       = record;
+                access_record stored_record                 = record;
+                stored_record.valid                         = 0;
+                storage_.access_records[record_index]       = stored_record;
                 storage_.access_records[record_index].valid = 0;
                 __threadfence();
                 storage_.access_records[record_index].valid = 1;
                 __threadfence();
-                record_coalescing_proof(record);
             }
 
             if(record_index >= storage_.access_record_capacity)
@@ -398,16 +429,16 @@ namespace hip_moi
             }
         }
 
-        __device__ void record_coalescing_proof(const access_record& record) const
+        __device__ bool record_coalescing_access(const access_record& record) const
         {
-            if(record.site_id == 0 || !storage_.coalescing_proof_records
-               || !storage_.coalescing_proof_count || !storage_.epoch_coalescing_proof_count
-               || storage_.coalescing_proof_record_capacity <= 0)
+            if(record.site_id == 0 || !storage_.coalescing_access_records
+               || !storage_.coalescing_access_count || !storage_.epoch_coalescing_access_count
+               || storage_.coalescing_access_record_capacity <= 0)
             {
-                return;
+                return false;
             }
 
-            coalescing_proof_record proof_record{
+            coalescing_access_record coalescing_record{
                 record.address,
                 record.byte_count,
                 lane_in_subgroup(),
@@ -418,21 +449,24 @@ namespace hip_moi
                 record.site_id,
             };
 
-            (void)atomicAdd(storage_.coalescing_proof_count, 1);
-            int proof_index = atomicAdd(storage_.epoch_coalescing_proof_count, 1);
-            if(proof_index < storage_.coalescing_proof_record_capacity)
+            (void)atomicAdd(storage_.coalescing_access_count, 1);
+            int coalescing_access_index = atomicAdd(storage_.epoch_coalescing_access_count, 1);
+            if(coalescing_access_index >= storage_.coalescing_access_record_capacity)
             {
-                proof_record.valid                                   = 0;
-                storage_.coalescing_proof_records[proof_index]       = proof_record;
-                storage_.coalescing_proof_records[proof_index].valid = 0;
-                __threadfence();
-                storage_.coalescing_proof_records[proof_index].valid = 1;
-                __threadfence();
+                return false;
             }
+
+            coalescing_record.valid                                           = 0;
+            storage_.coalescing_access_records[coalescing_access_index]       = coalescing_record;
+            storage_.coalescing_access_records[coalescing_access_index].valid = 0;
+            __threadfence();
+            storage_.coalescing_access_records[coalescing_access_index].valid = 1;
+            __threadfence();
+            return true;
         }
 
-        __device__ bool same_coalescing_key(const coalescing_proof_record& first,
-                                            const coalescing_proof_record& second) const
+        __device__ bool same_coalescing_key(const coalescing_access_record& first,
+                                            const coalescing_access_record& second) const
         {
             return first.valid && second.valid && first.site_id != 0
                    && first.site_id == second.site_id && first.epoch == second.epoch
@@ -440,13 +474,13 @@ namespace hip_moi
                    && first.byte_count == second.byte_count;
         }
 
-        __device__ bool same_coalescing_key(const coalescing_group_record& group,
-                                            const coalescing_proof_record& proof) const
+        __device__ bool same_coalescing_key(const coalescing_group_record&  group,
+                                            const coalescing_access_record& record) const
         {
-            return group.valid && proof.valid && group.site_id != 0
-                   && group.site_id == proof.site_id && group.epoch == proof.epoch
-                   && group.subgroup_id == proof.subgroup_id && group.kind == proof.kind
-                   && group.byte_count == proof.byte_count;
+            return group.valid && record.valid && group.site_id != 0
+                   && group.site_id == record.site_id && group.epoch == record.epoch
+                   && group.subgroup_id == record.subgroup_id && group.kind == record.kind
+                   && group.byte_count == record.byte_count;
         }
 
         __device__ uint64_t mix_coalescing_hash(uint64_t value) const
@@ -459,24 +493,25 @@ namespace hip_moi
             return value;
         }
 
-        __device__ int coalescing_group_hash(const coalescing_proof_record& proof) const
+        __device__ int coalescing_group_hash(const coalescing_access_record& record) const
         {
-            uint64_t hash = proof.site_id;
-            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.epoch) + 0x9e3779b97f4a7c15ull);
-            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.subgroup_id)
+            uint64_t hash = record.site_id;
+            hash
+                ^= mix_coalescing_hash(static_cast<uint64_t>(record.epoch) + 0x9e3779b97f4a7c15ull);
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(record.subgroup_id)
                                         + 0xbf58476d1ce4e5b9ull);
-            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.kind) + 0x94d049bb133111ebull);
-            hash ^= mix_coalescing_hash(static_cast<uint64_t>(proof.byte_count)
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(record.kind) + 0x94d049bb133111ebull);
+            hash ^= mix_coalescing_hash(static_cast<uint64_t>(record.byte_count)
                                         + 0x2545f4914f6cdd1dull);
             return static_cast<int>(
                 hash % static_cast<uint64_t>(storage_.coalescing_group_record_capacity));
         }
 
-        __device__ bool find_or_insert_coalescing_group(const coalescing_proof_record& proof,
+        __device__ bool find_or_insert_coalescing_group(const coalescing_access_record& record,
                                                         int* group_index) const
         {
             int capacity = storage_.coalescing_group_record_capacity;
-            int start    = coalescing_group_hash(proof);
+            int start    = coalescing_group_hash(record);
 
             for(int probe = 0; probe < capacity; ++probe)
             {
@@ -486,7 +521,7 @@ namespace hip_moi
                     index -= capacity;
                 }
 
-                if(same_coalescing_key(storage_.coalescing_group_records[index], proof))
+                if(same_coalescing_key(storage_.coalescing_group_records[index], record))
                 {
                     *group_index = index;
                     return true;
@@ -500,7 +535,7 @@ namespace hip_moi
                         return false;
                     }
 
-                    initialize_coalescing_group(index, proof);
+                    initialize_coalescing_group(index, record);
                     ++(*storage_.coalescing_group_count);
                     *group_index = index;
                     return true;
@@ -510,35 +545,35 @@ namespace hip_moi
             return false;
         }
 
-        __device__ void initialize_coalescing_group(int                            group_index,
-                                                    const coalescing_proof_record& proof) const
+        __device__ void initialize_coalescing_group(int                             group_index,
+                                                    const coalescing_access_record& record) const
         {
             storage_.coalescing_group_records[group_index] = coalescing_group_record{
-                proof.address,
-                proof.address,
-                proof.site_id,
+                record.address,
+                record.address,
+                record.site_id,
                 0,
                 0,
-                proof.byte_count,
-                proof.lane,
-                proof.lane,
-                proof.subgroup_id,
-                proof.epoch,
-                proof.kind,
+                record.byte_count,
+                record.lane,
+                record.lane,
+                record.subgroup_id,
+                record.epoch,
+                record.kind,
                 0,
                 1,
             };
         }
 
-        __device__ bool update_coalescing_group(coalescing_group_record*       group,
-                                                const coalescing_proof_record& proof) const
+        __device__ bool update_coalescing_group(coalescing_group_record*        group,
+                                                const coalescing_access_record& record) const
         {
-            if(proof.lane >= 64)
+            if(record.lane >= 64)
             {
                 return false;
             }
 
-            uint64_t lane_bit = 1ull << proof.lane;
+            uint64_t lane_bit = 1ull << record.lane;
             if(group->lane_mask & lane_bit)
             {
                 group->repeated_lane_mask |= lane_bit;
@@ -549,15 +584,15 @@ namespace hip_moi
             }
 
             ++group->participant_count;
-            if(proof.lane < group->first_lane)
+            if(record.lane < group->first_lane)
             {
-                group->first_lane         = proof.lane;
-                group->first_lane_address = proof.address;
+                group->first_lane         = record.lane;
+                group->first_lane_address = record.address;
             }
-            if(proof.lane > group->last_lane)
+            if(record.lane > group->last_lane)
             {
-                group->last_lane         = proof.lane;
-                group->last_lane_address = proof.address;
+                group->last_lane         = record.lane;
+                group->last_lane_address = record.address;
             }
             return true;
         }
@@ -578,19 +613,20 @@ namespace hip_moi
 
             for(int i = 0; i < scan_limit; ++i)
             {
-                coalescing_proof_record proof = storage_.coalescing_proof_records[i];
-                if(!proof.valid || proof.site_id == 0)
+                coalescing_access_record record = storage_.coalescing_access_records[i];
+                if(!record.valid || record.site_id == 0)
                 {
                     continue;
                 }
 
                 int group_index = 0;
-                if(!find_or_insert_coalescing_group(proof, &group_index))
+                if(!find_or_insert_coalescing_group(record, &group_index))
                 {
                     return false;
                 }
 
-                if(!update_coalescing_group(&storage_.coalescing_group_records[group_index], proof))
+                if(!update_coalescing_group(&storage_.coalescing_group_records[group_index],
+                                            record))
                 {
                     return false;
                 }
@@ -598,13 +634,13 @@ namespace hip_moi
             return true;
         }
 
-        __device__ bool has_prior_coalescing_leader(const coalescing_proof_record& record,
-                                                    int                            record_index,
-                                                    int                            scan_limit) const
+        __device__ bool has_prior_coalescing_leader(const coalescing_access_record& record,
+                                                    int                             record_index,
+                                                    int scan_limit) const
         {
             for(int i = 0; i < record_index && i < scan_limit; ++i)
             {
-                if(same_coalescing_key(storage_.coalescing_proof_records[i], record))
+                if(same_coalescing_key(storage_.coalescing_access_records[i], record))
                 {
                     return true;
                 }
@@ -659,7 +695,7 @@ namespace hip_moi
 
             for(int i = 0; i < scan_limit; ++i)
             {
-                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
+                coalescing_access_record candidate = storage_.coalescing_access_records[i];
                 if(!same_coalescing_key(group, candidate))
                 {
                     continue;
@@ -729,9 +765,9 @@ namespace hip_moi
             return true;
         }
 
-        __device__ bool build_coalesced_access_record(const coalescing_proof_record& key,
-                                                      int                            scan_limit,
-                                                      coalesced_access_record*       result) const
+        __device__ bool build_coalesced_access_record(const coalescing_access_record& key,
+                                                      int                             scan_limit,
+                                                      coalesced_access_record*        result) const
         {
             uint32_t                min_lane           = 0;
             uint32_t                max_lane           = 0;
@@ -739,12 +775,12 @@ namespace hip_moi
             uint64_t                lane_mask          = 0;
             uint64_t                repeated_lane_mask = 0;
             bool                    found              = false;
-            coalescing_proof_record first_lane_record{};
-            coalescing_proof_record last_lane_record{};
+            coalescing_access_record first_lane_record{};
+            coalescing_access_record last_lane_record{};
 
             for(int i = 0; i < scan_limit; ++i)
             {
-                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
+                coalescing_access_record candidate = storage_.coalescing_access_records[i];
                 if(!same_coalescing_key(candidate, key))
                 {
                     continue;
@@ -821,7 +857,7 @@ namespace hip_moi
 
             for(int i = 0; i < scan_limit; ++i)
             {
-                coalescing_proof_record candidate = storage_.coalescing_proof_records[i];
+                coalescing_access_record candidate = storage_.coalescing_access_records[i];
                 if(!same_coalescing_key(candidate, key))
                 {
                     continue;
@@ -934,15 +970,15 @@ namespace hip_moi
         {
             if(!storage_.coalesced_access_records || !storage_.coalesced_access_count
                || storage_.coalesced_access_record_capacity <= 0
-               || !storage_.coalescing_proof_records || !storage_.epoch_coalescing_proof_count)
+               || !storage_.coalescing_access_records || !storage_.epoch_coalescing_access_count)
             {
                 return;
             }
 
-            int scan_limit = *storage_.epoch_coalescing_proof_count;
-            if(scan_limit > storage_.coalescing_proof_record_capacity)
+            int scan_limit = *storage_.epoch_coalescing_access_count;
+            if(scan_limit > storage_.coalescing_access_record_capacity)
             {
-                scan_limit = storage_.coalescing_proof_record_capacity;
+                scan_limit = storage_.coalescing_access_record_capacity;
             }
 
             if(collect_coalesced_access_records_from_groups(scan_limit))
@@ -952,7 +988,7 @@ namespace hip_moi
 
             for(int i = 0; i < scan_limit; ++i)
             {
-                coalescing_proof_record key = storage_.coalescing_proof_records[i];
+                coalescing_access_record key = storage_.coalescing_access_records[i];
                 if(!key.valid || key.site_id == 0
                    || has_prior_coalescing_leader(key, i, scan_limit))
                 {
@@ -1069,9 +1105,64 @@ namespace hip_moi
                    && coalesced_access_overlaps_exact(summary, exact.address, exact.byte_count);
         }
 
+        __device__ bool coalesced_conflicts_with(const coalesced_access_record&  summary,
+                                                 const coalescing_access_record& exact) const
+        {
+            return summary.valid && exact.valid && summary.epoch == exact.epoch
+                   && summary.subgroup_id != exact.subgroup_id
+                   && (detail::is_write(summary.kind) || detail::is_write(exact.kind))
+                   && coalesced_access_overlaps_exact(summary, exact.address, exact.byte_count);
+        }
+
+        __device__ bool conflicts_with(const access_record&            first,
+                                       const coalescing_access_record& second) const
+        {
+            return first.valid && second.valid && first.epoch == second.epoch
+                   && first.subgroup_id != second.subgroup_id
+                   && (detail::is_write(first.kind) || detail::is_write(second.kind))
+                   && detail::byte_ranges_overlap(
+                       first.address, first.byte_count, second.address, second.byte_count);
+        }
+
+        __device__ bool conflicts_with(const coalescing_access_record& first,
+                                       const coalescing_access_record& second) const
+        {
+            return first.valid && second.valid && first.epoch == second.epoch
+                   && first.subgroup_id != second.subgroup_id
+                   && (detail::is_write(first.kind) || detail::is_write(second.kind))
+                   && detail::byte_ranges_overlap(
+                       first.address, first.byte_count, second.address, second.byte_count);
+        }
+
         __device__ bool
             coalesced_summary_contains_exact_member(const coalesced_access_record& summary,
                                                     const access_record&           exact) const
+        {
+            if(!summary.valid || !exact.valid || summary.epoch != exact.epoch
+               || summary.subgroup_id != exact.subgroup_id || summary.kind != exact.kind
+               || summary.byte_count != exact.byte_count || summary.site_id != exact.site_id)
+            {
+                return false;
+            }
+
+            for(uint32_t i = 0; i < summary.participant_count; ++i)
+            {
+                uintptr_t member_address = 0;
+                if(!coalesced_member_address(summary, i, &member_address))
+                {
+                    return false;
+                }
+                if(member_address == exact.address)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ bool
+            coalesced_summary_contains_exact_member(const coalesced_access_record&  summary,
+                                                    const coalescing_access_record& exact) const
         {
             if(!summary.valid || !exact.valid || summary.epoch != exact.epoch
                || summary.subgroup_id != exact.subgroup_id || summary.kind != exact.kind
@@ -1110,7 +1201,24 @@ namespace hip_moi
             return false;
         }
 
-        __device__ void emit_deferred_conflicts(int first_summary_index, int exact_scan_limit) const
+        __device__ bool exact_record_has_coalesced_summary(const coalescing_access_record& exact,
+                                                           int first_summary_index,
+                                                           int summary_scan_limit) const
+        {
+            for(int i = first_summary_index; i < summary_scan_limit; ++i)
+            {
+                if(coalesced_summary_contains_exact_member(storage_.coalesced_access_records[i],
+                                                           exact))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ void emit_deferred_conflicts(int first_summary_index,
+                                                int exact_scan_limit,
+                                                int coalescing_scan_limit) const
         {
             int summary_scan_limit = current_coalesced_access_scan_limit();
             if(storage_.coalesced_access_records && first_summary_index >= 0)
@@ -1132,43 +1240,103 @@ namespace hip_moi
                         }
                     }
 
-                    if(!storage_.access_records)
+                    if(storage_.access_records)
                     {
-                        continue;
+                        for(int j = 0; j < exact_scan_limit; ++j)
+                        {
+                            access_record exact = storage_.access_records[j];
+                            if(exact_record_has_coalesced_summary(
+                                   exact, first_summary_index, summary_scan_limit))
+                            {
+                                continue;
+                            }
+                            if(coalesced_conflicts_with(first, exact))
+                            {
+                                emit_conflict(first, exact);
+                            }
+                        }
                     }
 
-                    for(int j = 0; j < exact_scan_limit; ++j)
+                    if(storage_.coalescing_access_records)
                     {
-                        access_record exact = storage_.access_records[j];
-                        if(exact_record_has_coalesced_summary(
-                               exact, first_summary_index, summary_scan_limit))
+                        for(int j = 0; j < coalescing_scan_limit; ++j)
                         {
-                            continue;
-                        }
-                        if(coalesced_conflicts_with(first, exact))
-                        {
-                            emit_conflict(first, exact);
+                            coalescing_access_record exact = storage_.coalescing_access_records[j];
+                            if(exact_record_has_coalesced_summary(
+                                   exact, first_summary_index, summary_scan_limit))
+                            {
+                                continue;
+                            }
+                            if(coalesced_conflicts_with(first, exact))
+                            {
+                                emit_conflict(first, exact);
+                            }
                         }
                     }
                 }
             }
 
-            if(!storage_.access_records)
+            if(storage_.access_records)
+            {
+                for(int i = 0; i < exact_scan_limit; ++i)
+                {
+                    access_record first = storage_.access_records[i];
+                    if(exact_record_has_coalesced_summary(
+                           first, first_summary_index, summary_scan_limit))
+                    {
+                        continue;
+                    }
+                    for(int j = i + 1; j < exact_scan_limit; ++j)
+                    {
+                        access_record second = storage_.access_records[j];
+                        if(exact_record_has_coalesced_summary(
+                               second, first_summary_index, summary_scan_limit))
+                        {
+                            continue;
+                        }
+                        if(conflicts_with(first, second))
+                        {
+                            emit_conflict(first, second);
+                        }
+                    }
+
+                    if(!storage_.coalescing_access_records)
+                    {
+                        continue;
+                    }
+
+                    for(int j = 0; j < coalescing_scan_limit; ++j)
+                    {
+                        coalescing_access_record second = storage_.coalescing_access_records[j];
+                        if(exact_record_has_coalesced_summary(
+                               second, first_summary_index, summary_scan_limit))
+                        {
+                            continue;
+                        }
+                        if(conflicts_with(first, second))
+                        {
+                            emit_conflict(first, second);
+                        }
+                    }
+                }
+            }
+
+            if(!storage_.coalescing_access_records)
             {
                 return;
             }
 
-            for(int i = 0; i < exact_scan_limit; ++i)
+            for(int i = 0; i < coalescing_scan_limit; ++i)
             {
-                access_record first = storage_.access_records[i];
+                coalescing_access_record first = storage_.coalescing_access_records[i];
                 if(exact_record_has_coalesced_summary(
                        first, first_summary_index, summary_scan_limit))
                 {
                     continue;
                 }
-                for(int j = i + 1; j < exact_scan_limit; ++j)
+                for(int j = i + 1; j < coalescing_scan_limit; ++j)
                 {
-                    access_record second = storage_.access_records[j];
+                    coalescing_access_record second = storage_.coalescing_access_records[j];
                     if(exact_record_has_coalesced_summary(
                            second, first_summary_index, summary_scan_limit))
                     {
@@ -1186,17 +1354,19 @@ namespace hip_moi
         {
             if(thread_id() == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
-                int exact_scan_limit        = current_epoch_access_scan_limit();
-                int first_new_summary_index = current_coalesced_access_scan_limit();
+                int exact_scan_limit             = current_epoch_access_scan_limit();
+                int coalescing_access_scan_limit = current_epoch_coalescing_access_scan_limit();
+                int first_new_summary_index      = current_coalesced_access_scan_limit();
                 collect_coalesced_access_records();
-                emit_deferred_conflicts(first_new_summary_index, exact_scan_limit);
+                emit_deferred_conflicts(
+                    first_new_summary_index, exact_scan_limit, coalescing_access_scan_limit);
                 if(storage_.epoch_access_count)
                 {
                     *storage_.epoch_access_count = 0;
                 }
-                if(storage_.epoch_coalescing_proof_count)
+                if(storage_.epoch_coalescing_access_count)
                 {
-                    *storage_.epoch_coalescing_proof_count = 0;
+                    *storage_.epoch_coalescing_access_count = 0;
                 }
                 if(advance_epochs)
                 {
@@ -1257,6 +1427,60 @@ namespace hip_moi
                                         first.first_address,
                                         second.address,
                                         first.span_byte_count,
+                                        second.byte_count,
+                                        first.site_id,
+                                        second.site_id,
+                                    });
+        }
+
+        __device__ void emit_conflict(const coalesced_access_record&  first,
+                                      const coalescing_access_record& second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        first.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.first_address,
+                                        second.address,
+                                        first.span_byte_count,
+                                        second.byte_count,
+                                        first.site_id,
+                                        second.site_id,
+                                    });
+        }
+
+        __device__ void emit_conflict(const access_record&            first,
+                                      const coalescing_access_record& second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        first.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.address,
+                                        second.address,
+                                        first.byte_count,
+                                        second.byte_count,
+                                        first.site_id,
+                                        second.site_id,
+                                    });
+        }
+
+        __device__ void emit_conflict(const coalescing_access_record& first,
+                                      const coalescing_access_record& second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        first.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.address,
+                                        second.address,
+                                        first.byte_count,
                                         second.byte_count,
                                         first.site_id,
                                         second.site_id,

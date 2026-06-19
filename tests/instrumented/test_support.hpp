@@ -40,15 +40,15 @@ namespace hip_moi::test
     public:
         using access_record = typename Context::access_record;
         using coalesced_access_record = typename Context::coalesced_access_record;
-        using coalescing_proof_record =
-            typename hip_moi::detail::optional_coalescing_proof_record<Context>::type;
+        using coalescing_access_record =
+            typename hip_moi::detail::optional_coalescing_access_record<Context>::type;
         using coalescing_group_record =
             typename hip_moi::detail::optional_coalescing_group_record<Context>::type;
         using diagnostic    = typename Context::diagnostic;
         using storage_ref   = typename Context::storage_ref;
 
-        static constexpr bool has_coalescing_proof_records
-            = hip_moi::detail::optional_coalescing_proof_record<Context>::available;
+        static constexpr bool has_coalescing_access_records
+            = hip_moi::detail::optional_coalescing_access_record<Context>::available;
         static constexpr bool has_coalescing_group_records
             = hip_moi::detail::optional_coalescing_group_record<Context>::available;
 
@@ -67,31 +67,31 @@ namespace hip_moi::test
             allocate(access_capacity,
                      diagnostic_capacity,
                      subgroup_capacity,
-                     /*coalescing_proof_capacity=*/0,
+                     /*coalescing_access_capacity=*/0,
                      /*coalescing_group_capacity=*/0);
         }
 
         void allocate(int access_capacity,
                       int diagnostic_capacity,
                       int subgroup_capacity,
-                      int coalescing_proof_capacity)
+                      int coalescing_access_capacity)
         {
             allocate(access_capacity,
                      diagnostic_capacity,
                      subgroup_capacity,
-                     coalescing_proof_capacity,
+                     coalescing_access_capacity,
                      /*coalescing_group_capacity=*/0);
         }
 
         void allocate(int access_capacity,
                       int diagnostic_capacity,
                       int subgroup_capacity,
-                      int coalescing_proof_capacity,
+                      int coalescing_access_capacity,
                       int coalescing_group_capacity)
         {
             access_record_capacity_ = access_capacity;
             coalesced_access_record_capacity_ = access_capacity;
-            coalescing_proof_record_capacity_ = coalescing_proof_capacity;
+            coalescing_access_record_capacity_ = coalescing_access_capacity;
             coalescing_group_record_capacity_ = coalescing_group_capacity;
             diagnostic_capacity_    = diagnostic_capacity;
             subgroup_capacity_      = subgroup_capacity;
@@ -101,15 +101,16 @@ namespace hip_moi::test
             HIP_MOI_TEST_HIP_ASSERT(
                 hipMalloc(&coalesced_access_records_,
                           coalesced_access_record_capacity_ * sizeof(coalesced_access_record)));
-            if constexpr(has_coalescing_proof_records)
+            if constexpr(has_coalescing_access_records)
             {
-                if(coalescing_proof_record_capacity_ > 0)
+                if(coalescing_access_record_capacity_ > 0)
                 {
-                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_proof_records_,
-                                                      coalescing_proof_record_capacity_
-                                                          * sizeof(coalescing_proof_record)));
-                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_proof_count_, sizeof(int)));
-                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&epoch_coalescing_proof_count_, sizeof(int)));
+                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_records_,
+                                                      coalescing_access_record_capacity_
+                                                          * sizeof(coalescing_access_record)));
+                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_count_, sizeof(int)));
+                    HIP_MOI_TEST_HIP_ASSERT(
+                        hipMalloc(&epoch_coalescing_access_count_, sizeof(int)));
                 }
                 if constexpr(has_coalescing_group_records)
                 {
@@ -134,7 +135,7 @@ namespace hip_moi::test
 
         storage_ref ref() const
         {
-            if constexpr(has_coalescing_proof_records)
+            if constexpr(has_coalescing_access_records)
             {
                 return storage_ref{
                     access_records_,
@@ -149,10 +150,10 @@ namespace hip_moi::test
                     coalesced_access_records_,
                     coalesced_access_record_capacity_,
                     coalesced_access_count_,
-                    coalescing_proof_records_,
-                    coalescing_proof_record_capacity_,
-                    coalescing_proof_count_,
-                    epoch_coalescing_proof_count_,
+                    coalescing_access_records_,
+                    coalescing_access_record_capacity_,
+                    coalescing_access_count_,
+                    epoch_coalescing_access_count_,
                     coalescing_group_records_,
                     coalescing_group_record_capacity_,
                     coalescing_group_count_,
@@ -192,9 +193,9 @@ namespace hip_moi::test
             return coalesced_access_records_;
         }
 
-        coalescing_proof_record* coalescing_proof_records_device() const
+        coalescing_access_record* coalescing_access_records_device() const
         {
-            return coalescing_proof_records_;
+            return coalescing_access_records_;
         }
 
         coalescing_group_record* coalescing_group_records_device() const
@@ -212,9 +213,9 @@ namespace hip_moi::test
             return coalesced_access_count_;
         }
 
-        int* coalescing_proof_count_device() const
+        int* coalescing_access_count_device() const
         {
-            return coalescing_proof_count_;
+            return coalescing_access_count_;
         }
 
         int* coalescing_group_count_device() const
@@ -240,10 +241,10 @@ namespace hip_moi::test
                 (void)hipFree(coalesced_access_records_);
                 coalesced_access_records_ = nullptr;
             }
-            if(coalescing_proof_records_)
+            if(coalescing_access_records_)
             {
-                (void)hipFree(coalescing_proof_records_);
-                coalescing_proof_records_ = nullptr;
+                (void)hipFree(coalescing_access_records_);
+                coalescing_access_records_ = nullptr;
             }
             if(coalescing_group_records_)
             {
@@ -280,15 +281,15 @@ namespace hip_moi::test
                 (void)hipFree(coalesced_access_count_);
                 coalesced_access_count_ = nullptr;
             }
-            if(coalescing_proof_count_)
+            if(coalescing_access_count_)
             {
-                (void)hipFree(coalescing_proof_count_);
-                coalescing_proof_count_ = nullptr;
+                (void)hipFree(coalescing_access_count_);
+                coalescing_access_count_ = nullptr;
             }
-            if(epoch_coalescing_proof_count_)
+            if(epoch_coalescing_access_count_)
             {
-                (void)hipFree(epoch_coalescing_proof_count_);
-                epoch_coalescing_proof_count_ = nullptr;
+                (void)hipFree(epoch_coalescing_access_count_);
+                epoch_coalescing_access_count_ = nullptr;
             }
             if(coalescing_group_count_)
             {
@@ -299,7 +300,7 @@ namespace hip_moi::test
 
         access_record*           access_records_                   = nullptr;
         coalesced_access_record* coalesced_access_records_         = nullptr;
-        coalescing_proof_record* coalescing_proof_records_         = nullptr;
+        coalescing_access_record* coalescing_access_records_         = nullptr;
         coalescing_group_record* coalescing_group_records_         = nullptr;
         diagnostic*              diagnostics_                      = nullptr;
         subgroup_state*          subgroup_states_                  = nullptr;
@@ -307,12 +308,12 @@ namespace hip_moi::test
         int*                     epoch_access_count_               = nullptr;
         int*                     diagnostic_count_                 = nullptr;
         int*                     coalesced_access_count_           = nullptr;
-        int*                     coalescing_proof_count_           = nullptr;
-        int*                     epoch_coalescing_proof_count_     = nullptr;
+        int*                      coalescing_access_count_           = nullptr;
+        int*                      epoch_coalescing_access_count_     = nullptr;
         int*                     coalescing_group_count_           = nullptr;
         int                      access_record_capacity_           = 0;
         int                      coalesced_access_record_capacity_ = 0;
-        int                      coalescing_proof_record_capacity_ = 0;
+        int                       coalescing_access_record_capacity_ = 0;
         int                      coalescing_group_record_capacity_ = 0;
         int                      diagnostic_capacity_              = 0;
         int                      subgroup_capacity_                = 0;

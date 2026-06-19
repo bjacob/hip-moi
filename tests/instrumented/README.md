@@ -137,15 +137,16 @@ fixed-stride sites produce one coalescing summary at `ctx.syncthreads()`, while
 default-site accesses, repeated dynamic instances, and irregular address
 patterns remain exact-only.
 
-`022_subgroup_level_coalescing_test.hip` covers subgroup-level coalescing proof
-logs and summaries. It verifies that default site ids do not write proof
-records, opted-in sites write one proof record per lane, contiguous and
+`022_subgroup_level_coalescing_test.hip` covers subgroup-level coalescing access
+logs and summaries. It verifies that default site ids do not write coalescing
+access records, opted-in sites write one coalescing access record per lane and
+avoid ordinary exact access records when storage is available, contiguous and
 fixed-stride lane patterns summarize in both increasing and decreasing address
 order, repeated lanes are rejected, and independent subgroups produce separate
 summaries. It also covers many distinct sites sharing one epoch and the fallback
 path when optional group scratch storage is too small. The many-site coverage
-now uses the open-addressed subgroup grouping path and checks that the same site
-with load and store accesses produces separate groups.
+uses the open-addressed subgroup grouping path and checks that the same site with
+load and store accesses produces separate groups.
 
 `023_subgroup_level_coalesced_conflict_test.hip` starts using subgroup-level
 coalesced summaries in deferred epoch-close conflict detection. It checks

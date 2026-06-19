@@ -3,7 +3,7 @@
 //
 // tests/instrumented/022_subgroup_level_coalescing_test.hip
 //
-// Tests for subgroup-level coalescing proof logs and summaries.
+// Tests for subgroup-level coalescing coalescing access logs and summaries.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -18,7 +18,7 @@ namespace
     constexpr int kSubgroupCount      = 4;
     constexpr int kThreadCount        = kThreadsPerSubgroup * kSubgroupCount;
     constexpr int kAccessCapacity     = 320;
-    constexpr int kProofCapacity      = 320;
+    constexpr int kCoalescingAccessCapacity = 320;
     constexpr int kGroupCapacity      = 32;
     constexpr int kDiagnosticCapacity = 8;
 
@@ -41,12 +41,12 @@ namespace
     struct observed_metadata
     {
         int access_count;
-        int coalescing_proof_count;
+        int coalescing_access_count;
         int coalescing_group_count;
         int coalesced_access_count;
         int diagnostic_count;
-        hip_moi::subgroup_level_context::coalescing_proof_record
-            coalescing_proof_records[kProofCapacity];
+        hip_moi::subgroup_level_context::coalescing_access_record
+            coalescing_access_records[kCoalescingAccessCapacity];
         hip_moi::subgroup_level_context::coalesced_access_record
             coalesced_access_records[kAccessCapacity];
     };
@@ -212,9 +212,9 @@ namespace
                                           storage.access_count_device(),
                                           sizeof(observed->access_count),
                                           hipMemcpyDeviceToHost));
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_proof_count,
-                                          storage.coalescing_proof_count_device(),
-                                          sizeof(observed->coalescing_proof_count),
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_access_count,
+                                          storage.coalescing_access_count_device(),
+                                          sizeof(observed->coalescing_access_count),
                                           hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_group_count,
                                           storage.coalescing_group_count_device(),
@@ -228,9 +228,9 @@ namespace
                                           storage.diagnostic_count_device(),
                                           sizeof(observed->diagnostic_count),
                                           hipMemcpyDeviceToHost));
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalescing_proof_records,
-                                          storage.coalescing_proof_records_device(),
-                                          sizeof(observed->coalescing_proof_records),
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalescing_access_records,
+                                          storage.coalescing_access_records_device(),
+                                          sizeof(observed->coalescing_access_records),
                                           hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalesced_access_records,
                                           storage.coalesced_access_records_device(),
@@ -246,7 +246,7 @@ namespace
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
-            /*coalescing_proof_capacity=*/kProofCapacity,
+            /*coalescing_access_capacity=*/kCoalescingAccessCapacity,
             /*coalescing_group_capacity=*/group_capacity);
 
         hipLaunchKernelGGL(kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
@@ -256,10 +256,11 @@ namespace
         copy_observed_metadata(storage, observed);
     }
 
-    int stored_proof_count(const observed_metadata& observed)
+    int stored_coalescing_access_count(const observed_metadata& observed)
     {
-        return observed.coalescing_proof_count < kProofCapacity ? observed.coalescing_proof_count
-                                                                : kProofCapacity;
+        return observed.coalescing_access_count < kCoalescingAccessCapacity
+                   ? observed.coalescing_access_count
+                   : kCoalescingAccessCapacity;
     }
 
     int stored_summary_count(const observed_metadata& observed)
@@ -268,18 +269,18 @@ namespace
                                                                  : kAccessCapacity;
     }
 
-    void expect_one_proof_per_lane(const observed_metadata& observed,
-                                   hip_moi::site_id         expected_site,
-                                   uint32_t                 expected_subgroup)
+    void expect_one_coalescing_access_per_lane(const observed_metadata& observed,
+                                               hip_moi::site_id         expected_site,
+                                               uint32_t                 expected_subgroup)
     {
         bool seen_lanes[kThreadsPerSubgroup] = {};
-        int  proof_count                     = stored_proof_count(observed);
+        int  coalescing_access_count         = stored_coalescing_access_count(observed);
         int  matched_count                   = 0;
 
-        for(int i = 0; i < proof_count; ++i)
+        for(int i = 0; i < coalescing_access_count; ++i)
         {
-            const hip_moi::subgroup_level_context::coalescing_proof_record& record
-                = observed.coalescing_proof_records[i];
+            const hip_moi::subgroup_level_context::coalescing_access_record& record
+                = observed.coalescing_access_records[i];
             if(!record.valid || record.site_id != expected_site.value()
                || record.subgroup_id != expected_subgroup)
             {
@@ -328,28 +329,28 @@ namespace
         return false;
     }
 
-    TEST(HipMoiSubgroupLevelCoalescing, DefaultSiteDoesNotWriteProofRecords)
+    TEST(HipMoiSubgroupLevelCoalescing, DefaultSiteDoesNotWriteCoalescingAccessRecords)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(default_site_kernel, &observed));
 
         EXPECT_EQ(observed.access_count, kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 0);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiSubgroupLevelCoalescing, OptedInSiteWritesOneProofRecordPerLane)
+    TEST(HipMoiSubgroupLevelCoalescing, OptedInSiteWritesOneCoalescingAccessRecordPerLane)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(contiguous_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.diagnostic_count, 0);
-        expect_one_proof_per_lane(observed, kContiguousSite, /*expected_subgroup=*/1);
+        expect_one_coalescing_access_per_lane(observed, kContiguousSite, /*expected_subgroup=*/1);
     }
 
     TEST(HipMoiSubgroupLevelCoalescing, ContiguousLanePatternProducesSummary)
@@ -403,8 +404,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(repeated_lane_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, 2 * kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, 2 * kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -415,8 +416,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(irregular_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -427,8 +428,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(two_subgroup_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalescing_group_count, kSubgroupCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -451,8 +452,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(many_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, 8 * kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, 8 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, 8 * kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_group_count, 8);
         EXPECT_EQ(observed.coalesced_access_count, 8);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -511,8 +512,8 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(mixed_kind_site_kernel, &observed));
 
-        EXPECT_EQ(observed.access_count, 2 * kThreadsPerSubgroup);
-        EXPECT_EQ(observed.coalescing_proof_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, 2 * kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_group_count, 2);
         EXPECT_EQ(observed.coalesced_access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -532,14 +533,14 @@ namespace
                                 /*expected_kind=*/hip_moi::access_kind::load));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescing, GroupCapacityOverflowFallsBackToProofScan)
+    TEST(HipMoiSubgroupLevelCoalescing, GroupCapacityOverflowFallsBackToAccessScan)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(
             run_case(two_subgroup_site_kernel, &observed, /*group_capacity=*/1));
 
-        EXPECT_EQ(observed.access_count, kThreadCount);
-        EXPECT_EQ(observed.coalescing_proof_count, kThreadCount);
+        EXPECT_EQ(observed.access_count, 0);
+        EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
