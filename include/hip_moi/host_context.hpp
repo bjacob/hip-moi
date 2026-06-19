@@ -301,6 +301,46 @@ namespace hip_moi
                 return last_diagnostic_count_;
             }
 
+            std::size_t storage_bytes() const
+            {
+                return storage_bytes_;
+            }
+
+            std::size_t layout_bytes() const
+            {
+                return layout_bytes_;
+            }
+
+            int access_record_capacity() const
+            {
+                return access_record_capacity_;
+            }
+
+            int coalesced_access_record_capacity() const
+            {
+                return coalesced_access_record_capacity_;
+            }
+
+            int coalescing_access_record_capacity() const
+            {
+                return coalescing_access_record_capacity_;
+            }
+
+            int coalescing_group_record_capacity() const
+            {
+                return coalescing_group_record_capacity_;
+            }
+
+            int diagnostic_capacity() const
+            {
+                return diagnostic_capacity_;
+            }
+
+            int subgroup_capacity() const
+            {
+                return subgroup_capacity_;
+            }
+
             void set_destructor_reporting_enabled(bool enabled)
             {
                 destructor_reports_ = enabled;

@@ -1356,10 +1356,15 @@ Incremental instrumented test growth:
     documents default global-memory storage, manual storage, and saturation
     behavior.
 38. Keep improving saturation behavior and observability.
-    * Add direct tests for too-small `storage_bytes` death behavior.
+    * Add direct tests for too-small `storage_bytes` death behavior. Done.
+    * Add direct tests for typed-capacity override semantics. Done for the
+      primary host-context cases: required zero capacities are rejected,
+      positive overrides are honored, and optional subgroup-level coalescing
+      capacities may be disabled with zero.
     * Consider public host-side introspection for computed capacities and
       storage layout, if users need to tune without reading implementation
-      internals.
+      internals. Done for the first accessors: host contexts now expose
+      `storage_bytes()`, `layout_bytes()`, and computed typed capacities.
     * Preserve the invariant that storage exhaustion produces diagnostics or
       conservative fallback, not silent corruption.
 

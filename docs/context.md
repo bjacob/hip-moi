@@ -54,6 +54,30 @@ optional subgroup-level coalescing buffers, zero disables that buffer.
 The access-record and diagnostic capacities cannot be zero: exact access logging
 and diagnostics are the correctness anchor for both instrumentation modes.
 
+## Inspecting the Layout
+
+Host contexts expose the computed layout:
+
+```c++
+std::size_t allocated = moi.storage_bytes();
+std::size_t used = moi.layout_bytes();
+int access_records = moi.access_record_capacity();
+int diagnostics = moi.diagnostic_capacity();
+```
+
+For subgroup-level host contexts, the same accessors also report optional
+coalescing capacities:
+
+```c++
+int summaries = moi.coalesced_access_record_capacity();
+int coalescing_accesses = moi.coalescing_access_record_capacity();
+int coalescing_groups = moi.coalescing_group_record_capacity();
+```
+
+These values are meant for tuning and tests. They describe the storage
+partition chosen by the host context; kernels still receive only the non-owning
+`storage_ref`.
+
 ## Manual Storage
 
 The public `storage_ref` types remain explicit typed views. This is intentional.
