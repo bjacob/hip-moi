@@ -127,3 +127,5 @@ hip_moi_add_gtest(hip_moi_instrumented_site_id_test
                   instrumented/020_site_id_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_coalescing_opportunity_test
                   instrumented/021_coalescing_opportunity_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_coalescing_test
+                  instrumented/022_subgroup_level_coalescing_test.hip)

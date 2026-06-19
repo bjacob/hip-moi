@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
+#include <type_traits>
 
 namespace hip_moi
 {
@@ -60,6 +61,22 @@ namespace hip_moi
 
     namespace detail
     {
+        template <typename Context, typename = void>
+        struct optional_coalescing_proof_record
+        {
+            using type                      = unsigned char;
+            static constexpr bool available = false;
+        };
+
+        template <typename Context>
+        struct optional_coalescing_proof_record<
+            Context,
+            std::void_t<typename Context::coalescing_proof_record>>
+        {
+            using type                      = typename Context::coalescing_proof_record;
+            static constexpr bool available = true;
+        };
+
         __host__ __device__ constexpr uint64_t fnv1a64(const char* text)
         {
             uint64_t hash = 14695981039346656037ull;

@@ -68,10 +68,11 @@ foundation:
   through per-lane vector fragment loads and stores.
 * `docs/coalescing.md` explains the current coalescing model: users opt in with
   nonzero `site_id` values, default zero-site accesses remain exact-only, the
-  current thread-level implementation emits summary metadata at epoch
-  boundaries without changing exact diagnostics, and the detected patterns are
-  currently limited to simple contiguous or fixed-stride thread-to-address
-  shapes.
+  current implementation emits summary metadata at epoch boundaries without
+  changing exact diagnostics, thread-level mode proves summaries from exact
+  records, subgroup-level mode proves summaries from a separate optional
+  lane-based proof log, and the detected patterns are currently limited to
+  simple contiguous or fixed-stride thread/lane-to-address shapes.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -213,6 +214,11 @@ foundation:
   nonzero-site contiguous and fixed-stride all-thread stores produce one summary
   at `ctx.syncthreads()`, while default-site, repeated dynamic-instance, and
   irregular address patterns remain exact-only.
+* `tests/instrumented/022_subgroup_level_coalescing_test.hip` covers
+  subgroup-level coalescing proof logs and summaries. It checks that default
+  site ids do not write proof records, opted-in sites write one proof record per
+  lane, contiguous and fixed-stride lane patterns summarize, repeated lanes are
+  rejected, and independent subgroups produce separate summaries.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -237,8 +243,11 @@ foundation:
   numeric site ids. A first conservative thread-level coalescing-opportunity
   pass now exists: at `ctx.syncthreads()`, exact access records from a just-ended
   epoch are scanned for nonzero-site contiguous or fixed-stride thread-to-address
-  patterns, and summaries are written to a separate summary buffer. These
-  summaries do not yet drive diagnostics or hot-path compression.
+  patterns, and summaries are written to a separate summary buffer. A matching
+  subgroup-level proof-log pass now exists: nonzero-site subgroup accesses can
+  write optional lane/address proof records, and `ctx.syncthreads()` summarizes
+  proven contiguous or fixed-stride lane-to-address patterns. These summaries do
+  not yet drive diagnostics or hot-path compression.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -248,9 +257,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, continue the coalescing line by implementing
-lane-based subgroup-level proof logs, and start recording lowering notes for
-`ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, decide whether coalescing summaries should begin
+driving hot-path compression or diagnostics, and start recording lowering notes
+for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -776,20 +785,20 @@ address patterns remain exact-only. These summaries are currently diagnostic
 metadata and test or planning evidence; conflict diagnostics still come from the
 exact access log.
 
-`subgroup_level_context` already has separate summary storage in its public
-shape, but it does not yet produce summaries. Because subgroup-level hot records
-intentionally omit thread id, subgroup-level coalescing needs a separate proof
-path rather than reintroducing per-thread identity into the subgroup-level
-access record. That preserves the "pay only for what you use" invariant:
-ordinary subgroup-level diagnostics keep compact subgroup-shaped access records,
-while nonzero-site accesses may optionally write lane-level proof records.
+`subgroup_level_context` has separate summary storage and now produces summaries
+through a separate proof path. Because subgroup-level hot records intentionally
+omit thread id, subgroup-level coalescing does not reintroduce per-thread
+identity into the subgroup-level access record. That preserves the "pay only for
+what you use" invariant: ordinary subgroup-level diagnostics keep compact
+subgroup-shaped access records, while nonzero-site accesses may optionally write
+lane-level proof records.
 
-The planned subgroup-level proof-log path:
+The subgroup-level proof-log path:
 
 * Keep `subgroup_level_context::access_record` as diagnostic truth. It records
   address, byte size, subgroup id, epoch, kind, validity, and site id, but not
   thread id or lane.
-* Add a separate optional `coalescing_proof_record` log, used only when
+* Use a separate optional `coalescing_proof_record` log, used only when
   `site_id != 0` and the caller supplied proof storage. A proof record stores
   the same grouping key plus `lane` and address:
   `(epoch, subgroup_id, site_id, kind, byte_count, lane, address)`.
@@ -1214,10 +1223,14 @@ Incremental instrumented test growth:
     proof log keyed by subgroup/epoch/site/kind/byte size and carrying lane plus
     address. It should build `lane_mask` and `repeated_lane_mask` at epoch
     boundaries, separate from the subgroup-level access record, so that the hot
-    diagnostic record can keep omitting thread id and lane.
+    diagnostic record can keep omitting thread id and lane. Done.
 28. Add `lane_in_subgroup()` as the preferred helper name, migrate tests and
     docs toward lane terminology, and keep the existing rank-named helper only
-    as a temporary compatibility spelling if needed.
+    as a temporary compatibility spelling if needed. Done for the public helper
+    and new tests/docs; older tests may still use the compatibility spelling.
+29. Decide whether coalesced summaries should remain observability metadata for
+    now or start driving actual access-log compression. Do this separately for
+    thread-level and subgroup-level modes, since their proof paths differ.
 
 Layer 1: toy deterministic kernels.
 

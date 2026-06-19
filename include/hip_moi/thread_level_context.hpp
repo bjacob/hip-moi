@@ -235,13 +235,18 @@ namespace hip_moi
             return subgroup < subgroup_count ? subgroup : subgroup_count - 1;
         }
 
-        __device__ uint32_t thread_rank_in_subgroup() const
+        __device__ uint32_t lane_in_subgroup() const
         {
             if(cfg_.threads_per_subgroup <= 0)
             {
                 return thread_id();
             }
             return thread_id() % static_cast<uint32_t>(cfg_.threads_per_subgroup);
+        }
+
+        __device__ uint32_t thread_rank_in_subgroup() const
+        {
+            return lane_in_subgroup();
         }
 
     private:

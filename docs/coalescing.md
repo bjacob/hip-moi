@@ -10,10 +10,10 @@ the LDS loads and stores they actually wrote with `ctx.lds_load` and
 `ctx.lds_store`, and diagnostics are based on those exact access records.
 
 Coalescing is an optimization direction layered on top of that exact model. A
-coalesced access is a compact summary of multiple exact access records that the
-detector has proven to follow a regular pattern. The current implementation
-records coalescing summaries as metadata only; exact access records still drive
-diagnostics.
+coalesced access is a compact summary of multiple instrumented access records
+that the detector has proven to follow a regular pattern. The current
+implementation records coalescing summaries as metadata only; exact access
+records still drive diagnostics.
 
 ## Opting In
 
@@ -48,6 +48,23 @@ ctx.lds_store(&lds[threadIdx.x], value, tile_store_site);
 Prefer `HIP_MOI_SITE_ID()` in ordinary hand-written code. Use explicit numeric
 ids only when the caller has a reason to manage identity itself.
 
+For subgroup-level summaries, a nonzero site id is necessary but not sufficient:
+the context also needs proof-log storage. `hip_moi::subgroup_level_host_context`
+can provide that storage when requested:
+
+```c++
+hip_moi::host_context_options options;
+options.access_record_capacity = 1024;
+options.coalesced_access_record_capacity = 1024;
+options.coalescing_proof_record_capacity = 1024;
+
+hip_moi::subgroup_level_host_context moi(options);
+```
+
+Custom `storage_ref` users can instead populate the
+`coalescing_proof_records`, `coalescing_proof_record_capacity`,
+`coalescing_proof_count`, and `epoch_coalescing_proof_count` fields directly.
+
 ## Current Overhead
 
 ### No Opt-In
@@ -63,19 +80,27 @@ scan, performed by one thread, over the exact records in that epoch.
 
 Users who provide their own `storage_ref` may leave the coalesced summary
 buffer pointers null. In that case the summary pass returns immediately, and no
-coalescing metadata is produced.
+coalescing metadata is produced. For subgroup-level mode, users may also leave
+the coalescing proof-log pointers null; then no subgroup summaries are produced.
 
 ### Opted-In Sites
 
-For a nonzero site id, hip-moi still records exact accesses first. At
-`ctx.syncthreads()`, thread-level mode scans the just-ended epoch and tries to
-prove that records from the same site form a regular pattern.
+For a nonzero site id, hip-moi still records exact accesses first. In
+thread-level mode, `ctx.syncthreads()` scans the just-ended exact access records
+and tries to prove that records from the same site form a regular pattern.
+
+In subgroup-level mode, an opted-in access also writes a separate proof record
+when proof storage is supplied. That proof record carries the access address and
+the thread's lane within the subgroup. The subgroup-level diagnostic
+`access_record` stays compact and does not grow a lane or thread-id field.
 
 Today, opting in therefore costs:
 
 * the same exact per-access logging as before,
 * a nonzero `site_id` field in those exact records,
-* an epoch-boundary proof pass over exact records,
+* in subgroup-level mode, one additional proof record per opted-in access when
+  proof storage is supplied,
+* an epoch-boundary proof pass over exact records or proof records,
 * one coalesced summary record for each proven regular site, if summary storage
   has capacity.
 
@@ -86,13 +111,16 @@ these proofs to compress logging, but that is not implemented yet.
 ## Representation
 
 Thread-level summaries use `thread_level_context::coalesced_access_record`.
-Conceptually, one summary says:
+Subgroup-level summaries use
+`subgroup_level_context::coalesced_access_record`.
+
+Conceptually, a thread-level summary says:
 
 > In this epoch, a contiguous range of threads in one subgroup all performed the
 > same kind of access, from the same static site, with the same byte size, and
 > their addresses followed a fixed stride.
 
-The fields are:
+The thread-level fields are:
 
 * `first_address`: address used by the first participating thread.
 * `byte_count`: byte size of each individual access.
@@ -107,6 +135,15 @@ The fields are:
 * `address_stride`: signed byte stride between consecutive participating
   threads' addresses.
 * `site_id`: nonzero source-site id shared by the exact records.
+
+Conceptually, a subgroup-level summary says:
+
+> In this epoch, a contiguous range of lanes in one subgroup all performed the
+> same kind of access, from the same static site, with the same byte size, and
+> their addresses followed a fixed stride.
+
+Its fields are the same shape, except it uses `first_lane` rather than
+`first_thread_id`.
 
 This representation can describe more than a strictly contiguous byte range.
 For example, it can represent all of these shapes:
@@ -136,26 +173,23 @@ The first has stride `4`, the second has stride `8`, and the third has stride
 `-8`. A summary is only emitted when the stride is large enough that adjacent
 participating accesses do not overlap.
 
-Subgroup-level context already has a separate `coalesced_access_record` type in
-its public storage shape, but subgroup-level mode does not emit summaries yet.
-Because subgroup-level hot access records intentionally omit thread ids,
-subgroup-level coalescing needs separate proof metadata before it can be made
-meaningful.
-
 ## Patterns Detected Today
 
 The current automatic coalescing code is deliberately narrow.
 
-It only runs in `thread_level_context`, and only at `ctx.syncthreads()`. It can
-emit a summary when all of the following are true for a group of exact records:
+It only runs at `ctx.syncthreads()`. Thread-level mode proves patterns from
+exact access records. Subgroup-level mode proves patterns from the separate
+proof log. Both can emit a summary when all of the following are true for a
+group of records:
 
 * the records have a nonzero `site_id`,
 * they are in the same epoch,
 * they are in the same subgroup,
 * they have the same access kind,
 * they have the same `byte_count`,
-* their thread ids form one contiguous range,
-* each participating thread has exactly one record for that site in that epoch,
+* their thread ids, or subgroup lanes, form one contiguous range,
+* each participating thread/lane has exactly one record for that site in that
+  epoch,
 * their addresses follow one fixed signed byte stride,
 * the stride magnitude is at least `byte_count`, so the represented accesses do
   not overlap,
@@ -167,8 +201,9 @@ The current code does not summarize:
 * repeated dynamic instances of the same site by the same thread in one epoch,
 * irregular address expressions,
 * tile shapes that need more than one affine stride,
-* patterns crossing subgroup boundaries,
-* subgroup-level access records,
+* a single summary spanning multiple subgroups; subgroup-level mode emits one
+  summary per subgroup,
+* subgroup-level opted-in accesses when no proof storage was supplied,
 * accesses that are not visible to hip-moi because they were raw LDS loads or
   stores instead of `ctx.lds_load` / `ctx.lds_store`.
 

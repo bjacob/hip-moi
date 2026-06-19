@@ -136,3 +136,9 @@ nonzero site ids for regular-access summaries. Thread-level contiguous and
 fixed-stride sites produce one coalescing summary at `ctx.syncthreads()`, while
 default-site accesses, repeated dynamic instances, and irregular address
 patterns remain exact-only.
+
+`022_subgroup_level_coalescing_test.hip` covers subgroup-level coalescing proof
+logs and summaries. It verifies that default site ids do not write proof
+records, opted-in sites write one proof record per lane, contiguous and
+fixed-stride lane patterns summarize, repeated lanes are rejected, and
+independent subgroups produce separate summaries.
