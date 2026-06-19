@@ -7,13 +7,16 @@ SPDX-License-Identifier: MIT
 
 hip-moi's primary contract is exact access-level instrumentation: users replace
 the LDS loads and stores they actually wrote with `ctx.lds_load` and
-`ctx.lds_store`, and diagnostics are based on those exact access records.
+`ctx.lds_store`. Exact records remain the correctness anchor and fallback, even
+when an opted-in subgroup-level site is summarized for an epoch-close conflict
+check.
 
 Coalescing is an optimization direction layered on top of that exact model. A
 coalesced access is a compact summary of multiple instrumented access records
-that the detector has proven to follow a regular pattern. The current
-implementation records coalescing summaries as metadata only; exact access
-records still drive diagnostics.
+that the detector has proven to follow a regular pattern. Thread-level
+summaries are currently opportunity metadata. Subgroup-level summaries now also
+participate in conflict detection at epoch boundaries when nonzero site ids and
+proof-log storage are supplied.
 
 ## Opting In
 
@@ -78,6 +81,10 @@ that pass observes that every site id is zero and emits no summaries. The
 per-access behavior remains exact logging; the extra work is an epoch-boundary
 scan, performed by one thread, over the exact records in that epoch.
 
+Subgroup-level mode behaves similarly when no access opts in: no proof records
+are written, no summaries are emitted, and the summary-conflict pass has no
+summary records to compare.
+
 Users who provide their own `storage_ref` may leave the coalesced summary
 buffer pointers null. In that case the summary pass returns immediately, and no
 coalescing metadata is produced. For subgroup-level mode, users may also leave
@@ -102,11 +109,15 @@ Today, opting in therefore costs:
   proof storage is supplied,
 * an epoch-boundary proof pass over exact records or proof records,
 * one coalesced summary record for each proven regular site, if summary storage
-  has capacity.
+  has capacity,
+* in subgroup-level mode, an epoch-boundary conflict pass over the summaries
+  produced for that epoch.
 
-The current implementation does not yet reduce the hot-path access-log traffic.
-It is intentionally a summary/opportunity detector first. Future work may use
-these proofs to compress logging, but that is not implemented yet.
+The current implementation does not yet reduce the hot-path access-log traffic:
+exact records are still recorded first. For subgroup-level mode, coalescing is
+now more than metadata because proven summaries can emit diagnostics, but it is
+not yet a performance feature users should rely on to reduce instrumentation
+overhead.
 
 ## Representation
 
@@ -173,6 +184,29 @@ The first has stride `4`, the second has stride `8`, and the third has stride
 `-8`. A summary is only emitted when the stride is large enough that adjacent
 participating accesses do not overlap.
 
+## Conflict Detection
+
+Thread-level conflict detection is still exact-record based. Thread-level
+summaries are useful for observing coalescing opportunities but do not yet
+change diagnostics.
+
+Subgroup-level conflict detection has two layers:
+
+* the original exact-record scan still runs when each access is recorded;
+* at `ctx.syncthreads()`, summaries produced for the closing epoch are compared
+  with each other and with exact records that were not themselves summarized.
+
+The summary overlap check uses the represented per-lane byte ranges, not merely
+the enclosing `span_byte_count`. This matters for fixed-stride patterns with
+gaps: two summaries whose spans overlap do not report unless at least one
+represented lane access actually overlaps.
+
+When a subgroup-level diagnostic is emitted from a coalesced summary, the
+diagnostic still uses `kind=access_conflict`. The address and size fields on a
+coalesced side describe the summary's first address and enclosing span. For a
+summary-vs-exact diagnostic, the exact side keeps the exact access address and
+byte size.
+
 ## Patterns Detected Today
 
 The current automatic coalescing code is deliberately narrow.
@@ -207,6 +241,6 @@ The current code does not summarize:
 * accesses that are not visible to hip-moi because they were raw LDS loads or
   stores instead of `ctx.lds_load` / `ctx.lds_store`.
 
-This means coalescing is currently most useful as a way to observe simple,
-regular all-thread LDS access sites. It is not yet a performance feature users
-should rely on to reduce instrumentation overhead.
+This means coalescing is currently most useful as a way to observe and diagnose
+simple, regular all-thread LDS access sites. It is not yet a performance
+feature users should rely on to reduce instrumentation overhead.

@@ -148,13 +148,26 @@ namespace hip_moi
             return 0;
         }
 
+        __host__ __device__ inline bool byte_ranges_overlap(uintptr_t first_address,
+                                                            uint32_t  first_byte_count,
+                                                            uintptr_t second_address,
+                                                            uint32_t  second_byte_count)
+        {
+            uintptr_t first_end  = first_byte_count > UINTPTR_MAX - first_address
+                                       ? UINTPTR_MAX
+                                       : first_address + first_byte_count;
+            uintptr_t second_end = second_byte_count > UINTPTR_MAX - second_address
+                                       ? UINTPTR_MAX
+                                       : second_address + second_byte_count;
+            return first_address < second_end && second_address < first_end;
+        }
+
         template <typename AccessRecord>
         __device__ inline bool byte_ranges_overlap(const AccessRecord& first,
                                                    const AccessRecord& second)
         {
-            uintptr_t first_end  = first.address + first.byte_count;
-            uintptr_t second_end = second.address + second.byte_count;
-            return first.address < second_end && second.address < first_end;
+            return byte_ranges_overlap(
+                first.address, first.byte_count, second.address, second.byte_count);
         }
 
         __device__ inline bool is_write(access_kind kind)

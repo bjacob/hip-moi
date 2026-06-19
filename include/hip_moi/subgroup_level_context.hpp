@@ -224,7 +224,10 @@ namespace hip_moi
             __syncthreads();
             if(thread_id() == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
+                int exact_scan_limit        = current_epoch_access_scan_limit();
+                int first_new_summary_index = current_coalesced_access_scan_limit();
                 collect_coalesced_access_records();
+                emit_coalesced_conflicts(first_new_summary_index, exact_scan_limit);
                 if(storage_.epoch_access_count)
                 {
                     *storage_.epoch_access_count = 0;
@@ -298,6 +301,33 @@ namespace hip_moi
                    && first.subgroup_id != second.subgroup_id
                    && (detail::is_write(first.kind) || detail::is_write(second.kind))
                    && detail::byte_ranges_overlap(first, second);
+        }
+
+        __device__ int current_epoch_access_scan_limit() const
+        {
+            if(!storage_.access_records || !storage_.epoch_access_count
+               || storage_.access_record_capacity <= 0)
+            {
+                return 0;
+            }
+
+            int scan_limit = *storage_.epoch_access_count;
+            return scan_limit > storage_.access_record_capacity ? storage_.access_record_capacity
+                                                                : scan_limit;
+        }
+
+        __device__ int current_coalesced_access_scan_limit() const
+        {
+            if(!storage_.coalesced_access_records || !storage_.coalesced_access_count
+               || storage_.coalesced_access_record_capacity <= 0)
+            {
+                return 0;
+            }
+
+            int scan_limit = *storage_.coalesced_access_count;
+            return scan_limit > storage_.coalesced_access_record_capacity
+                       ? storage_.coalesced_access_record_capacity
+                       : scan_limit;
         }
 
         __device__ void
@@ -633,6 +663,194 @@ namespace hip_moi
             }
         }
 
+        __device__ bool coalesced_member_address(const coalesced_access_record& record,
+                                                 uint32_t                       participant,
+                                                 uintptr_t*                     address) const
+        {
+            if(participant >= record.participant_count)
+            {
+                return false;
+            }
+
+            uint64_t stride_magnitude = record.address_stride < 0
+                                            ? static_cast<uint64_t>(-record.address_stride)
+                                            : static_cast<uint64_t>(record.address_stride);
+            uint64_t step             = static_cast<uint64_t>(participant) * stride_magnitude;
+            if(record.address_stride >= 0)
+            {
+                if(step > UINTPTR_MAX - record.first_address)
+                {
+                    return false;
+                }
+                *address = record.first_address + static_cast<uintptr_t>(step);
+                return true;
+            }
+
+            if(step > record.first_address)
+            {
+                return false;
+            }
+            *address = record.first_address - static_cast<uintptr_t>(step);
+            return true;
+        }
+
+        __device__ bool
+            coalesced_access_overlaps_exact(const coalesced_access_record& coalesced_record,
+                                            uintptr_t                      exact_address,
+                                            uint32_t                       exact_byte_count) const
+        {
+            if(!coalesced_record.valid)
+            {
+                return false;
+            }
+
+            for(uint32_t i = 0; i < coalesced_record.participant_count; ++i)
+            {
+                uintptr_t member_address = 0;
+                if(!coalesced_member_address(coalesced_record, i, &member_address))
+                {
+                    return false;
+                }
+                if(detail::byte_ranges_overlap(member_address,
+                                               coalesced_record.byte_count,
+                                               exact_address,
+                                               exact_byte_count))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ bool coalesced_accesses_overlap(const coalesced_access_record& first,
+                                                   const coalesced_access_record& second) const
+        {
+            if(!first.valid || !second.valid)
+            {
+                return false;
+            }
+
+            for(uint32_t i = 0; i < first.participant_count; ++i)
+            {
+                uintptr_t first_member_address = 0;
+                if(!coalesced_member_address(first, i, &first_member_address))
+                {
+                    return false;
+                }
+                if(coalesced_access_overlaps_exact(second, first_member_address, first.byte_count))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ bool coalesced_conflicts_with(const coalesced_access_record& first,
+                                                 const coalesced_access_record& second) const
+        {
+            return first.valid && second.valid && first.epoch == second.epoch
+                   && first.subgroup_id != second.subgroup_id
+                   && (detail::is_write(first.kind) || detail::is_write(second.kind))
+                   && coalesced_accesses_overlap(first, second);
+        }
+
+        __device__ bool coalesced_conflicts_with(const coalesced_access_record& summary,
+                                                 const access_record&           exact) const
+        {
+            return summary.valid && exact.valid && summary.epoch == exact.epoch
+                   && summary.subgroup_id != exact.subgroup_id
+                   && (detail::is_write(summary.kind) || detail::is_write(exact.kind))
+                   && coalesced_access_overlaps_exact(summary, exact.address, exact.byte_count);
+        }
+
+        __device__ bool
+            coalesced_summary_contains_exact_member(const coalesced_access_record& summary,
+                                                    const access_record&           exact) const
+        {
+            if(!summary.valid || !exact.valid || summary.epoch != exact.epoch
+               || summary.subgroup_id != exact.subgroup_id || summary.kind != exact.kind
+               || summary.byte_count != exact.byte_count || summary.site_id != exact.site_id)
+            {
+                return false;
+            }
+
+            for(uint32_t i = 0; i < summary.participant_count; ++i)
+            {
+                uintptr_t member_address = 0;
+                if(!coalesced_member_address(summary, i, &member_address))
+                {
+                    return false;
+                }
+                if(member_address == exact.address)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ bool exact_record_has_coalesced_summary(const access_record& exact,
+                                                           int                  first_summary_index,
+                                                           int summary_scan_limit) const
+        {
+            for(int i = first_summary_index; i < summary_scan_limit; ++i)
+            {
+                if(coalesced_summary_contains_exact_member(storage_.coalesced_access_records[i],
+                                                           exact))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        __device__ void emit_coalesced_conflicts(int first_summary_index,
+                                                 int exact_scan_limit) const
+        {
+            if(!storage_.coalesced_access_records || first_summary_index < 0)
+            {
+                return;
+            }
+
+            int summary_scan_limit = current_coalesced_access_scan_limit();
+            for(int i = first_summary_index; i < summary_scan_limit; ++i)
+            {
+                coalesced_access_record first = storage_.coalesced_access_records[i];
+                if(!first.valid)
+                {
+                    continue;
+                }
+
+                for(int j = i + 1; j < summary_scan_limit; ++j)
+                {
+                    coalesced_access_record second = storage_.coalesced_access_records[j];
+                    if(coalesced_conflicts_with(first, second))
+                    {
+                        emit_conflict(first, second);
+                    }
+                }
+
+                if(!storage_.access_records)
+                {
+                    continue;
+                }
+
+                for(int j = 0; j < exact_scan_limit; ++j)
+                {
+                    access_record exact = storage_.access_records[j];
+                    if(exact_record_has_coalesced_summary(
+                           exact, first_summary_index, summary_scan_limit))
+                    {
+                        continue;
+                    }
+                    if(coalesced_conflicts_with(first, exact))
+                    {
+                        emit_conflict(first, exact);
+                    }
+                }
+            }
+        }
+
         __device__ void emit_conflict(const access_record& first, const access_record& second) const
         {
             detail::emit_diagnostic(storage_,
@@ -644,6 +862,42 @@ namespace hip_moi
                                         first.address,
                                         second.address,
                                         first.byte_count,
+                                        second.byte_count,
+                                        first.site_id,
+                                        second.site_id,
+                                    });
+        }
+
+        __device__ void emit_conflict(const coalesced_access_record& first,
+                                      const coalesced_access_record& second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        first.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.first_address,
+                                        second.first_address,
+                                        first.span_byte_count,
+                                        second.span_byte_count,
+                                        first.site_id,
+                                        second.site_id,
+                                    });
+        }
+
+        __device__ void emit_conflict(const coalesced_access_record& first,
+                                      const access_record&           second) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        first.epoch,
+                                        first.subgroup_id,
+                                        second.subgroup_id,
+                                        first.first_address,
+                                        second.address,
+                                        first.span_byte_count,
                                         second.byte_count,
                                         first.site_id,
                                         second.site_id,

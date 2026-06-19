@@ -68,11 +68,12 @@ foundation:
   through per-lane vector fragment loads and stores.
 * `docs/coalescing.md` explains the current coalescing model: users opt in with
   nonzero `site_id` values, default zero-site accesses remain exact-only, the
-  current implementation emits summary metadata at epoch boundaries without
-  changing exact diagnostics, thread-level mode proves summaries from exact
-  records, subgroup-level mode proves summaries from a separate optional
-  lane-based proof log, and the detected patterns are currently limited to
-  simple contiguous or fixed-stride thread/lane-to-address shapes.
+  current implementation emits summaries at epoch boundaries, thread-level
+  summaries are still opportunity metadata, subgroup-level summaries now
+  participate in epoch-close conflict detection, subgroup-level mode proves
+  summaries from a separate optional lane-based proof log, and the detected
+  patterns are currently limited to simple contiguous or fixed-stride
+  thread/lane-to-address shapes.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -219,6 +220,11 @@ foundation:
   site ids do not write proof records, opted-in sites write one proof record per
   lane, contiguous and fixed-stride lane patterns summarize, repeated lanes are
   rejected, and independent subgroups produce separate summaries.
+* `tests/instrumented/023_subgroup_level_coalesced_conflict_test.hip` starts
+  using subgroup-level coalesced summaries in conflict detection. It checks
+  summary-vs-summary diagnostics, summary-vs-exact diagnostics, read/read
+  silence, disjoint summaries, and fixed-stride gaps whose enclosing spans
+  overlap but whose represented per-lane byte ranges do not.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -246,8 +252,10 @@ foundation:
   patterns, and summaries are written to a separate summary buffer. A matching
   subgroup-level proof-log pass now exists: nonzero-site subgroup accesses can
   write optional lane/address proof records, and `ctx.syncthreads()` summarizes
-  proven contiguous or fixed-stride lane-to-address patterns. These summaries do
-  not yet drive diagnostics or hot-path compression.
+  proven contiguous or fixed-stride lane-to-address patterns. Subgroup-level
+  coalesced summaries now drive an epoch-close conflict pass, while thread-level
+  summaries remain opportunity metadata and neither mode has hot-path
+  compression yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -257,9 +265,10 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, decide whether coalescing summaries should begin
-driving hot-path compression or diagnostics, and start recording lowering notes
-for `ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, decide whether subgroup-level coalesced
+summaries should remain an additional diagnostic layer or start replacing some
+redundant exact pairwise scans, and start recording lowering notes for
+`ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -781,9 +790,9 @@ scan the just-ended epoch for nonzero-site regularity. When a site has one
 record per contiguous thread id and its addresses follow a non-overlapping
 fixed stride, hip-moi writes a `coalesced_access_record` summary. Default
 `site_id{0}` accesses, repeated dynamic instances at one site, and irregular
-address patterns remain exact-only. These summaries are currently diagnostic
-metadata and test or planning evidence; conflict diagnostics still come from the
-exact access log.
+address patterns remain exact-only. Thread-level summaries are currently
+diagnostic metadata and test or planning evidence; thread-level conflict
+diagnostics still come from the exact access log.
 
 `subgroup_level_context` has separate summary storage and now produces summaries
 through a separate proof path. Because subgroup-level hot records intentionally
@@ -820,7 +829,12 @@ The subgroup-level proof-log path:
 This design keeps the layers separate: `access_record` is the exact diagnostic
 log, `coalescing_proof_record` is optional proof machinery, and
 `coalesced_access_record` is the compact summary emitted when the proof
-succeeds.
+succeeds. In subgroup-level mode, those summaries now participate in conflict
+detection at epoch close: newly emitted summaries are compared with each other
+and with exact records that were not themselves summarized. The overlap test
+walks the represented per-lane byte ranges, so a fixed-stride summary with gaps
+does not report merely because its enclosing span overlaps another summary's
+span.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -1228,9 +1242,12 @@ Incremental instrumented test growth:
     docs toward lane terminology, and keep the existing rank-named helper only
     as a temporary compatibility spelling if needed. Done for the public helper
     and new tests/docs; older tests may still use the compatibility spelling.
-29. Decide whether coalesced summaries should remain observability metadata for
-    now or start driving actual access-log compression. Do this separately for
-    thread-level and subgroup-level modes, since their proof paths differ.
+29. Use subgroup-level coalesced summaries in conflict detection without yet
+    changing the hot access-log path. Done: summaries are compared against other
+    summaries and against unsummarized exact records at epoch close.
+30. Decide whether coalesced summaries should start driving actual access-log
+    compression or exact-scan suppression. Do this separately for thread-level
+    and subgroup-level modes, since their proof paths differ.
 
 Layer 1: toy deterministic kernels.
 
@@ -1354,8 +1371,11 @@ library teaches us the right subgroup abstractions.
       solving dynamic instance identity.
     * The first implementation records thread-level coalescing opportunities at
       epoch boundaries in a separate summary buffer. Done.
-    * Hot-path compression can come later, after the summaries have been useful
-      in tests and after subgroup-level proof metadata has been designed.
+    * Subgroup-level proof metadata and summary-based conflict detection now
+      exist. Done.
+    * Hot-path compression can come later, after summary diagnostics have been
+      useful in tests and after we decide which exact pairwise scans can be
+      safely skipped.
 
 ## Plan beyond the MVP
 

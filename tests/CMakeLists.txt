@@ -129,3 +129,5 @@ hip_moi_add_gtest(hip_moi_instrumented_coalescing_opportunity_test
                   instrumented/021_coalescing_opportunity_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_coalescing_test
                   instrumented/022_subgroup_level_coalescing_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_coalesced_conflict_test
+                  instrumented/023_subgroup_level_coalesced_conflict_test.hip)
