@@ -95,6 +95,9 @@ foundation:
   safe scalar producer/consumer loops, all-thread own-slot loops, repeated
   missing-barrier diagnostics, and diagnostic epoch numbering across loop
   iterations.
+* `tests/instrumented/009_tiled_lds_test.hip` covers 2D tiled LDS idioms:
+  row-major copy, transpose, skewed stride, blocked layout, diagonal gather,
+  striped load/store, and an unsynchronized transpose diagnostic case.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -102,14 +105,15 @@ foundation:
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, and metadata
-  capacity tests, and looped epoch tests exist. Epoch clearing, broader
-  real-kernel idioms, and low-overhead per-thread logs are still future work.
+  capacity tests, looped epoch tests, and tiled LDS tests exist. Epoch clearing,
+  broader real-kernel idioms, and low-overhead per-thread logs are still future
+  work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: add tiled and matmul-like LDS idioms, starting with a
+Next implementation slice: add simple matmul-like LDS idioms, starting with a
 small pattern that keeps the current MVP synchronization contract intact.
 
 ## Foundations
@@ -635,6 +639,7 @@ tests/instrumented/
   006_all_thread_array_test.hip
   007_metadata_capacity_test.hip
   008_loop_epoch_test.hip
+  009_tiled_lds_test.hip
   test_support.hpp
 ```
 
@@ -653,6 +658,8 @@ including a missing-barrier diagnostic case.
 buffer truncation behavior, including the user-facing host report.
 `008_loop_epoch_test.hip` asserts looped epoch behavior, including repeated
 safe barriers and repeated missing-barrier diagnostics.
+`009_tiled_lds_test.hip` asserts 2D tile layouts, tiled gathers, and an
+unsynchronized transpose diagnostic.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -681,8 +688,9 @@ Incremental instrumented test growth:
    are solid. Done.
 7. Add metadata capacity and diagnostic truncation tests. Done.
 8. Add loops when repeated epochs are solid. Done.
-9. Add tiled and matmul-like LDS cases when the basic machinery has survived
-   enough pressure.
+9. Add tiled LDS cases when the basic machinery has survived enough pressure.
+   Done.
+10. Add matmul-like LDS cases.
 
 Layer 1: toy deterministic kernels.
 

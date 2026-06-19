@@ -49,3 +49,7 @@ truncated diagnostic buffers.
 `008_loop_epoch_test.hip` stresses repeated epoch advancement in loops, including
 safe producer/consumer loops, all-thread per-slot loops, repeated missing-barrier
 diagnostics, and diagnostic epoch numbering across iterations.
+
+`009_tiled_lds_test.hip` covers 2D tiled LDS patterns: row-major, transpose,
+skewed stride, blocked layout, diagonal gather, striped load/store, and an
+unsynchronized transpose diagnostic case.
