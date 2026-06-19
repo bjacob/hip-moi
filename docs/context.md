@@ -94,6 +94,12 @@ recommendation for real kernels that already pressure LDS capacity.
 Storage saturation should degrade into diagnostics or conservative fallback, not
 silent corruption.
 
+Start with the default 16 MiB host-owned budget unless there is a reason not to.
+Increase `storage_bytes` when host reports mention `metadata_full`, diagnostic
+buffer truncation, or unexpectedly high subgroup-level coalescing fallback
+counts. Reduce it only when the allocator's reported `layout_bytes()` and
+computed capacities show comfortable headroom for the kernels being diagnosed.
+
 Exact access-record overflow emits a `metadata_full` diagnostic when possible.
 If the diagnostic buffer itself fills, hip-moi keeps counting total diagnostics
 but only stores the first `diagnostic_capacity` records for host-side reporting.
@@ -108,6 +114,18 @@ The bad saturation case is still possible: if coalescing falls back to exact
 records and exact access storage is also full, hip-moi may emit only
 `metadata_full` diagnostics and may miss some specific conflicts. The intended
 user response is to increase `storage_bytes` or narrow instrumentation scope.
+
+## Subgroup Capacity
+
+`subgroup_capacity` is still a semantic host option, not a byte-only detail. The
+host context cannot infer how many subgroups a future kernel launch will pass in
+its device-side `config`, so users must size this field for the largest
+instrumented workgroup shape they will use with that host context.
+
+If a kernel config names more subgroups than the host context allocated, hip-moi
+emits a `metadata_full` diagnostic during `ctx.init_workgroup()`. In
+subgroup-level diagnostics, `first_subgroup` is the allocated subgroup capacity
+and `second_subgroup` is the configured subgroup count.
 
 ## Current Implementation
 

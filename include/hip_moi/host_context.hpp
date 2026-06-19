@@ -788,10 +788,18 @@ namespace hip_moi
             {
                 std::fprintf(stderr,
                              "hip-moi: %s storage_bytes=%llu is too small; "
-                             "layout requires at least %llu bytes\n",
+                             "layout requires at least %llu bytes "
+                             "(access=%d coalesced_access=%d coalescing_access=%d "
+                             "coalescing_group=%d diagnostics=%d subgroups=%d)\n",
                              Traits::name(),
                              static_cast<unsigned long long>(storage_bytes_),
-                             static_cast<unsigned long long>(required_bytes));
+                             static_cast<unsigned long long>(required_bytes),
+                             access_record_capacity_,
+                             coalesced_access_record_capacity_,
+                             coalescing_access_record_capacity_,
+                             coalescing_group_record_capacity_,
+                             diagnostic_capacity_,
+                             subgroup_capacity_);
                 std::fflush(stderr);
                 std::abort();
             }

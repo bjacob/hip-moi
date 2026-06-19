@@ -1366,7 +1366,15 @@ Incremental instrumented test growth:
       internals. Done for the first accessors: host contexts now expose
       `storage_bytes()`, `layout_bytes()`, and computed typed capacities.
     * Preserve the invariant that storage exhaustion produces diagnostics or
-      conservative fallback, not silent corruption.
+      conservative fallback, not silent corruption. Done for the current host
+      context plan: host-owned tests now cover access-log overflow,
+      diagnostic-buffer truncation, subgroup coalescing overflow fallback, and
+      the bad case where coalescing fallback also fills exact access storage.
+    * Diagnose under-sized `subgroup_capacity`. Done: both context modes emit a
+      `metadata_full` diagnostic during `init_workgroup()` if device config
+      asks for more subgroups than storage represents.
+    * Keep tuning the auto-partition heuristic as real kernels teach us better
+      ratios. This is no longer a blocker for The context allocation plan.
 
 Layer 1: toy deterministic kernels.
 

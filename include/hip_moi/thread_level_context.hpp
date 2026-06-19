@@ -121,6 +121,11 @@ namespace hip_moi
                 {
                     storage_.access_records[i].valid = 0;
                 }
+                if(detail::configured_subgroup_count(cfg_) > static_cast<uint32_t>(
+                       storage_.subgroup_capacity > 0 ? storage_.subgroup_capacity : 0))
+                {
+                    emit_subgroup_capacity_full();
+                }
                 __threadfence();
             }
             __syncthreads();
@@ -310,6 +315,23 @@ namespace hip_moi
                                         record.byte_count,
                                         record.site_id,
                                         record.site_id,
+                                    });
+        }
+
+        __device__ void emit_subgroup_capacity_full() const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::metadata_full),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
                                     });
         }
 
