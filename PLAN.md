@@ -81,6 +81,12 @@ foundation:
   specifies the subgroup-level coalescing counters, including
   `coalescing_fallback_count` for opted-in accesses that fell back to exact
   records.
+* `docs/context.md` describes The context allocation plan. Host-owned contexts
+  now take a byte budget, defaulting to 16 MiB of device global memory, and
+  partition one HIP allocation into the typed buffers needed by the selected
+  mode. Fine-grained typed capacities remain as advanced/test overrides, while
+  `storage_ref` and `static_context_storage` remain available for users who
+  deliberately provide their own storage.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -447,20 +453,6 @@ class thread_level_context {
     uint64_t site_id;
   };
 
-  struct coalesced_access_record {
-    uintptr_t first_address;
-    uint32_t byte_count;
-    uint32_t span_byte_count;
-    uint32_t first_thread_id;
-    uint32_t subgroup_id;
-    uint32_t epoch;
-    uint32_t kind;
-    uint32_t participant_count;
-    uint32_t valid;
-    int64_t address_stride;
-    uint64_t site_id;
-  };
-
   struct diagnostic {
     uint32_t kind;
     uint32_t epoch;
@@ -485,9 +477,6 @@ class thread_level_context {
     int* access_count;
     int* epoch_access_count;
     int* diagnostic_count;
-    coalesced_access_record* coalesced_access_records;
-    int coalesced_access_record_capacity;
-    int* coalesced_access_count;
   };
 
   // Optional fixed-capacity storage helper for users who want static storage.
@@ -526,6 +515,7 @@ class subgroup_level_context {
     uintptr_t first_address;
     uint32_t byte_count;
     uint32_t span_byte_count;
+    uint32_t first_lane;
     uint32_t subgroup_id;
     uint32_t epoch;
     uint32_t kind;
@@ -534,6 +524,19 @@ class subgroup_level_context {
     int64_t address_stride;
     uint64_t site_id;
   };
+
+  struct coalescing_access_record {
+    uintptr_t address;
+    uint32_t byte_count;
+    uint32_t lane;
+    uint32_t subgroup_id;
+    uint32_t epoch;
+    uint32_t kind;
+    uint32_t valid;
+    uint64_t site_id;
+  };
+
+  struct coalescing_group_record;
 
   struct diagnostic {
     uint32_t kind;
@@ -562,6 +565,14 @@ class subgroup_level_context {
     coalesced_access_record* coalesced_access_records;
     int coalesced_access_record_capacity;
     int* coalesced_access_count;
+    coalescing_access_record* coalescing_access_records;
+    int coalescing_access_record_capacity;
+    int* coalescing_access_count;
+    int* epoch_coalescing_access_count;
+    int* coalescing_fallback_count;
+    coalescing_group_record* coalescing_group_records;
+    int coalescing_group_record_capacity;
+    int* coalescing_group_count;
   };
 
   template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
@@ -591,9 +602,17 @@ inline constexpr site_id no_site_id{};
 using context = thread_level_context;
 
 struct host_context_options {
+  size_t storage_bytes;  // Default: 16 MiB.
+
+  // Advanced/test overrides. Negative means "auto from storage_bytes";
+  // zero disables optional coalescing buffers.
   int access_record_capacity;
   int coalesced_access_record_capacity;
+  int coalescing_access_record_capacity;
+  int coalescing_group_record_capacity;
   int diagnostic_capacity;
+
+  // Number of subgroups represented in this context.
   int subgroup_capacity;
 
   bool destructor_reports;
@@ -633,6 +652,11 @@ Notes:
 * Each context's `storage_ref` is a non-owning view of caller-provided metadata
   buffers. Those buffers may be in global memory, which avoids consuming scarce
   LDS in kernels that already use nearly all available shared memory.
+* The host-owned context path follows The context allocation plan: ordinary
+  users provide `host_context_options::storage_bytes`, defaulting to 16 MiB, and
+  the host context partitions one device global-memory allocation into aligned
+  typed slices. Fine-grained typed capacities are advanced overrides and test
+  controls, not the primary user-facing allocation model.
 * The current implementation uses detector-internal atomics and fences to
   reserve and publish metadata slots. These operations must not be modeled as
   user-program synchronization.
@@ -1324,6 +1348,20 @@ Incremental instrumented test growth:
     epochs for regular access patterns, and the dedicated thread-level
     coalescing-opportunity test target was removed. Thread-level site ids remain
     as exact-record and diagnostic metadata.
+37. Implement The context allocation plan for host-owned contexts. Done for the
+    first slice: `host_context_options` now has a primary `storage_bytes` byte
+    budget, defaulting to 16 MiB; host contexts use one HIP device allocation
+    and carve it into aligned typed slices for the selected mode; typed
+    capacities remain available as advanced/test overrides; `docs/context.md`
+    documents default global-memory storage, manual storage, and saturation
+    behavior.
+38. Keep improving saturation behavior and observability.
+    * Add direct tests for too-small `storage_bytes` death behavior.
+    * Consider public host-side introspection for computed capacities and
+      storage layout, if users need to tune without reading implementation
+      internals.
+    * Preserve the invariant that storage exhaustion produces diagnostics or
+      conservative fallback, not silent corruption.
 
 Layer 1: toy deterministic kernels.
 
@@ -1467,6 +1505,19 @@ library teaches us the right subgroup abstractions.
     * Further hot-path compression can come later, after the remaining
       epoch-close costs are small enough to make coalescing a credible
       optimization for broad kernels.
+
+11. Make host-owned context storage usable without per-buffer tuning. First
+    slice done.
+    * Treat `storage_bytes` as the primary host allocation control.
+    * Default to a large global-memory budget because most real kernels cannot
+      spare LDS for detector metadata.
+    * Keep manual typed `storage_ref` and `static_context_storage` available for
+      tests, generated experiments, and users who deliberately want static
+      storage.
+    * Keep saturation behavior explicit: exact metadata overflow should report
+      `metadata_full` when possible, diagnostic buffers may truncate stored
+      records while preserving counts, and coalescing overflow should fall back
+      to exact logging.
 
 ## Plan beyond the MVP
 

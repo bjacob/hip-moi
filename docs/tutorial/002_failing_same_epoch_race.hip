@@ -30,9 +30,8 @@ namespace
     hip_moi::host_context_options small_context_options()
     {
         hip_moi::host_context_options options;
-        options.access_record_capacity = 16;
-        options.diagnostic_capacity    = 4;
-        options.subgroup_capacity      = 1;
+        options.storage_bytes     = 64 * 1024;
+        options.subgroup_capacity = 1;
         return options;
     }
 

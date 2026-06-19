@@ -54,19 +54,20 @@ ids only when the caller has a reason to manage identity itself.
 For subgroup-level summaries and hot-path compression, a nonzero site id is
 necessary but not sufficient: the subgroup-level context also needs coalescing
 access storage. `hip_moi::subgroup_level_host_context` can provide that storage
-when requested:
+from its byte budget:
 
 ```c++
 hip_moi::host_context_options options;
-options.access_record_capacity = 1024;
-options.coalesced_access_record_capacity = 1024;
-options.coalescing_access_record_capacity = 1024;
-options.coalescing_group_record_capacity = 256;
+options.storage_bytes = 16 * 1024 * 1024;
+options.subgroup_capacity = 64;
 
 hip_moi::subgroup_level_host_context moi(options);
 ```
 
-Custom `storage_ref` users can instead populate the
+The typed-capacity fields in `host_context_options` are advanced overrides. A
+negative value asks the host context to derive the capacity from
+`storage_bytes`; zero disables optional coalescing buffers. Custom `storage_ref`
+users can instead populate the
 `coalescing_access_records`, `coalescing_access_record_capacity`,
 `coalescing_access_count`, `epoch_coalescing_access_count`, and
 `coalescing_fallback_count` fields directly. They may also provide

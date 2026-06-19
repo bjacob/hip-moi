@@ -131,7 +131,11 @@ kernel, and call `HIP_MOI_CHECK(moi)` at the point where diagnostics should be
 reported:
 
 ```c++
-hip_moi::host_context moi(small_context_options());
+hip_moi::host_context_options options;
+options.storage_bytes = 64 * 1024;
+options.subgroup_capacity = 1;
+
+hip_moi::host_context moi(options);
 
 hipLaunchKernelGGL(producer_consumer_kernel,
                    dim3(1),
@@ -348,18 +352,15 @@ correct:
 
 ```c++
 hip_moi::host_context_options options;
-options.access_record_capacity = 128;
-options.coalesced_access_record_capacity = 16;
-options.coalescing_access_record_capacity = 128;
-options.coalescing_group_record_capacity = 16;
-options.diagnostic_capacity = 8;
+options.storage_bytes = 64 * 1024;
 options.subgroup_capacity = 2;
 
 hip_moi::subgroup_level_host_context moi(options);
 ```
 
 The compiled companion is `006_subgroup_level_coalescing.hip`. The lower-level
-counter and fallback semantics are documented in `docs/coalescing.md`.
+allocation controls are documented in `docs/context.md`; the coalescing counter
+and fallback semantics are documented in `docs/coalescing.md`.
 
 ## Scope-Based Checking
 

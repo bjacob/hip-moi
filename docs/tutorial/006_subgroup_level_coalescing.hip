@@ -31,12 +31,8 @@ namespace
     hip_moi::host_context_options coalescing_context_options()
     {
         hip_moi::host_context_options options;
-        options.access_record_capacity              = 128;
-        options.coalesced_access_record_capacity    = 16;
-        options.coalescing_access_record_capacity   = 128;
-        options.coalescing_group_record_capacity    = 16;
-        options.diagnostic_capacity                 = 8;
-        options.subgroup_capacity                   = kSubgroupCount;
+        options.storage_bytes     = 64 * 1024;
+        options.subgroup_capacity = kSubgroupCount;
         return options;
     }
 

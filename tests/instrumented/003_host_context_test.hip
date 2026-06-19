@@ -41,6 +41,14 @@ namespace
         return options;
     }
 
+    hip_moi::host_context_options byte_budget_host_context_options(int subgroup_capacity)
+    {
+        hip_moi::host_context_options options;
+        options.storage_bytes      = 64 * 1024;
+        options.subgroup_capacity  = subgroup_capacity;
+        return options;
+    }
+
     __global__ void same_thread_store_load_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
@@ -253,6 +261,32 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
+    TEST(HipMoiHostContext, ByteBudgetThreadLevelContextRunsSafeKernel)
+    {
+        hip_moi::host_context moi(byte_budget_host_context_options(/*subgroup_capacity=*/1));
+
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+
+        int initial = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+
+        launch_safe_kernel(moi, device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+
+        HIP_MOI_CHECK(moi);
+
+        int output = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+
+        EXPECT_EQ(output, 123);
+        EXPECT_EQ(moi.last_diagnostic_count(), 0);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
     TEST(HipMoiHostContext, ExplicitCheckConsumesRaceDiagnostic)
     {
         hip_moi::host_context moi(small_host_context_options());
@@ -380,6 +414,33 @@ namespace
     TEST(HipMoiHostContext, SubgroupLevelCheckMacroSucceedsForSafeKernel)
     {
         hip_moi::subgroup_level_host_context moi(small_subgroup_host_context_options());
+
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+
+        int initial = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+
+        launch_subgroup_safe_kernel(moi, device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+
+        HIP_MOI_CHECK(moi);
+
+        int output = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+
+        EXPECT_EQ(output, 456);
+        EXPECT_EQ(moi.last_diagnostic_count(), 0);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
+    TEST(HipMoiHostContext, ByteBudgetSubgroupLevelContextRunsSafeKernel)
+    {
+        hip_moi::subgroup_level_host_context moi(
+            byte_budget_host_context_options(/*subgroup_capacity=*/kSubgroupCount));
 
         int* device_output = nullptr;
         HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
