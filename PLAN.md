@@ -34,9 +34,10 @@ HIP synchronization APIs. Users opt in by calling `hip-moi` APIs for LDS memory
 accesses and synchronization.
 
 The initial single-subgroup MVP exists, first multi-subgroup tests exist, and
-`subgroup-level` now exists as a separate mode. The next priority is to make
-subgroup-level instrumentation cheaper and more intentional without losing the
-clear thread-level contract that already works for HIP-language diagnostics.
+`subgroup-level` now exists as a separate mode. The next priority is to keep
+meeting ordinary HIP code where it is: users should instrument the LDS accesses
+they actually wrote, while the library improves diagnostics, multi-subgroup
+coverage, and synchronization modeling around that access-level API.
 
 ## Current status
 
@@ -213,17 +214,20 @@ foundation:
   while checking subgroup-level silence for representative diagnostic-positive
   intra-subgroup races. Real multi-subgroup RDNA4 WMMA bridge tests now exist
   for both data-tiled and row-major layouts under both modes. Diagnostic quality
-  work and low-overhead subgroup-representative logs are still future work.
+  work, access-level multi-subgroup refinement, and synchronization lowering
+  notes are still future work. Low-overhead subgroup-representative logs are a
+  possible later optimization, not the immediate implementation direction.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: start the lower-overhead subgroup-representative API
-design. The current `subgroup-level` mode still logs each instrumented access
-call; the representative question is what explicit API can summarize a known
-collective/tile-shaped LDS footprint once per subgroup without pretending to
-summarize arbitrary per-thread pointer accesses.
+Next implementation slice: improve the existing access-level instrumentation
+path before adding a new user contract. The near-term work should add labels or
+source IDs, improve first-conflict preservation and host reporting, keep
+expanding multi-subgroup tests that replace real LDS accesses with
+`ctx.lds_load`/`ctx.lds_store`, and start recording synchronization-lowering
+notes for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -534,14 +538,16 @@ Notes:
 * The `thread-level` mode lets every participating thread log accesses, and
   records keep enough identity to distinguish threads. The `subgroup-level`
   mode uses subgroup identity instead of thread identity in its hot record and
-  diagnostic types. It may eventually use subgroup-representative
-  instrumentation, such as only the 0-th thread of each subgroup recording a
-  subgroup-level access summary.
+  diagnostic types. Its primary user model is still access-level
+  instrumentation: users replace the LDS loads and stores they wrote with
+  `ctx.lds_load` and `ctx.lds_store`.
 * Do not silently make the existing per-thread `lds_load`/`lds_store` wrappers
   mean "only subgroup leader logs" until the contract is clear. Arbitrary
   per-thread accesses are not necessarily summarized by the leader's address.
-  A lower-overhead mode may need separate subgroup-level APIs or a different
-  record path for accesses that are known to be collective/tile-shaped.
+  A lower-overhead subgroup-representative mode is only a possible future API
+  for accesses that are explicitly known to be collective/tile-shaped. It is a
+  departure from the "instrument the HIP accesses you wrote" premise and should
+  not be the immediate path.
 * The target design is plain dissociation of mode-specific hot metadata:
   `thread-level` keeps per-thread identity in its records, while
   `subgroup-level` uses records and diagnostics shaped around
@@ -643,8 +649,14 @@ Each instrumented LDS access records:
 `subgroup-level` mode uses a distinct compact record that tracks subgroup ids
 and omits thread id, because diagnostics intentionally do not distinguish
 threads within one subgroup. The current implementation still records each
-instrumented access call; a later subgroup-representative path may summarize a
-known collective/tile-shaped access with one record per subgroup.
+instrumented access call. That is intentional for now because it keeps the API
+close to ordinary HIP code: users instrument the LDS accesses they actually
+wrote.
+
+A possible later subgroup-representative path may summarize a known
+collective/tile-shaped access with one record per subgroup. Treat that as an
+optimization/research direction with a different user contract, not as the
+current implementation plan.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -1023,13 +1035,18 @@ Incremental instrumented test growth:
     followed by `single_subgroup`, and add subgroup-level companion checks for
     deterministic diagnostic-positive single-subgroup race cases. Done.
 21. Add real multi-subgroup RDNA4 WMMA coverage under both `thread-level` and
-    `subgroup-level` modes. Done for the first data-tiled double-buffered
-    fragment-staging slice.
-22. Prototype lower-overhead subgroup-representative logging for tile-shaped
-    accesses if the design is clear enough; otherwise document the blockers and
-    keep using all-thread logging filtered by subgroup id.
-23. Improve diagnostic quality with labels/source locations and first-conflict
+    `subgroup-level` modes. Done for data-tiled and row-major double-buffered
+    fragment-staging slices.
+22. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
+23. Keep broadening ordinary access-level multi-subgroup coverage where it
+    exercises real HIP code shapes.
+24. Start synchronization-lowering notes for `ctx.syncthreads()` and lower-level
+    builtins, while keeping naked fences paired with atomics as a later
+    memory-model widening step.
+25. Consider lower-overhead subgroup-representative logging only after the
+    access-level path is solid and only for tile-shaped operations whose full
+    subgroup footprint can be stated explicitly.
 
 Layer 1: toy deterministic kernels.
 
@@ -1123,30 +1140,31 @@ library teaches us the right subgroup abstractions.
    * Include diagnostic-positive cross-subgroup array, tiled, looped-epoch, and
      matmul-shaped cases.
 
-8. Explore subgroup-representative instrumentation.
-   * Candidate direction: only the 0-th thread of each subgroup records a
-     subgroup-level access summary.
-   * Do this only for access patterns where the representative can describe the
-     whole subgroup's memory footprint, such as tile-shaped or fragment-shaped
-     operations.
-   * Do not pretend this summarizes arbitrary per-thread pointer accesses.
-   * Determine whether this can reduce atomics or eliminate them from the common
-     access path.
-
-9. Then resume diagnostic quality work.
+8. Resume diagnostic quality work.
    * Add source/location IDs or stringless labels.
    * Add first-conflict preservation so later conflicts do not hide the useful
      one.
    * Add clearer mode-aware host diagnostics, especially for
      `subgroup-level` false negatives by design.
 
-10. Keep synchronization lowering notes on the horizon.
+9. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
      `__builtin_amdgcn_s_barrier`, and `__builtin_amdgcn_fence`.
    * Save or document their LLVM IR shape for the HIP-language model.
    * Separately note which hardware facts would matter for the future
      assembly-level model.
    * Do not infer HIP-level cross-thread synchronization from naked fences.
+
+10. Keep subgroup-representative instrumentation as a possible later direction.
+    * Candidate direction: a separate API where only one thread per subgroup
+      records an explicit subgroup-level access summary.
+    * Do this only for access patterns where the summary can describe the whole
+      subgroup's memory footprint, such as tile-shaped or fragment-shaped
+      operations.
+    * Do not pretend this summarizes arbitrary per-thread pointer accesses.
+    * Treat this as a departure from access-level HIP instrumentation, useful
+      mainly as an optional optimization or a bridge to assembly-level
+      experiments.
 
 ## Plan beyond the MVP
 
@@ -1203,11 +1221,9 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 * First implementation logs all instrumented access calls but stores them in the
   `subgroup-level` record shape, so the hot record omits thread id. Done.
 * Host ownership/reporting for the `subgroup-level` diagnostic shape exists.
-* Next, investigate subgroup-representative logging where only the 0-th thread
-  of each subgroup records a subgroup-level access summary.
-* Use representative logging only for access patterns whose byte ranges can be
-  summarized by a subgroup leader, such as cooperative tile or fragment
-  operations.
+* Continue exercising ordinary access-level instrumentation under this mode:
+  users still replace real LDS accesses with `ctx.lds_load` and
+  `ctx.lds_store`.
 * Measure or inspect metadata size, access-record fields, atomic usage, and
   generated code for both modes.
 * Add paired tests showing the same kernel reports in `thread-level` mode but
@@ -1216,6 +1232,10 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 * Add matmul-shaped cross-subgroup conflicts, because this is the main bridge to
   the future assembly-level effort. Done for the first non-WMMA subgroup-level
   slice.
+* Later, consider subgroup-representative logging only as a separate explicit
+  API for cooperative tile or fragment operations whose byte ranges can be
+  summarized. Do not make it the default interpretation of `lds_load` or
+  `lds_store`.
 
 ### Step 4: Real-kernel LDS coverage under both modes
 
