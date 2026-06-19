@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/012_matmul_pipeline_test.hip
+// tests/instrumented/012_single_subgroup_matmul_pipeline_test.hip
 //
 // Double-buffered and pipeline-like matmul LDS instrumentation tests.
 #include "test_support.hpp"
@@ -256,6 +256,46 @@ namespace
         }
     }
 
+    __global__ void single_output_reuse_without_barrier_subgroup_level_kernel(
+        const int* a_global, const int* b_global, hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int a_shared[2];
+        __shared__ int b_shared[2];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&a_shared[0], a_global[matmul_a_offset<1, 2>(0, 0, 0)]);
+            ctx.lds_store(&a_shared[1], a_global[matmul_a_offset<1, 2>(0, 0, 1)]);
+            ctx.lds_store(&b_shared[0], b_global[matmul_b_offset<1, 2>(0, 0, 0)]);
+            ctx.lds_store(&b_shared[1], b_global[matmul_b_offset<1, 2>(0, 0, 1)]);
+        }
+
+        ctx.syncthreads();
+
+        if(threadIdx.x == 0)
+        {
+            int acc = 0;
+            for(int k = 0; k < 2; ++k)
+            {
+                int a = ctx.lds_load(&a_shared[k]);
+                int b = ctx.lds_load(&b_shared[k]);
+                acc += a * b;
+            }
+            (void)acc;
+        }
+        if(threadIdx.x == 1)
+        {
+            ctx.lds_store(&a_shared[0], a_global[matmul_a_offset<1, 2>(1, 0, 0)]);
+            ctx.lds_store(&a_shared[1], a_global[matmul_a_offset<1, 2>(1, 0, 1)]);
+            ctx.lds_store(&b_shared[0], b_global[matmul_b_offset<1, 2>(1, 0, 0)]);
+            ctx.lds_store(&b_shared[1], b_global[matmul_b_offset<1, 2>(1, 0, 1)]);
+        }
+    }
+
     __global__ void partial_a_tile_overwrite_without_barrier_kernel(
         const int* a_global, const int* b_global, hip_moi::thread_level_context::storage_ref storage)
     {
@@ -450,6 +490,39 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
     }
 
+    template <int MTile, int NTile, int KTile, int TileCount, typename Kernel>
+    void run_subgroup_level_no_diagnostic_case(Kernel kernel, int expected_access_count)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/32, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        int host_a[TileCount * MTile * KTile];
+        int host_b[TileCount * NTile * KTile];
+        fill_matmul_inputs<MTile, NTile, KTile>(host_a, host_b, TileCount);
+
+        int* device_a = nullptr;
+        int* device_b = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(
+            kernel, dim3(1), dim3(kThreadCount), 0, 0, device_a, device_b, storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, expected_access_count, /*expected_diagnostic_count=*/0));
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
+    }
+
     TEST(HipMoiMatmulPipeline, DoubleBuffered2x2K2x3DoesNotReport)
     {
         run_safe_output_case(double_buffered_matmul_2x2_k2x3_kernel);
@@ -466,6 +539,13 @@ namespace
             single_output_reuse_without_barrier_kernel,
             /*expected_access_count=*/12,
             /*expected_diagnostic_count=*/4);
+    }
+
+    TEST(HipMoiMatmulPipeline, SubgroupLevelSingleOutputReuseWithoutBarrierDoesNotReport)
+    {
+        run_subgroup_level_no_diagnostic_case<1, 1, 2, 2>(
+            single_output_reuse_without_barrier_subgroup_level_kernel,
+            /*expected_access_count=*/12);
     }
 
     TEST(HipMoiMatmulPipeline, PartialATileOverwriteWithoutBarrierReports)

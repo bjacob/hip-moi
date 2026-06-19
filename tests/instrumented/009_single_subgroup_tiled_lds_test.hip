@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/009_tiled_lds_test.hip
+// tests/instrumented/009_single_subgroup_tiled_lds_test.hip
 //
 // Tiled LDS access patterns under the MVP synchronization contract.
 #include "test_support.hpp"
@@ -179,6 +179,25 @@ namespace
         (void)ctx.lds_load(&tile[out_col][out_row]);
     }
 
+    __global__ void transpose_without_barrier_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int tile[4][8];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        int tid = static_cast<int>(threadIdx.x);
+        int row = tid / 8;
+        int col = tid - 8 * row;
+        ctx.lds_store(&tile[row][col], 10 * row + col);
+
+        int out_row = tid / 4;
+        int out_col = tid - 4 * out_row;
+        (void)ctx.lds_load(&tile[out_col][out_row]);
+    }
+
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,
                                 observed_metadata*                           observed)
     {
@@ -323,5 +342,25 @@ namespace
         {
             expect_access_conflict(observed.diagnostics[i]);
         }
+    }
+
+    TEST(HipMoiTiledLds, SubgroupLevelTransposeWithoutBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/128, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(transpose_without_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/64, /*expected_diagnostic_count=*/0));
     }
 } // namespace

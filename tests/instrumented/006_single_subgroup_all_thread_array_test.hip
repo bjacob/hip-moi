@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/006_all_thread_array_test.hip
+// tests/instrumented/006_single_subgroup_all_thread_array_test.hip
 //
 // All-thread LDS array patterns for the MVP instrumentation contract.
 #include "test_support.hpp"
@@ -84,6 +84,22 @@ namespace
         __shared__ int values[kThreadCount];
 
         hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        int tid = static_cast<int>(threadIdx.x);
+        ctx.lds_store(&values[tid], tid * 7);
+
+        int neighbor = (tid + 1) % kThreadCount;
+        (void)ctx.lds_load(&values[neighbor]);
+    }
+
+    __global__ void all_threads_neighbor_read_without_barrier_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadCount];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);
@@ -234,5 +250,26 @@ namespace
                       static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
             EXPECT_EQ(observed.diagnostics[i].epoch, 0u);
         }
+    }
+
+    TEST(HipMoiAllThreadArray, SubgroupLevelNeighborReadWithoutSyncthreadsDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/32, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(all_threads_neighbor_read_without_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2 * kThreadCount,
+            /*expected_diagnostic_count=*/0));
     }
 } // namespace

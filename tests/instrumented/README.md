@@ -16,66 +16,73 @@ Instrumented tests should mirror the reference kernels in
 * diagnostic-positive references should produce deterministic diagnostics,
 * racy references should not rely on numerical kernel outputs as their oracle.
 
-`001_safe_mvp_test.hip` is intentionally tiny: it verifies that the API can be
+Files whose workgroups contain only one subgroup include `single_subgroup` in
+their names. Those files should also exercise subgroup-level mode where the
+outcome is deterministic: in particular, thread-level race diagnostics that are
+entirely intra-subgroup should have subgroup-level companion checks asserting
+zero diagnostics.
+
+`001_single_subgroup_safe_mvp_test.hip` is intentionally tiny: it verifies that the API can be
 included from a HIP kernel, storage can be passed in, and a same-thread
 instrumented LDS store/load can run with two logged accesses and zero
-diagnostics.
+diagnostics in both thread-level and subgroup-level modes.
 
-`002_race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
+`002_single_subgroup_race_mvp_test.hip` starts the diagnostic-positive suite with a same-epoch
 write/read conflict on one LDS address. It asserts diagnostic metadata rather
-than numerical kernel output.
+than numerical kernel output, and checks that the same single-subgroup conflict
+is intentionally not a subgroup-level diagnostic.
 
 `003_host_context_test.hip` exercises the user-facing host layer:
 `hip_moi::host_context`, `HIP_MOI_CHECK`, explicit diagnostic consumption, and
 scope-based destructor handling of unconsumed diagnostics. It uses GTest stderr
 capture and death tests to check both reporting and abort behavior.
 
-`004_basic_conflict_predicate_test.hip` broadens the raw detector-contract
+`004_single_subgroup_basic_conflict_predicate_test.hip` broadens the raw detector-contract
 coverage for same-epoch byte ranges: read/read, write/write, non-overlap,
 adjacent ranges, and overlapping subobjects.
 
-`005_epoch_boundary_test.hip` exercises uniform `ctx.syncthreads()` as the MVP
+`005_single_subgroup_epoch_boundary_test.hip` exercises uniform `ctx.syncthreads()` as the MVP
 epoch boundary: separated same-address accesses should not report, while a new
 same-epoch conflict after a barrier should still report in the new epoch.
 
-`006_all_thread_array_test.hip` moves beyond hand-picked threads: all threads in
+`006_single_subgroup_all_thread_array_test.hip` moves beyond hand-picked threads: all threads in
 the workgroup participate in simple LDS array write/read patterns, including one
 intentionally unsynchronized neighbor-read diagnostic case.
 
-`007_metadata_capacity_test.hip` covers access-log overflow, diagnostic counters
+`007_single_subgroup_metadata_capacity_test.hip` covers access-log overflow, diagnostic counters
 that exceed the stored diagnostic buffer, and the host-facing stderr message for
 truncated diagnostic buffers.
 
-`008_loop_epoch_test.hip` stresses repeated epoch advancement in loops, including
+`008_single_subgroup_loop_epoch_test.hip` stresses repeated epoch advancement in loops, including
 safe producer/consumer loops, all-thread per-slot loops, repeated missing-barrier
 diagnostics, and diagnostic epoch numbering across iterations.
 
-`009_tiled_lds_test.hip` covers 2D tiled LDS patterns: row-major, transpose,
+`009_single_subgroup_tiled_lds_test.hip` covers 2D tiled LDS patterns: row-major, transpose,
 skewed stride, blocked layout, diagonal gather, striped load/store, and an
 unsynchronized transpose diagnostic case.
 
-`010_matmul_like_test.hip` covers small cooperative LDS matmul idioms: simple
+`010_single_subgroup_matmul_like_test.hip` covers small cooperative LDS matmul idioms: simple
 2x2 and 4x4 tiles, a chunked K loop, and a scalar missing-barrier diagnostic.
 The output-producing kernels consume explicit small integer input matrices and
 compare against a host-side reference matmul.
 
-`011_epoch_log_lifetime_test.hip` verifies that access-log storage is reused at
+`011_single_subgroup_epoch_log_lifetime_test.hip` verifies that access-log storage is reused at
 epoch boundaries, so long synchronized loops can run with capacity sized for one
 epoch rather than the whole kernel.
 
-`012_matmul_pipeline_test.hip` covers double-buffered and pipeline-like matmul
+`012_single_subgroup_matmul_pipeline_test.hip` covers double-buffered and pipeline-like matmul
 LDS patterns, including safe ping-pong buffering and diagnostic-positive buffer
 reuse/partial-overwrite cases. Safe output cases use explicit small integer
 inputs and a host-side reference matmul oracle.
 
-`013_rdna4_wmma_row_major_test.hip` is gated to RDNA4/gfx12 targets. It uses a
+`013_single_subgroup_rdna4_wmma_row_major_test.hip` is gated to RDNA4/gfx12 targets. It uses a
 real `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12` intrinsic with all 32
 threads, conventional row-major LDS tiles, single-buffer and double-buffer safe
 cases, and a diagnostic-positive row overwrite. Safe cases use non-uniform
 small integer-valued `_Float16` inputs that compare exactly against a host-side
 reference matmul.
 
-`014_rdna4_wmma_data_tiled_test.hip` is also gated to RDNA4/gfx12 targets. It
+`014_single_subgroup_rdna4_wmma_data_tiled_test.hip` is also gated to RDNA4/gfx12 targets. It
 uses the same intrinsic but with data-tiled packed fragments. Each thread's A/B
 fragment is a contiguous 16-byte object at byte offset `lane * 16`, and each
 thread's C accumulator fragment is a contiguous 32-byte object at byte offset
@@ -83,6 +90,11 @@ thread's C accumulator fragment is a contiguous 32-byte object at byte offset
 diagnostic-positive neighbor-fragment overwrite. The packed A/B/C fragments are
 generated from logical tiles and checked against the same exact host-side
 reference matmul.
+
+Across the `single_subgroup` files, representative thread-level
+diagnostic-positive cases have subgroup-level companions that assert zero
+diagnostics. This is deliberate: in a one-subgroup workgroup, subgroup-level
+mode has no cross-subgroup pair to report.
 
 `015_thread_level_subgroup_test.hip` starts multi-subgroup coverage for
 `thread-level` mode. It uses a 64-thread workgroup split into two 32-thread

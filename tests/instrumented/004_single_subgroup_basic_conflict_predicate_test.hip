@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/005_epoch_boundary_test.hip
+// tests/instrumented/004_single_subgroup_basic_conflict_predicate_test.hip
 //
-// Focused tests for ctx.syncthreads() as the MVP epoch boundary.
+// Focused tests for the MVP byte-range conflict predicate.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -15,6 +15,12 @@
 namespace
 {
     constexpr int kThreadCount = 8;
+
+    struct int_pair
+    {
+        int first;
+        int second;
+    };
 
     struct observed_metadata
     {
@@ -33,7 +39,7 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void same_epoch_write_read_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
+    __global__ void same_address_read_read_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -42,90 +48,21 @@ namespace
 
         if(threadIdx.x == 0)
         {
-            ctx.lds_store(&value, 10);
+            value = 17;
         }
-        if(threadIdx.x == 1)
+        __syncthreads();
+
+        if(threadIdx.x == 0)
         {
             out[0] = ctx.lds_load(&value);
         }
-    }
-
-    __global__ void separated_write_read_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::thread_level_context ctx = make_context(storage);
-        ctx.init_workgroup();
-
-        if(threadIdx.x == 0)
-        {
-            ctx.lds_store(&value, 10);
-        }
-
-        ctx.syncthreads();
-
-        if(threadIdx.x == 1)
-        {
-            out[0] = ctx.lds_load(&value);
-        }
-    }
-
-    __global__ void separated_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::thread_level_context ctx = make_context(storage);
-        ctx.init_workgroup();
-
-        if(threadIdx.x == 0)
-        {
-            ctx.lds_store(&value, 10);
-        }
-
-        ctx.syncthreads();
-
-        if(threadIdx.x == 1)
-        {
-            ctx.lds_store(&value, 20);
-        }
-    }
-
-    __global__ void repeated_reuse_across_epochs_kernel(int*                         out,
-                                                        hip_moi::thread_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::thread_level_context ctx = make_context(storage);
-        ctx.init_workgroup();
-
-        if(threadIdx.x == 0)
-        {
-            ctx.lds_store(&value, 10);
-        }
-
-        ctx.syncthreads();
-
-        if(threadIdx.x == 1)
-        {
-            out[0] = ctx.lds_load(&value);
-        }
-
-        ctx.syncthreads();
-
-        if(threadIdx.x == 0)
-        {
-            ctx.lds_store(&value, 20);
-        }
-
-        ctx.syncthreads();
-
         if(threadIdx.x == 1)
         {
             out[1] = ctx.lds_load(&value);
         }
     }
 
-    __global__ void same_epoch_conflict_after_barrier_kernel(hip_moi::thread_level_context::storage_ref storage)
+    __global__ void same_address_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -136,16 +73,98 @@ namespace
         {
             ctx.lds_store(&value, 10);
         }
-
-        ctx.syncthreads();
-
-        if(threadIdx.x == 0)
+        if(threadIdx.x == 1)
         {
             ctx.lds_store(&value, 20);
         }
+    }
+
+    __global__ void non_overlapping_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
+    {
+        __shared__ int values[4];
+
+        hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&values[0], 10);
+        }
         if(threadIdx.x == 1)
         {
-            (void)ctx.lds_load(&value);
+            ctx.lds_store(&values[2], 20);
+        }
+    }
+
+    __global__ void adjacent_byte_ranges_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
+    {
+        __shared__ int_pair value;
+
+        hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value.first, 10);
+        }
+        if(threadIdx.x == 1)
+        {
+            ctx.lds_store(&value.second, 20);
+        }
+    }
+
+    __global__ void overlapping_subobject_write_write_kernel(hip_moi::thread_level_context::storage_ref storage)
+    {
+        __shared__ int_pair value;
+
+        hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value, int_pair{10, 20});
+        }
+        if(threadIdx.x == 1)
+        {
+            ctx.lds_store(&value.second, 30);
+        }
+    }
+
+    __global__ void same_address_write_write_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value, 10);
+        }
+        if(threadIdx.x == 1)
+        {
+            ctx.lds_store(&value, 20);
+        }
+    }
+
+    __global__ void overlapping_subobject_write_write_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int_pair value;
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value, int_pair{10, 20});
+        }
+        if(threadIdx.x == 1)
+        {
+            ctx.lds_store(&value.second, 30);
         }
     }
 
@@ -166,23 +185,21 @@ namespace
                                           hipMemcpyDeviceToHost));
     }
 
-    void expect_no_diagnostics(const observed_metadata& observed, int expected_access_count)
+    void expect_two_accesses_and_no_diagnostics(const observed_metadata& observed)
     {
-        EXPECT_EQ(observed.access_count, expected_access_count);
+        EXPECT_EQ(observed.access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    void expect_one_access_conflict(const observed_metadata& observed,
-                                    int                      expected_access_count,
-                                    uint32_t                 expected_epoch)
+    void expect_one_access_conflict(const observed_metadata& observed)
     {
-        EXPECT_EQ(observed.access_count, expected_access_count);
+        EXPECT_EQ(observed.access_count, 2);
         ASSERT_EQ(observed.diagnostic_count, 1);
 
         const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
-        EXPECT_EQ(diagnostic.epoch, expected_epoch);
+        EXPECT_EQ(diagnostic.epoch, 0u);
 
         bool threads_are_zero_and_one = (diagnostic.first_thread_id == 0u
                                          && diagnostic.second_thread_id == 1u)
@@ -191,91 +208,7 @@ namespace
         EXPECT_TRUE(threads_are_zero_and_one);
     }
 
-    TEST(HipMoiEpochBoundary, SameEpochWriteReadReports)
-    {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
-
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
-
-        int initial = -1;
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
-
-        hipLaunchKernelGGL(same_epoch_write_read_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        expect_one_access_conflict(observed, /*expected_access_count=*/2, /*expected_epoch=*/0);
-
-        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
-    }
-
-    TEST(HipMoiEpochBoundary, WriteReadSeparatedBySyncthreadsDoesNotReport)
-    {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
-
-        int* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
-
-        int initial = -1;
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
-
-        hipLaunchKernelGGL(separated_write_read_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        int output = -1;
-        HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        EXPECT_EQ(output, 10);
-        expect_no_diagnostics(observed, /*expected_access_count=*/2);
-
-        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
-    }
-
-    TEST(HipMoiEpochBoundary, WriteWriteSeparatedBySyncthreadsDoesNotReport)
-    {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
-
-        hipLaunchKernelGGL(
-            separated_write_write_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        expect_no_diagnostics(observed, /*expected_access_count=*/2);
-    }
-
-    TEST(HipMoiEpochBoundary, RepeatedReuseAcrossEpochsDoesNotReport)
+    TEST(HipMoiBasicConflictPredicate, SameAddressReadReadDoesNotReport)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
@@ -288,7 +221,7 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(device_output, initial, sizeof(initial), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(repeated_reuse_across_epochs_kernel,
+        hipLaunchKernelGGL(same_address_read_read_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -305,20 +238,59 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
-        EXPECT_EQ(output[0], 10);
-        EXPECT_EQ(output[1], 20);
-        expect_no_diagnostics(observed, /*expected_access_count=*/4);
+        EXPECT_EQ(output[0], 17);
+        EXPECT_EQ(output[1], 17);
+        expect_two_accesses_and_no_diagnostics(observed);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiEpochBoundary, SameEpochConflictAfterSyncthreadsReportsInNewEpoch)
+    TEST(HipMoiBasicConflictPredicate, SameAddressWriteWriteReports)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
             /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
 
-        hipLaunchKernelGGL(same_epoch_conflict_after_barrier_kernel,
+        hipLaunchKernelGGL(
+            same_address_write_write_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
+
+        expect_one_access_conflict(observed);
+
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
+        EXPECT_EQ(diagnostic.first_addr, diagnostic.second_addr);
+        EXPECT_EQ(diagnostic.first_size, sizeof(int));
+        EXPECT_EQ(diagnostic.second_size, sizeof(int));
+    }
+
+    TEST(HipMoiBasicConflictPredicate, NonOverlappingWritesDoNotReport)
+    {
+        hip_moi::test::device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(
+            non_overlapping_write_write_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
+
+        expect_two_accesses_and_no_diagnostics(observed);
+    }
+
+    TEST(HipMoiBasicConflictPredicate, AdjacentByteRangesDoNotReport)
+    {
+        hip_moi::test::device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(adjacent_byte_ranges_write_write_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -330,6 +302,74 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
-        expect_one_access_conflict(observed, /*expected_access_count=*/3, /*expected_epoch=*/1);
+        expect_two_accesses_and_no_diagnostics(observed);
+    }
+
+    TEST(HipMoiBasicConflictPredicate, OverlappingSubobjectWriteReports)
+    {
+        hip_moi::test::device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(overlapping_subobject_write_write_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
+
+        expect_one_access_conflict(observed);
+
+        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
+        EXPECT_NE(diagnostic.first_addr, diagnostic.second_addr);
+
+        bool sizes_are_pair_and_int
+            = (diagnostic.first_size == sizeof(int_pair) && diagnostic.second_size == sizeof(int))
+              || (diagnostic.first_size == sizeof(int)
+                  && diagnostic.second_size == sizeof(int_pair));
+        EXPECT_TRUE(sizes_are_pair_and_int);
+    }
+
+    TEST(HipMoiBasicConflictPredicate, SubgroupLevelSameAddressWriteWriteDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(same_address_write_write_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2, /*expected_diagnostic_count=*/0));
+    }
+
+    TEST(HipMoiBasicConflictPredicate, SubgroupLevelOverlappingSubobjectWriteDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/4, /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(overlapping_subobject_write_write_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2, /*expected_diagnostic_count=*/0));
     }
 } // namespace

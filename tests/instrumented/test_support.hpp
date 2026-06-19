@@ -24,6 +24,17 @@
 namespace hip_moi::test
 {
     template <typename Context>
+    __device__ Context make_single_subgroup_context(typename Context::storage_ref storage)
+    {
+        typename Context::config cfg{
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
+            /*subgroup_count=*/1,
+        };
+        return Context(storage, cfg);
+    }
+
+    template <typename Context>
     class device_context_storage_for
     {
     public:
@@ -144,6 +155,27 @@ namespace hip_moi::test
     using device_context_storage = thread_level_device_context_storage;
     using subgroup_level_device_context_storage
         = device_context_storage_for<hip_moi::subgroup_level_context>;
+
+    template <typename Storage>
+    void expect_metadata_counts(const Storage& storage,
+                                int            expected_access_count,
+                                int            expected_diagnostic_count)
+    {
+        int access_count = -1;
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&access_count,
+                                          storage.access_count_device(),
+                                          sizeof(access_count),
+                                          hipMemcpyDeviceToHost));
+
+        int diagnostic_count = -1;
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&diagnostic_count,
+                                          storage.diagnostic_count_device(),
+                                          sizeof(diagnostic_count),
+                                          hipMemcpyDeviceToHost));
+
+        EXPECT_EQ(access_count, expected_access_count);
+        EXPECT_EQ(diagnostic_count, expected_diagnostic_count);
+    }
 } // namespace hip_moi::test
 
 #endif // HIP_MOI_TESTS_INSTRUMENTED_TEST_SUPPORT_HPP

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/013_rdna4_wmma_row_major_test.hip
+// tests/instrumented/013_single_subgroup_rdna4_wmma_row_major_test.hip
 //
 // RDNA4 WMMA tests using conventional row-major LDS tiles.
 #include "test_support.hpp"
@@ -81,7 +81,8 @@ namespace
         return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __device__ void load_row_major_tile_to_lds(hip_moi::thread_level_context& ctx,
+    template <typename Context>
+    __device__ void load_row_major_tile_to_lds(Context&          ctx,
                                                _Float16*         a_shared,
                                                _Float16*         b_shared,
                                                const _Float16*   a_global,
@@ -99,7 +100,8 @@ namespace
         }
     }
 
-    __device__ void wmma_f16_mac_from_row_major_lds(hip_moi::thread_level_context& ctx,
+    template <typename Context>
+    __device__ void wmma_f16_mac_from_row_major_lds(Context&          ctx,
                                                     f32x8_t&          acc,
                                                     const _Float16*   a_shared,
                                                     const _Float16*   b_shared)
@@ -180,6 +182,33 @@ namespace
         __shared__ _Float16 b_shared[kTileN * kTileK];
 
         hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        f32x8_t acc = {};
+        load_row_major_tile_to_lds(ctx, a_shared, b_shared, a_global, b_global, /*tile_id=*/0);
+        ctx.syncthreads();
+        wmma_f16_mac_from_row_major_lds(ctx, acc, a_shared, b_shared);
+
+        if(threadIdx.x == 0)
+        {
+            for(int k = 0; k < kTileK; ++k)
+            {
+                ctx.lds_store(&a_shared[row_major(/*row=*/1, k, kTileK)],
+                              static_cast<_Float16>(2.0f));
+            }
+        }
+    }
+
+    __global__ void row_major_reuse_without_barrier_subgroup_level_kernel(
+        const _Float16*                 a_global,
+        const _Float16*                 b_global,
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ _Float16 a_shared[kTileM * kTileK];
+        __shared__ _Float16 b_shared[kTileN * kTileK];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -364,6 +393,44 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
         expect_row_reuse_diagnostics(observed);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
+    }
+
+    TEST(HipMoiRdna4WmmaRowMajor, SubgroupLevelReuseWithoutBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/640, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        _Float16 host_a[kTileElementCount];
+        _Float16 host_b[kTileElementCount];
+        fill_row_major_inputs(host_a, host_b, /*tile_count=*/1);
+
+        _Float16* device_a = nullptr;
+        _Float16* device_b = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(row_major_reuse_without_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           device_a,
+                           device_b,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/1040, /*expected_diagnostic_count=*/0));
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));

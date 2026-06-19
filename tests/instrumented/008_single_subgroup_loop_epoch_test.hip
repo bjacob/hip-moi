@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/008_loop_epoch_test.hip
+// tests/instrumented/008_single_subgroup_loop_epoch_test.hip
 //
 // Looped epoch patterns for the MVP synchronization model.
 #include "test_support.hpp"
@@ -108,6 +108,53 @@ namespace
         __shared__ int value;
 
         hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        for(int iter = 0; iter < kIterationCount; ++iter)
+        {
+            ctx.syncthreads();
+
+            if(threadIdx.x == 0)
+            {
+                ctx.lds_store(&value, iter);
+            }
+            if(threadIdx.x == 1)
+            {
+                (void)ctx.lds_load(&value);
+            }
+
+            ctx.syncthreads();
+        }
+    }
+
+    __global__ void loop_neighbor_read_without_inner_barrier_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadCount];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        int tid = static_cast<int>(threadIdx.x);
+        for(int iter = 0; iter < kIterationCount; ++iter)
+        {
+            ctx.lds_store(&values[tid], iter * 100 + tid);
+
+            int neighbor = (tid + 1) % kThreadCount;
+            (void)ctx.lds_load(&values[neighbor]);
+
+            ctx.syncthreads();
+        }
+    }
+
+    __global__ void loop_conflict_after_each_leading_barrier_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
         ctx.init_workgroup();
 
         for(int iter = 0; iter < kIterationCount; ++iter)
@@ -292,5 +339,47 @@ namespace
             expect_access_conflict(observed.diagnostics[iter],
                                    static_cast<uint32_t>(2 * iter + 1));
         }
+    }
+
+    TEST(HipMoiLoopEpoch, SubgroupLevelMissingInnerBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/96, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(loop_neighbor_read_without_inner_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2 * kIterationCount * kThreadCount,
+            /*expected_diagnostic_count=*/0));
+    }
+
+    TEST(HipMoiLoopEpoch, SubgroupLevelConflictAfterEachLeadingBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/32, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(loop_conflict_after_each_leading_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2 * kIterationCount,
+            /*expected_diagnostic_count=*/0));
     }
 } // namespace

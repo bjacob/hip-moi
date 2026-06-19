@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/014_rdna4_wmma_data_tiled_test.hip
+// tests/instrumented/014_single_subgroup_rdna4_wmma_data_tiled_test.hip
 //
 // RDNA4 WMMA tests using data-tiled matrix fragments. Each thread owns one
 // contiguous fragment per matrix, at byte offset lane * fragment_size.
@@ -93,7 +93,8 @@ namespace
         reinterpret_cast<f32x8_t*>(global_fragments)[fragment_index] = fragment;
     }
 
-    __device__ void load_data_tiled_fragments_to_lds(hip_moi::thread_level_context& ctx,
+    template <typename Context>
+    __device__ void load_data_tiled_fragments_to_lds(Context&          ctx,
                                                      f16x8_t*          a_shared,
                                                      f16x8_t*          b_shared,
                                                      const _Float16*   a_global,
@@ -106,7 +107,8 @@ namespace
         ctx.lds_store(&b_shared[lane], load_global_fragment(b_global, base + lane));
     }
 
-    __device__ void wmma_f16_mac_from_data_tiled_lds(hip_moi::thread_level_context& ctx,
+    template <typename Context>
+    __device__ void wmma_f16_mac_from_data_tiled_lds(Context&          ctx,
                                                      f32x8_t&          acc,
                                                      const f16x8_t*    a_shared,
                                                      const f16x8_t*    b_shared)
@@ -185,6 +187,35 @@ namespace
         __shared__ f16x8_t b_shared[kThreadCount];
 
         hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        f32x8_t acc = {};
+        load_data_tiled_fragments_to_lds(
+            ctx, a_shared, b_shared, a_global, b_global, /*tile_id=*/0);
+        ctx.syncthreads();
+        wmma_f16_mac_from_data_tiled_lds(ctx, acc, a_shared, b_shared);
+
+        if(threadIdx.x == 0)
+        {
+            f16x8_t replacement;
+            for(int i = 0; i < kFragmentElements; ++i)
+            {
+                replacement[i] = static_cast<_Float16>(2.0f);
+            }
+            ctx.lds_store(&a_shared[1], replacement);
+        }
+    }
+
+    __global__ void data_tiled_neighbor_fragment_overwrite_without_barrier_subgroup_level_kernel(
+        const _Float16*                 a_global,
+        const _Float16*                 b_global,
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ f16x8_t a_shared[kThreadCount];
+        __shared__ f16x8_t b_shared[kThreadCount];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -371,6 +402,45 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
         expect_neighbor_fragment_reuse_diagnostics(observed);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
+    }
+
+    TEST(HipMoiRdna4WmmaDataTiled,
+         SubgroupLevelNeighborFragmentOverwriteWithoutBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/128, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        _Float16 host_a[kPackedTileElements];
+        _Float16 host_b[kPackedTileElements];
+        fill_data_tiled_inputs(host_a, host_b, /*tile_count=*/1);
+
+        _Float16* device_a = nullptr;
+        _Float16* device_b = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(data_tiled_neighbor_fragment_overwrite_without_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           device_a,
+                           device_b,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/129, /*expected_diagnostic_count=*/0));
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));

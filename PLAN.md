@@ -33,10 +33,10 @@ magically intercept raw pointer dereferences, direct builtin calls, or arbitrary
 HIP synchronization APIs. Users opt in by calling `hip-moi` APIs for LDS memory
 accesses and synchronization.
 
-The initial single-subgroup MVP exists. The next priority is to generalize it
-toward multi-subgroup workgroups and to design a second, lower-overhead
-`subgroup-level` instrumentation mode before spending much more effort on
-diagnostic polish.
+The initial single-subgroup MVP exists, first multi-subgroup tests exist, and
+`subgroup-level` now exists as a separate mode. The next priority is to make
+subgroup-level instrumentation cheaper and more intentional without losing the
+clear thread-level contract that already works for HIP-language diagnostics.
 
 ## Current status
 
@@ -57,12 +57,14 @@ foundation:
 * `docs/tutorial/` contains self-contained numbered HIP example programs, a
   README, and a CMake subtree that builds the examples and registers them as
   CTests. The tutorial CTests include both a passing synchronized example,
-  expected-failing diagnosed examples, and a gfx12-gated real RDNA4
-  data-tiled WMMA matmul example. The README is the tutorial's primary content:
-  each example is explained as a plain HIP kernel first, then as the
-  corresponding hip-moi instrumented kernel, while the standalone `.hip`
-  programs serve as compiled companions. The matmul tutorial presents the
-  data-tiled layout through per-lane vector fragment loads and stores.
+  expected-failing diagnosed examples, a subgroup-level cross-subgroup
+  diagnostic example, and a gfx12-gated real RDNA4 data-tiled WMMA matmul
+  example. The README is the tutorial's primary content: it introduces
+  `thread-level` and `subgroup-level` as peer instrumentation modes, then
+  explains each example as a plain HIP kernel first and as the corresponding
+  hip-moi instrumented kernel second. The standalone `.hip` programs serve as
+  compiled companions. The matmul tutorial presents the data-tiled layout
+  through per-lane vector fragment loads and stores.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -90,14 +92,22 @@ foundation:
   metadata initialization and epoch increments use detector-internal device
   fences before releasing the workgroup so global-memory metadata is visible to
   the participating threads.
-* `tests/instrumented/001_safe_mvp_test.hip` contains the first instrumented
+* Instrumented tests that are intentionally limited to a one-subgroup workgroup
+  now use `single_subgroup` near the start of the file name. Representative
+  diagnostic-positive single-subgroup tests have subgroup-level companion checks
+  asserting zero diagnostics, making the mode contract explicit: a
+  single-subgroup workgroup has no cross-subgroup race for subgroup-level mode
+  to report.
+* `tests/instrumented/001_single_subgroup_safe_mvp_test.hip` contains the first instrumented
   kernel test. It passes caller-provided global-memory metadata storage into a
   kernel, performs a same-thread instrumented LDS store/load, checks the
-  numerical result, asserts two logged accesses, and asserts zero diagnostics.
-* `tests/instrumented/002_race_mvp_test.hip` contains the first
+  numerical result, asserts two logged accesses, and asserts zero diagnostics
+  in both thread-level and subgroup-level modes.
+* `tests/instrumented/002_single_subgroup_race_mvp_test.hip` contains the first
   diagnostic-positive instrumented kernel. It checks that a same-epoch LDS
   write/read byte-range conflict from two different threads produces one
-  deterministic diagnostic.
+  deterministic thread-level diagnostic, and that the same one-subgroup
+  conflict is intentionally not reported by subgroup-level mode.
 * `tests/instrumented/003_host_context_test.hip` contains the first
   user-facing host diagnostics tests. It exercises `hip_moi::host_context`,
   `HIP_MOI_CHECK`, explicit nonfatal diagnostic consumption, the default
@@ -106,55 +116,58 @@ foundation:
   `hip_moi::subgroup_level_host_context`, whose diagnostics print subgroup ids
   instead of representative or scaled thread ids. The tests check stderr
   diagnostic text and abort behavior using GTest stderr capture and death tests.
-* `tests/instrumented/004_basic_conflict_predicate_test.hip` broadens the raw
+* `tests/instrumented/004_single_subgroup_basic_conflict_predicate_test.hip` broadens the raw
   detector-contract coverage for same-epoch byte ranges: read/read same address,
   write/write same address, non-overlapping writes, adjacent byte ranges, and an
   overlapping full-object/subobject write.
-* `tests/instrumented/005_epoch_boundary_test.hip` exercises uniform
+* `tests/instrumented/005_single_subgroup_epoch_boundary_test.hip` exercises uniform
   `ctx.syncthreads()` as the MVP epoch boundary. It checks that same-address
   accesses separated by a barrier do not report, repeated reuse across epochs
   does not report, and a new same-epoch conflict after a barrier reports in the
   new epoch.
-* `tests/instrumented/006_all_thread_array_test.hip` starts the all-thread
+* `tests/instrumented/006_single_subgroup_all_thread_array_test.hip` starts the all-thread
   ladder step. It covers independent per-thread LDS writes, own-slot reads after
   a barrier, neighbor reads after a barrier, and an intentionally missing-barrier
   neighbor-read diagnostic case.
-* `tests/instrumented/007_metadata_capacity_test.hip` covers access-log
+* `tests/instrumented/007_single_subgroup_metadata_capacity_test.hip` covers access-log
   overflow, diagnostic counters that exceed stored diagnostic capacity, and the
   host-facing stderr report for truncated diagnostic buffers.
-* `tests/instrumented/008_loop_epoch_test.hip` covers looped epoch patterns:
+* `tests/instrumented/008_single_subgroup_loop_epoch_test.hip` covers looped epoch patterns:
   safe scalar producer/consumer loops, all-thread own-slot loops, repeated
   missing-barrier diagnostics, and diagnostic epoch numbering across loop
   iterations.
-* `tests/instrumented/009_tiled_lds_test.hip` covers 2D tiled LDS idioms:
+* `tests/instrumented/009_single_subgroup_tiled_lds_test.hip` covers 2D tiled LDS idioms:
   row-major copy, transpose, skewed stride, blocked layout, diagonal gather,
   striped load/store, and an unsynchronized transpose diagnostic case.
-* `tests/instrumented/010_matmul_like_test.hip` covers small cooperative LDS
+* `tests/instrumented/010_single_subgroup_matmul_like_test.hip` covers small cooperative LDS
   matmul idioms: simple 2x2 and 4x4 tiles, a chunked K loop, and a scalar
   missing-barrier diagnostic. The numerical tests use explicit small integer
   input matrices and compare GPU outputs against a host-side reference matmul.
-* `tests/instrumented/011_epoch_log_lifetime_test.hip` verifies that access-log
+* `tests/instrumented/011_single_subgroup_epoch_log_lifetime_test.hip` verifies that access-log
   storage is reused at epoch boundaries, so long synchronized loops can run with
   capacity sized for one epoch rather than the whole kernel.
-* `tests/instrumented/012_matmul_pipeline_test.hip` covers double-buffered and
+* `tests/instrumented/012_single_subgroup_matmul_pipeline_test.hip` covers double-buffered and
   pipeline-like matmul LDS idioms: safe ping-pong buffering plus
   diagnostic-positive buffer reuse and partial tile overwrite cases. The safe
   output cases use explicit small integer inputs and a host-side reference
   matmul oracle.
-* `tests/instrumented/013_rdna4_wmma_row_major_test.hip` is a gfx12-gated real
+* `tests/instrumented/013_single_subgroup_rdna4_wmma_row_major_test.hip` is a gfx12-gated real
   RDNA4 WMMA smoke test using
   `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, all 32 threads,
   conventional row-major LDS tiles, single-buffer and double-buffer safe cases,
   and a diagnostic-positive row overwrite. The safe cases now use non-uniform
-  small integer-valued `_Float16` inputs and exact host-reference outputs.
-* `tests/instrumented/014_rdna4_wmma_data_tiled_test.hip` is the matching
+  small integer-valued `_Float16` inputs and exact host-reference outputs. The
+  diagnostic-positive one-subgroup overwrite has a subgroup-level companion
+  check asserting zero diagnostics.
+* `tests/instrumented/014_single_subgroup_rdna4_wmma_data_tiled_test.hip` is the matching
   gfx12-gated packed-layout test. It uses the same WMMA intrinsic, but each
   thread's A/B fragment is a contiguous 16-byte object at byte offset
   `lane * 16`, and each thread's C accumulator fragment is a contiguous
   32-byte object at byte offset `lane * 32`, stored with one `f32x8_t` vector
   store. The test includes a diagnostic-positive neighbor-fragment overwrite.
   The packed A/B/C fragments are generated from logical tiles and checked
-  against the same exact host-reference matmul.
+  against the same exact host-reference matmul. The one-subgroup overwrite also
+  has a subgroup-level companion check asserting zero diagnostics.
 * `tests/instrumented/015_thread_level_subgroup_test.hip` starts
   multi-subgroup `thread-level` coverage. It uses a 64-thread workgroup split
   into two 32-thread subgroups, checks the `thread_level_context`
@@ -183,6 +196,9 @@ foundation:
   multi-subgroup `thread-level` and `subgroup-level` tests exist. Epoch-local
   access-log lifetime now exists. Dissociated `subgroup-level` records and
   diagnostics now exist. Mode-aware subgroup-level host reporting now exists.
+  The tutorial now presents thread-level and subgroup-level modes as peers, and
+  the single-subgroup instrumented tests now mark themselves in their file names
+  while checking subgroup-level silence for representative intra-subgroup races.
   Diagnostic quality work and low-overhead subgroup-representative logs are
   still future work.
 
@@ -860,55 +876,60 @@ Proposed instrumented test layout:
 
 ```text
 tests/instrumented/
-  001_safe_mvp_test.hip
-  002_race_mvp_test.hip
+  001_single_subgroup_safe_mvp_test.hip
+  002_single_subgroup_race_mvp_test.hip
   003_host_context_test.hip
-  004_basic_conflict_predicate_test.hip
-  005_epoch_boundary_test.hip
-  006_all_thread_array_test.hip
-  007_metadata_capacity_test.hip
-  008_loop_epoch_test.hip
-  009_tiled_lds_test.hip
-  010_matmul_like_test.hip
-  011_epoch_log_lifetime_test.hip
-  012_matmul_pipeline_test.hip
-  013_rdna4_wmma_row_major_test.hip
-  014_rdna4_wmma_data_tiled_test.hip
+  004_single_subgroup_basic_conflict_predicate_test.hip
+  005_single_subgroup_epoch_boundary_test.hip
+  006_single_subgroup_all_thread_array_test.hip
+  007_single_subgroup_metadata_capacity_test.hip
+  008_single_subgroup_loop_epoch_test.hip
+  009_single_subgroup_tiled_lds_test.hip
+  010_single_subgroup_matmul_like_test.hip
+  011_single_subgroup_epoch_log_lifetime_test.hip
+  012_single_subgroup_matmul_pipeline_test.hip
+  013_single_subgroup_rdna4_wmma_row_major_test.hip
+  014_single_subgroup_rdna4_wmma_data_tiled_test.hip
   015_thread_level_subgroup_test.hip
   016_subgroup_level_bootstrap_test.hip
   017_subgroup_level_multisubgroup_test.hip
   test_support.hpp
 ```
 
-`001_safe_mvp_test.hip` should assert both numerical outputs and zero
-diagnostics. `002_race_mvp_test.hip` should assert deterministic diagnostics;
+Files with `single_subgroup` in their names are deliberately one-subgroup
+workgroups. When such a file has deterministic thread-level race diagnostics,
+it should also include subgroup-level checks showing that intra-subgroup races
+are outside subgroup-level mode's reporting contract.
+
+`001_single_subgroup_safe_mvp_test.hip` should assert both numerical outputs and zero
+diagnostics. `002_single_subgroup_race_mvp_test.hip` should assert deterministic diagnostics;
 for racy kernels, numerical output is not the oracle.
 `003_host_context_test.hip` asserts end-user behavior: explicit checks,
 stderr/fatal policy, and scope-based destructor handling.
-`004_basic_conflict_predicate_test.hip` asserts the basic MVP predicate around
+`004_single_subgroup_basic_conflict_predicate_test.hip` asserts the basic MVP predicate around
 same-epoch byte ranges before the suite moves on to epoch-boundary behavior.
-`005_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
+`005_single_subgroup_epoch_boundary_test.hip` asserts the MVP epoch-boundary behavior of
 uniform `ctx.syncthreads()`.
-`006_all_thread_array_test.hip` asserts first all-thread LDS array behavior,
+`006_single_subgroup_all_thread_array_test.hip` asserts first all-thread LDS array behavior,
 including a missing-barrier diagnostic case.
-`007_metadata_capacity_test.hip` asserts access-log overflow and diagnostic
+`007_single_subgroup_metadata_capacity_test.hip` asserts access-log overflow and diagnostic
 buffer truncation behavior, including the user-facing host report.
-`008_loop_epoch_test.hip` asserts looped epoch behavior, including repeated
+`008_single_subgroup_loop_epoch_test.hip` asserts looped epoch behavior, including repeated
 safe barriers and repeated missing-barrier diagnostics.
-`009_tiled_lds_test.hip` asserts 2D tile layouts, tiled gathers, and an
+`009_single_subgroup_tiled_lds_test.hip` asserts 2D tile layouts, tiled gathers, and an
 unsynchronized transpose diagnostic.
-`010_matmul_like_test.hip` asserts cooperative LDS matmul-like access patterns
+`010_single_subgroup_matmul_like_test.hip` asserts cooperative LDS matmul-like access patterns
 using explicit small integer inputs, host-reference output checks, and a scalar
 missing-barrier diagnostic.
-`011_epoch_log_lifetime_test.hip` asserts that access-log capacity is scoped to
+`011_single_subgroup_epoch_log_lifetime_test.hip` asserts that access-log capacity is scoped to
 the active epoch rather than the cumulative kernel trace.
-`012_matmul_pipeline_test.hip` asserts double-buffered and pipeline-like matmul
+`012_single_subgroup_matmul_pipeline_test.hip` asserts double-buffered and pipeline-like matmul
 LDS patterns with host-reference output checks, including diagnostic-positive
 buffer reuse cases.
-`013_rdna4_wmma_row_major_test.hip` asserts RDNA4/gfx12 WMMA intrinsic coverage
+`013_single_subgroup_rdna4_wmma_row_major_test.hip` asserts RDNA4/gfx12 WMMA intrinsic coverage
 using all 32 threads, conventional row-major LDS tiles, non-uniform exact
 inputs, and host-reference output checks.
-`014_rdna4_wmma_data_tiled_test.hip` asserts the matching RDNA4/gfx12 WMMA
+`014_single_subgroup_rdna4_wmma_data_tiled_test.hip` asserts the matching RDNA4/gfx12 WMMA
 coverage for packed A/B/C fragments laid out at `lane * fragment_size` byte
 offsets, with packed data generated from logical tiles and checked against a
 host-reference matmul.
@@ -935,6 +956,7 @@ docs/tutorial/
   002_failing_same_epoch_race.hip
   003_destructor_fallback.hip
   004_rdna4_wmma_data_tiled_matmul.hip
+  005_subgroup_level_cross_subgroup_race.hip
 ```
 
 Incremental instrumented test growth:
@@ -974,10 +996,16 @@ Incremental instrumented test growth:
     causative threads. Done.
 18. Add richer multi-subgroup `subgroup-level` tests covering arrays, loops,
     tiled layouts, and matmul-shaped cross-subgroup LDS sharing. Done.
-19. Prototype lower-overhead subgroup-representative logging for tile-shaped
+19. Update tutorial examples to cover thread-level and subgroup-level usage as
+    peer modes, with compiled examples for both user-facing paths. Done for the
+    first passing example and a cross-subgroup diagnostic example.
+20. Rename single-subgroup instrumented tests with a fixed-width numeric prefix
+    followed by `single_subgroup`, and add subgroup-level companion checks for
+    representative deterministic single-subgroup cases. Done.
+21. Prototype lower-overhead subgroup-representative logging for tile-shaped
     accesses if the design is clear enough; otherwise document the blockers and
     keep using all-thread logging filtered by subgroup id.
-20. Improve diagnostic quality with labels/source locations and first-conflict
+22. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.

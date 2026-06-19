@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/010_matmul_like_test.hip
+// tests/instrumented/010_single_subgroup_matmul_like_test.hip
 //
 // Matmul-like LDS patterns under the MVP synchronization contract.
 #include "test_support.hpp"
@@ -247,6 +247,29 @@ namespace
         }
     }
 
+    __global__ void scalar_matmul_missing_barrier_subgroup_level_kernel(
+        const int* a_global, const int* b_global, hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int a_shared;
+        __shared__ int b_shared;
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&a_shared, a_global[matmul_a_offset<1, 1>(0, 0, 0)]);
+            ctx.lds_store(&b_shared, b_global[matmul_b_offset<1, 1>(0, 0, 0)]);
+        }
+        if(threadIdx.x == 1)
+        {
+            int a = ctx.lds_load(&a_shared);
+            int b = ctx.lds_load(&b_shared);
+            (void)(a * b);
+        }
+    }
+
     void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,
                                 observed_metadata*                           observed)
     {
@@ -396,6 +419,44 @@ namespace
                       static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
             EXPECT_EQ(observed.diagnostics[i].epoch, 0u);
         }
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
+    }
+
+    TEST(HipMoiMatmulLike, SubgroupLevelScalarMissingBarrierDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/16, /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        int host_a[1];
+        int host_b[1];
+        fill_matmul_inputs<1, 1, 1>(host_a, host_b, /*tile_count=*/1);
+
+        int* device_a = nullptr;
+        int* device_b = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_a, sizeof(host_a)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_b, sizeof(host_b)));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(scalar_matmul_missing_barrier_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           device_a,
+                           device_b,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/4, /*expected_diagnostic_count=*/0));
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_a));
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));

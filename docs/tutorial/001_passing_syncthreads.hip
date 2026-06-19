@@ -4,7 +4,7 @@
 // docs/tutorial/001_passing_syncthreads.hip
 //
 // A minimal passing hip-moi program: a store and a load separated by
-// ctx.syncthreads().
+// ctx.syncthreads(), shown with both context modes.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
@@ -78,16 +78,44 @@ namespace
             out[0] = ctx.lds_load(&value) + 1;
         }
     }
+
+    __global__ void subgroup_level_producer_consumer_kernel(
+        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context::config cfg{
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
+            /*subgroup_count=*/1,
+        };
+        hip_moi::subgroup_level_context ctx(storage, cfg);
+
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value, 41);
+        }
+
+        ctx.syncthreads();
+
+        if(threadIdx.x == 1)
+        {
+            out[0] = ctx.lds_load(&value) + 1;
+        }
+    }
 } // namespace
 
 int main()
 {
-    hip_moi::host_context moi(small_context_options());
+    hip_moi::host_context                thread_moi(small_context_options());
+    hip_moi::subgroup_level_host_context subgroup_moi(small_context_options());
 
     int* device_output = nullptr;
-    check_hip(hipMalloc(&device_output, 2 * sizeof(int)), "hipMalloc");
+    check_hip(hipMalloc(&device_output, 3 * sizeof(int)), "hipMalloc");
 
-    int initial[2] = {-1, -1};
+    int initial[3] = {-1, -1, -1};
     check_hip(hipMemcpy(device_output, initial, sizeof(initial), hipMemcpyHostToDevice),
               "hipMemcpy(device_output)");
 
@@ -106,25 +134,40 @@ int main()
                        0,
                        0,
                        device_output + 1,
-                       moi.device_ref());
-    check_hip(hipGetLastError(), "hipGetLastError(instrumented)");
+                       thread_moi.device_ref());
+    check_hip(hipGetLastError(), "hipGetLastError(thread_level)");
 
-    HIP_MOI_CHECK(moi);
+    HIP_MOI_CHECK(thread_moi);
 
-    int output[2] = {-1, -1};
+    hipLaunchKernelGGL(subgroup_level_producer_consumer_kernel,
+                       dim3(1),
+                       dim3(kThreadCount),
+                       0,
+                       0,
+                       device_output + 2,
+                       subgroup_moi.device_ref());
+    check_hip(hipGetLastError(), "hipGetLastError(subgroup_level)");
+
+    HIP_MOI_CHECK(subgroup_moi);
+
+    int output[3] = {-1, -1, -1};
     check_hip(hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost),
               "hipMemcpy(output)");
     check_hip(hipFree(device_output), "hipFree");
 
-    if(output[0] != 42 || output[1] != 42)
+    if(output[0] != 42 || output[1] != 42 || output[2] != 42)
     {
         std::fprintf(stderr,
-                     "expected outputs 42 and 42, got %d and %d\n",
+                     "expected outputs 42, 42, 42, got %d, %d, %d\n",
                      output[0],
-                     output[1]);
+                     output[1],
+                     output[2]);
         return EXIT_FAILURE;
     }
 
-    std::printf("hip-moi tutorial 001: plain=%d instrumented=%d\n", output[0], output[1]);
+    std::printf("hip-moi tutorial 001: plain=%d thread-level=%d subgroup-level=%d\n",
+                output[0],
+                output[1],
+                output[2]);
     return EXIT_SUCCESS;
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/002_race_mvp_test.hip
+// tests/instrumented/002_single_subgroup_race_mvp_test.hip
 //
 // Initial diagnostic-positive tests for the hip-moi instrumentation API.
 #include "test_support.hpp"
@@ -26,6 +26,26 @@ namespace
             /*subgroup_count=*/1,
         };
         hip_moi::thread_level_context ctx(storage, cfg);
+
+        ctx.init_workgroup();
+
+        if(threadIdx.x == 0)
+        {
+            ctx.lds_store(&value, 123);
+        }
+        if(threadIdx.x == 1)
+        {
+            out[0] = ctx.lds_load(&value);
+        }
+    }
+
+    __global__ void same_epoch_write_read_subgroup_level_kernel(
+        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
 
         ctx.init_workgroup();
 
@@ -93,6 +113,34 @@ namespace
                                         || (diagnostic.first_thread_id == 1u
                                             && diagnostic.second_thread_id == 0u);
         EXPECT_TRUE(threads_are_zero_and_one);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
+    TEST(HipMoiInstrumentedRaceMvp, SubgroupLevelSameEpochWriteReadDoesNotReport)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(16, 4, 1));
+
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+
+        int initial = -1;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+
+        hipLaunchKernelGGL(same_epoch_write_read_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           device_output,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(
+            hip_moi::test::expect_metadata_counts(storage, /*expected_access_count=*/2, /*expected_diagnostic_count=*/0));
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }

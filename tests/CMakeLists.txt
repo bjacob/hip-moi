@@ -81,35 +81,35 @@ endforeach()
 
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
-hip_moi_add_gtest(hip_moi_instrumented_safe_mvp_test
-                  instrumented/001_safe_mvp_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_race_mvp_test
-                  instrumented/002_race_mvp_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_safe_mvp_test
+                  instrumented/001_single_subgroup_safe_mvp_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_race_mvp_test
+                  instrumented/002_single_subgroup_race_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_host_context_test
                   instrumented/003_host_context_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_basic_conflict_predicate_test
-                  instrumented/004_basic_conflict_predicate_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_epoch_boundary_test
-                  instrumented/005_epoch_boundary_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_all_thread_array_test
-                  instrumented/006_all_thread_array_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_metadata_capacity_test
-                  instrumented/007_metadata_capacity_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_loop_epoch_test
-                  instrumented/008_loop_epoch_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_tiled_lds_test
-                  instrumented/009_tiled_lds_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_matmul_like_test
-                  instrumented/010_matmul_like_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_epoch_log_lifetime_test
-                  instrumented/011_epoch_log_lifetime_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_matmul_pipeline_test
-                  instrumented/012_matmul_pipeline_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_basic_conflict_predicate_test
+                  instrumented/004_single_subgroup_basic_conflict_predicate_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_epoch_boundary_test
+                  instrumented/005_single_subgroup_epoch_boundary_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_all_thread_array_test
+                  instrumented/006_single_subgroup_all_thread_array_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_metadata_capacity_test
+                  instrumented/007_single_subgroup_metadata_capacity_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_loop_epoch_test
+                  instrumented/008_single_subgroup_loop_epoch_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_tiled_lds_test
+                  instrumented/009_single_subgroup_tiled_lds_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_matmul_like_test
+                  instrumented/010_single_subgroup_matmul_like_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_epoch_log_lifetime_test
+                  instrumented/011_single_subgroup_epoch_log_lifetime_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_matmul_pipeline_test
+                  instrumented/012_single_subgroup_matmul_pipeline_test.hip)
 if(_hip_moi_build_rdna4_tests)
-  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_row_major_test
-                    instrumented/013_rdna4_wmma_row_major_test.hip)
-  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_data_tiled_test
-                    instrumented/014_rdna4_wmma_data_tiled_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_rdna4_wmma_row_major_test
+                    instrumented/013_single_subgroup_rdna4_wmma_row_major_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_rdna4_wmma_data_tiled_test
+                    instrumented/014_single_subgroup_rdna4_wmma_data_tiled_test.hip)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_thread_level_subgroup_test
                   instrumented/015_thread_level_subgroup_test.hip)

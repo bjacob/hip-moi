@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/007_metadata_capacity_test.hip
+// tests/instrumented/007_single_subgroup_metadata_capacity_test.hip
 //
 // Metadata capacity and overflow behavior for the MVP detector.
 #include "test_support.hpp"
@@ -59,6 +59,22 @@ namespace
         __shared__ int values[kThreadCount];
 
         hip_moi::thread_level_context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        int tid = static_cast<int>(threadIdx.x);
+        ctx.lds_store(&values[tid], tid);
+
+        int neighbor = (tid + 1) % kThreadCount;
+        (void)ctx.lds_load(&values[neighbor]);
+    }
+
+    __global__ void many_neighbor_conflicts_subgroup_level_kernel(
+        hip_moi::subgroup_level_context::storage_ref storage)
+    {
+        __shared__ int values[kThreadCount];
+
+        hip_moi::subgroup_level_context ctx =
+            hip_moi::test::make_single_subgroup_context<hip_moi::subgroup_level_context>(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);
@@ -180,5 +196,27 @@ namespace
         expect_contains(stderr_output, "hip-moi diagnostic 0: kind=access_conflict");
         expect_contains(stderr_output,
                         "hip-moi: diagnostic buffer stored 3 of 8 diagnostic(s)");
+    }
+
+    TEST(HipMoiMetadataCapacity, SubgroupLevelSingleSubgroupConflictsDoNotFillDiagnostics)
+    {
+        hip_moi::test::subgroup_level_device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate(
+            /*access_capacity=*/32,
+            /*diagnostic_capacity=*/kTruncatedDiagnosticCapacity,
+            /*subgroup_capacity=*/1));
+
+        hipLaunchKernelGGL(many_neighbor_conflicts_subgroup_level_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           storage.ref());
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        ASSERT_NO_FATAL_FAILURE(hip_moi::test::expect_metadata_counts(
+            storage, /*expected_access_count=*/2 * kThreadCount,
+            /*expected_diagnostic_count=*/0));
     }
 } // namespace
