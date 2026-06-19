@@ -11,19 +11,32 @@ Build a small HIP device-side library that helps diagnose definite
 workgroup-local LDS memory-ordering mistakes in manually instrumented kernels,
 with near-zero false positives inside its stated contract.
 
+The project now has two distinct purposes:
+
+1. Provide a real HIP-language diagnostic tool. In this purpose, hip-moi judges
+   instrumented HIP programs by the HIP/LLVM memory model. GPU hardware
+   execution folklore is not a correctness argument at this level.
+2. Serve as a stepping stone toward a separate future assembly-level
+   instrumentation effort. In that future effort, the relevant memory model is
+   the hardware's model. Wavefront lockstep, issue behavior, and the shape of
+   load/store queues may then become semantic facts rather than folklore.
+
+These purposes must not be conflated. This repository still implements
+HIP-language instrumentation, and diagnostics emitted by this library must be
+principled in the HIP/LLVM model. The assembly-level purpose changes the
+short-term priorities because it tells us which abstractions are most worth
+learning from now: multi-subgroup workgroups, cross-subgroup communication, and
+instrumentation modes that can intentionally ignore intra-subgroup races.
+
 The library is not a compiler pass and not a true interposer. It will not
 magically intercept raw pointer dereferences, direct builtin calls, or arbitrary
 HIP synchronization APIs. Users opt in by calling `hip-moi` APIs for LDS memory
 accesses and synchronization.
 
-The near-term schedule is deliberately aggressive:
-
-* EOD: a tiny but real MVP that compiles, runs on gfx1201, and has GPU tests.
-* End of tomorrow: a more credible refined MVP with better diagnostics,
-  stronger tests, and at least one real-kernel idiom extracted from the matmul
-  corpus.
-* Later: incremental widening of the memory model, especially atomics and
-  fences.
+The initial single-subgroup MVP exists. The next priority is to generalize it
+toward multi-subgroup workgroups and to design a second, lower-overhead
+cross-subgroup-only instrumentation mode before spending much more effort on
+diagnostic polish.
 
 ## Current status
 
@@ -140,15 +153,18 @@ foundation:
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
   tests, looped epoch tests, tiled LDS tests, simple matmul-like tests,
   pipeline-like matmul tests, and RDNA4 WMMA row-major/data-tiled tests exist.
-  Epoch-local access-log lifetime now exists. Diagnostic quality work and
-  low-overhead per-thread logs are still future work.
+  Epoch-local access-log lifetime now exists. Multi-subgroup workgroups,
+  cross-subgroup-only mode, diagnostic quality work, and low-overhead
+  per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: improve diagnostic quality, starting with compact
-source/location labels or first-conflict preservation.
+Next implementation slice: multi-subgroup groundwork and instrumentation-mode
+design. The immediate goal is to make subgroup identity operational, then decide
+how a thread-precise HIP mode and a lower-overhead cross-subgroup-only mode
+coexist without compromising either contract.
 
 ## Foundations
 
@@ -162,16 +178,17 @@ Use common HIP/AMDGPU terminology consistently:
   synchronize with `__syncthreads()`/`s_barrier`. In HIP source, this is the
   group indexed by `blockIdx` and sized by `blockDim`.
 * Wavefront: the hardware execution grouping. Do not rely on wavefront lockstep
-  for language-level correctness.
+  for HIP-language correctness. For the future assembly-level effort, wavefront
+  behavior is part of the hardware model and must be studied directly.
 * Subgroup: a library/modeling concept for a subset of a workgroup. This is
   useful for future finer-grained epoch tracking. A subgroup may correspond to a
-  wavefront in some modes, but the plan should say so explicitly when that is
-  intended.
+  wavefront in some modes, especially assembly-oriented modes, but the plan
+  should say so explicitly when that is intended.
 
 ### Memory-model ground rules
 
-The mental model for this project should be language/IR first, hardware folklore
-last.
+For the HIP-language instrumentation purpose, the mental model is language/IR
+first, hardware folklore last.
 
 HIP device code lowers through Clang to LLVM IR. HIP APIs and Clang builtins
 must ultimately be understood by what they lower to: LLVM loads/stores, atomic
@@ -216,13 +233,22 @@ Practical consequences:
   `ctx.syncthreads()` as one full-workgroup epoch boundary. Later phases can
   split this into lower-level primitives once their IR-level meaning is clear.
 
+For the assembly-level future effort, the ground rules are different. The
+program being instrumented would no longer be judged as HIP source or LLVM IR;
+it would be judged by the hardware model. In that setting, wavefront lockstep,
+instruction issue, load/store queue behavior, and other hardware details are
+not folklore. They are candidates for the actual model. This is why hip-moi
+should learn early how to represent multiple subgroups in one workgroup and how
+to focus on races between subgroups. Within-subgroup races remain possible
+research questions, but they are not the assembly-oriented MVP center of mass.
+
 ## MVP
 
 The MVP is the smallest useful library that can be built and tested today.
 
 ### MVP contract
 
-The MVP diagnoses only this model:
+The existing MVP diagnoses only this thread-precise HIP-language model:
 
 * Memory scope: LDS/shared memory only.
 * Threading scope: one workgroup only.
@@ -246,6 +272,19 @@ Within this contract:
 
 This intentionally accepts many false negatives outside the model. The key MVP
 quality bar is that any diagnostic it does emit should be trustworthy.
+
+The planned cross-subgroup-only mode will have a different, explicitly narrower
+contract:
+
+* It is not a full HIP-language race detector.
+* It focuses on conflicting accesses by different subgroups within one
+  workgroup.
+* It intentionally ignores races among threads in the same subgroup.
+* It is motivated by lower-overhead HIP experimentation and by the future
+  assembly-level effort, where cross-subgroup races are expected to be the main
+  MVP target.
+* Any same-subgroup false negative in this mode is expected behavior and must be
+  documented as part of the mode contract.
 
 ### MVP API
 
@@ -367,6 +406,17 @@ Notes:
   `threads_per_subgroup == thread_count` and `subgroup_count == 1`. Future
   subgroup modes may allow a partial final subgroup, where
   `threads_per_subgroup * subgroup_count >= thread_count`.
+* The next API design pass needs an explicit instrumentation-mode story. The
+  current mode is thread-precise: every participating thread can log accesses,
+  and records need enough identity to distinguish threads. A cross-subgroup-only
+  mode should be able to use subgroup identity instead of thread identity and
+  may eventually use subgroup-representative instrumentation, such as only the
+  0-th thread of each subgroup recording a subgroup-level access summary.
+* Do not silently make the existing per-thread `lds_load`/`lds_store` wrappers
+  mean "only subgroup leader logs" until the contract is clear. Arbitrary
+  per-thread accesses are not necessarily summarized by the leader's address.
+  A lower-overhead mode may need separate subgroup-level APIs or a different
+  record path for accesses that are known to be collective/tile-shaped.
 * LDS load/store APIs should be templated immediately. Internally, every memory
   access becomes a byte range: base address plus `sizeof(T)` bytes.
 * The first API can require trivially copyable `T`.
@@ -447,11 +497,14 @@ Each instrumented LDS access records:
 * address or LDS-relative byte offset,
 * byte size,
 * access kind: load or store,
-* thread id,
+* thread id in thread-precise mode,
 * subgroup id,
 * epoch id,
 * optional source id,
 * whether the slot is valid.
+
+Cross-subgroup-only mode should have a compact record form that can omit
+thread id if diagnostics never distinguish threads within one subgroup.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -462,8 +515,10 @@ On every `lds_load<T>` or `lds_store<T>`:
 Conflict checking may happen immediately or be deferred. The preferred MVP
 direction is deferred checking from per-thread access logs, so the common access
 path does not need detector-created cross-thread synchronization. Whenever
-checking runs, if byte ranges overlap, thread ids differ, and either access is a
-write, record a diagnostic.
+checking runs in thread-precise mode, if byte ranges overlap, thread ids differ,
+and either access is a write, record a diagnostic. In cross-subgroup-only mode,
+the corresponding predicate uses subgroup ids instead of thread ids and ignores
+same-subgroup conflicts by contract.
 
 On `ctx.syncthreads()`:
 
@@ -536,21 +591,31 @@ patterns into deterministic diagnostics, not to preserve the original race. The
 bad failure mode is the conjunction of perturbing or hiding the original race and
 also failing to report it in the shadow diagnostic.
 
-### MVP subgroup-ready shape
+### Immediate multi-subgroup generalization
 
-Even though the MVP has only one full-workgroup epoch, do not bake that into
-type names or storage layout. Design the metadata as:
+The first MVP used one full-workgroup epoch. The next milestone is to make
+subgroup identity real in the implementation and tests. Keep metadata shaped as:
 
 ```c++
 epoch[subgroup_id]
 ```
 
-with `subgroup_count == 1` for the MVP.
+with `subgroup_count == 1` remaining a valid degenerate case.
 
-This keeps a path open for kernels where independent subgroups within one
-workgroup operate on different shared tiles or synchronize at different
-granularities. Do not implement subgroup semantics in the MVP; just avoid
-closing the door.
+This supports kernels where independent subgroups within one workgroup operate
+on different shared tiles or synchronize at different granularities. The first
+multi-subgroup implementation can still treat `ctx.syncthreads()` as a
+full-workgroup operation that advances all subgroup epochs together. Later
+subgroup-local synchronization can advance only the participating subgroup.
+
+Required early tests:
+
+* a 64-thread workgroup split into two 32-thread subgroups,
+* a cross-subgroup same-epoch LDS conflict that reports,
+* a same-subgroup same-epoch LDS conflict that reports in thread-precise mode,
+* the same same-subgroup conflict intentionally not reporting in
+  cross-subgroup-only mode,
+* cross-subgroup accesses separated by `ctx.syncthreads()` not reporting.
 
 ### MVP diagnostics
 
@@ -595,9 +660,10 @@ Instead, stage them as later negative tests in one of two ways:
 
 The MVP should prefer kernels that always terminate.
 
-### EOD MVP implementation steps
+### Initial MVP implementation steps
 
-The goal for EOD is a tiny but real library with GPU tests that compile and run.
+These steps describe the original tiny-but-real MVP target: a library with GPU
+tests that compile and run.
 
 1. Create the CMake skeleton.
    * Header-only library target.
@@ -634,7 +700,7 @@ The goal for EOD is a tiny but real library with GPU tests that compile and run.
    * Use a parameterized GTest suite so CTest can report one entry per
      instrumented kernel when `HIP_MOI_CTEST_PER_CASE=ON`.
 
-5. Add EOD test cases.
+5. Add initial test cases.
    * Same thread store then load: no diagnostic.
    * Different threads access non-overlapping LDS addresses: no diagnostic.
    * Different threads read same LDS address: no diagnostic.
@@ -753,7 +819,16 @@ Incremental instrumented test growth:
     diagnostic-positive matmul-shaped races. Done.
 13. Add RDNA4-gated real WMMA tests for both conventional row-major LDS tiles
     and data-tiled packed fragments. Done.
-14. Improve diagnostic quality with labels/source locations and first-conflict
+14. Add thread-precise multi-subgroup tests: at least two subgroups in one
+    workgroup, cross-subgroup conflicts, same-subgroup conflicts, and
+    full-workgroup synchronization separating subgroups.
+15. Add cross-subgroup-only mode tests: cross-subgroup conflicts still report,
+    same-subgroup conflicts intentionally do not report, and the mode contract
+    is visible in diagnostic metadata and host reports.
+16. Prototype lower-overhead subgroup-representative logging for tile-shaped
+    accesses if the design is clear enough; otherwise document the blockers and
+    keep using all-thread logging filtered by subgroup id.
+17. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.
@@ -787,40 +862,63 @@ Layer 2: API behavior tests.
 * multiple calls to `ctx.syncthreads()`,
 * multiple workgroups if supported.
 
-## Refined MVP by end of tomorrow
+## Revised Near-Term Milestone
 
-The goal for tomorrow is not broad generality. It is making the MVP feel like a
-credible tool rather than a toy.
+The refined MVP is now defined less by diagnostic polish and more by whether the
+library teaches us the right subgroup abstractions.
 
-1. Improve address/range tracking.
-   * Use byte ranges consistently.
-   * Handle partially overlapping typed accesses.
-   * Add tests for adjacent vs partially overlapping ranges.
+1. Make subgroup identity operational.
+   * Compute `subgroup_id` and thread rank within subgroup from runtime config.
+   * Support `subgroup_count > 1` in storage initialization and epoch state.
+   * Keep `ctx.syncthreads()` as a full-workgroup operation initially, advancing
+     all subgroup epochs together.
+   * Add two-subgroup tests using one workgroup.
 
-2. Improve diagnostics.
+2. Preserve the existing thread-precise HIP mode.
+   * Continue detecting same-epoch conflicts between any two different threads.
+   * Include same-subgroup and cross-subgroup diagnostic-positive tests.
+   * Keep this mode principled in the HIP/LLVM memory model.
+
+3. Design the cross-subgroup-only mode.
+   * Define the mode as intentionally ignoring same-subgroup conflicts.
+   * Decide whether mode selection is a runtime enum, a separate context type,
+     a storage policy, or some other zero-overhead-in-practice shape.
+   * Avoid virtual dispatch in device code.
+   * Decide whether the first implementation logs all thread accesses and
+     filters by subgroup id, or introduces a subgroup-representative API.
+
+4. Prototype the cross-subgroup-only mode.
+   * Produce deterministic diagnostics for cross-subgroup conflicts.
+   * Produce no diagnostic for same-subgroup conflicts by contract.
+   * Measure or at least inspect the metadata footprint difference from
+     thread-precise mode.
+   * Investigate whether thread id can be removed from the hot access record in
+     this mode.
+
+5. Explore subgroup-representative instrumentation.
+   * Candidate direction: only the 0-th thread of each subgroup records a
+     subgroup-level access summary.
+   * Do this only for access patterns where the representative can describe the
+     whole subgroup's memory footprint, such as tile-shaped or fragment-shaped
+     operations.
+   * Do not pretend this summarizes arbitrary per-thread pointer accesses.
+   * Determine whether this can reduce atomics or eliminate them from the common
+     access path.
+
+6. Then resume diagnostic quality work.
    * Add source/location IDs or stringless labels.
    * Add first-conflict preservation so later conflicts do not hide the useful
      one.
-   * Add overflow diagnostics for metadata capacity exhaustion.
+   * Add clearer mode-aware host diagnostics, especially for
+     cross-subgroup-only false negatives by design.
 
-3. Make context initialization robust.
-   * Clear shared metadata exactly once per workgroup.
-   * Ensure all threads see initialized metadata before use.
-   * Test multiple workgroups if the storage/result protocol supports it.
-
-4. Start extracting real-kernel idioms.
-   * Read `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip`.
-   * Extract the simplest LDS write/syncthreads/read pattern.
-   * Convert only the minimum number of loads/stores to `ctx.lds_*`.
-   * Preserve the original control structure closely.
-
-5. Add synchronization lowering notes.
+7. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
      `__builtin_amdgcn_s_barrier`, and `__builtin_amdgcn_fence`.
-   * Save or document their LLVM IR shape.
-   * Identify which combinations produce LLVM `fence` instructions, target
-     syncscopes, and/or target-specific barrier intrinsics.
-   * Do not infer cross-thread synchronization from naked fences.
+   * Save or document their LLVM IR shape for the HIP-language model.
+   * Separately note which hardware facts would matter for the future
+     assembly-level model.
+   * Do not infer HIP-level cross-thread synchronization from naked fences.
 
 ## Plan beyond the MVP
 
@@ -828,7 +926,58 @@ After the refined MVP, widen scope in small semantic steps. Each step should add
 one new kind of happens-before edge or one new class of instrumented access, with
 tests that prove both positive and negative cases.
 
-### Step 1: Real-kernel LDS coverage
+### Step 1: Multi-subgroup thread-precise HIP mode
+
+Allow a workgroup to contain multiple tracked subgroups without changing the
+HIP-language diagnostic contract.
+
+* Add multiple epoch counters per workgroup.
+* Compute subgroup id and thread rank within subgroup from `config`.
+* Preserve thread-precise diagnostics within and across subgroups.
+* Treat `ctx.syncthreads()` as a full-workgroup epoch boundary that advances all
+  subgroup epochs.
+* Test subgroup A and subgroup B operating independently on non-overlapping LDS
+  ranges.
+* Test same-address communication within one subgroup.
+* Test data crossing subgroup boundaries only after an explicit full-workgroup
+  synchronization.
+
+### Step 2: Cross-subgroup-only mode design
+
+Design a second instrumentation mode that intentionally ignores conflicts among
+threads in the same subgroup.
+
+* Name the mode and document its false-negative contract.
+* Decide how users select the mode.
+* Decide whether the mode shares `context` with thread-precise mode or uses a
+  separate context/storage wrapper.
+* Decide whether mode selection must be compile-time for the hot path or can be
+  a runtime value that clang optimizes away in local use.
+* Avoid virtual dispatch in device code.
+* Design a compact access record that tracks subgroup id but can omit thread id.
+* Decide how diagnostics should report "subgroup A vs subgroup B" without
+  pretending to identify exact threads.
+
+### Step 3: Cross-subgroup-only mode prototype
+
+Build the narrow mode before pursuing more esoteric synchronization semantics.
+
+* First implementation may log all thread accesses and filter same-subgroup
+  conflicts out of the shadow model.
+* Then investigate subgroup-representative logging where only the 0-th thread
+  of each subgroup records a subgroup-level access summary.
+* Use representative logging only for access patterns whose byte ranges can be
+  summarized by a subgroup leader, such as cooperative tile or fragment
+  operations.
+* Measure or inspect metadata size, access-record fields, atomic usage, and
+  generated code for both modes.
+* Add paired tests showing the same kernel reports in thread-precise mode but
+  intentionally does not report same-subgroup conflicts in cross-subgroup-only
+  mode.
+* Add matmul-shaped cross-subgroup conflicts, because this is the main bridge to
+  the future assembly-level effort.
+
+### Step 4: Real-kernel LDS coverage under both modes
 
 Broaden the corpus before broadening the memory model too much.
 
@@ -839,9 +988,11 @@ Broaden the corpus before broadening the memory model too much.
 * Cover repeated tile loops with multiple synchronization phases.
 * Keep RDNA4/gfx12-specific WMMA coverage split by input layout: conventional
   row-major tiles and data-tiled packed fragments.
+* For each useful real-kernel idiom, decide whether it belongs in
+  thread-precise mode, cross-subgroup-only mode, or both.
 * Keep atomics out of these tests until the atomic model exists.
 
-### Step 2: Hard synchronization negative tests
+### Step 5: Hard synchronization negative tests
 
 Add a way to test bad synchronization patterns that might otherwise hang.
 
@@ -851,20 +1002,7 @@ Add a way to test bad synchronization patterns that might otherwise hang.
 * Keep real-barrier divergent tests separate, probably with process-level
   timeout handling if they are ever useful.
 
-### Step 3: Subgroup epochs
-
-Allow a workgroup to contain multiple independently tracked subgroups.
-
-* Add multiple epoch counters per workgroup.
-* Let users provide or compute a subgroup id.
-* Test subgroup A and subgroup B operating independently on non-overlapping LDS
-  ranges.
-* Test same-address communication within one subgroup.
-* Test data crossing subgroup boundaries only after an explicit full-workgroup
-  synchronization.
-* Do not equate subgroup with wavefront unless that mode explicitly says so.
-
-### Step 4: Atomic access instrumentation, without new ordering
+### Step 6: Atomic access instrumentation, without new ordering
 
 First teach the library to see atomic operations as operations, without yet
 using them to create happens-before edges.
@@ -879,7 +1017,7 @@ using them to create happens-before edges.
 * Add tests showing that merely calling relaxed atomics does not order unrelated
   LDS accesses.
 
-### Step 5: Acquire/release atomics as synchronization
+### Step 7: Acquire/release atomics as synchronization
 
 Next model the common flag handoff without explicit fences.
 
@@ -905,9 +1043,9 @@ Required model:
 * Add negative tests where the operations are relaxed and therefore do not
   create the needed edge.
 
-### Step 6: Explicit fences paired with atomic handoff
+### Step 8: Explicit fences paired with atomic handoff
 
-Only after Step 5, add explicit fence modeling. This is the incremental version
+Only after Step 7, add explicit fence modeling. This is the incremental version
 of "fences + atomics"; naked fences remain negative cases.
 
 Example shape:
@@ -937,7 +1075,7 @@ Required model:
 * Add negative tests where the acquire fence occurs before the observing load.
 * Add negative tests where the load observes the wrong atomic write.
 
-### Step 7: RMWs and release sequences
+### Step 9: RMWs and release sequences
 
 Then extend the atomic handoff model to read-modify-write operations and release
 sequences.
@@ -951,7 +1089,7 @@ sequences.
 * Add tests where the release sequence is broken and no synchronizes-with edge
   should be created.
 
-### Step 8: Sync scopes and stronger orderings
+### Step 10: Sync scopes and stronger orderings
 
 Only after the simple acquire/release cases work, widen to target-specific
 details.
@@ -962,7 +1100,7 @@ details.
 * Decide how much `seq_cst` support is worth implementing.
 * Add tests that compare source-level HIP calls with the LLVM IR they produce.
 
-### Step 9: Ergonomics and runtime support
+### Step 11: Ergonomics and runtime support
 
 Improve usability after the core model is trustworthy.
 
@@ -984,6 +1122,12 @@ Keep the corpus layered:
 * Real-kernel idioms: keep kernels small enough to understand in one screen,
   preserve original LDS access patterns, and replace only relevant LDS accesses
   with `ctx.lds_*`.
+* Multi-subgroup mode tests: use the same logical kernels in thread-precise and
+  cross-subgroup-only modes when possible, so the mode contract is visible in
+  the expected diagnostics.
+* Cross-subgroup matmul idioms: include cases where different subgroups in one
+  workgroup cooperate through LDS tiles, because these are the strongest bridge
+  to the future assembly-level project.
 * Future hard cases: divergent barriers, fence-only snippets without atomic
   handoff, atomics forming release/acquire chains, subgroup-only
   synchronization, wavefront lockstep assumptions, global memory communication,
@@ -999,3 +1143,6 @@ Keep the corpus layered:
   conflict inside its model, prefer no diagnostic.
 * Document every unsupported case as a false-negative risk, not as a bug in the
   MVP.
+* Keep instrumentation modes explicit. A false negative that is unacceptable in
+  thread-precise HIP mode may be the intended contract in cross-subgroup-only
+  mode.
