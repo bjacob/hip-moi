@@ -71,17 +71,17 @@ namespace
         return static_cast<float>(acc);
     }
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __device__ void load_row_major_tile_to_lds(hip_moi::context& ctx,
+    __device__ void load_row_major_tile_to_lds(hip_moi::thread_level_context& ctx,
                                                _Float16*         a_shared,
                                                _Float16*         b_shared,
                                                const _Float16*   a_global,
@@ -99,7 +99,7 @@ namespace
         }
     }
 
-    __device__ void wmma_f16_mac_from_row_major_lds(hip_moi::context& ctx,
+    __device__ void wmma_f16_mac_from_row_major_lds(hip_moi::thread_level_context& ctx,
                                                     f32x8_t&          acc,
                                                     const _Float16*   a_shared,
                                                     const _Float16*   b_shared)
@@ -138,7 +138,7 @@ namespace
         __shared__ _Float16 a_shared[kTileM * kTileK];
         __shared__ _Float16 b_shared[kTileN * kTileK];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -157,7 +157,7 @@ namespace
         __shared__ _Float16 a_shared[2][kTileM * kTileK];
         __shared__ _Float16 b_shared[2][kTileN * kTileK];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -179,7 +179,7 @@ namespace
         __shared__ _Float16 a_shared[kTileM * kTileK];
         __shared__ _Float16 b_shared[kTileN * kTileK];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};

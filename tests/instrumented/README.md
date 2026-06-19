@@ -86,12 +86,12 @@ reference matmul.
 
 `015_thread_level_subgroup_test.hip` starts multi-subgroup coverage for
 `thread-level` mode. It uses a 64-thread workgroup split into two 32-thread
-subgroups, checks `context` subgroup identity helpers, verifies subgroup ids in
-access records, and asserts both same-subgroup and cross-subgroup same-epoch
-diagnostics.
+subgroups, checks `thread_level_context` subgroup identity helpers, verifies
+subgroup ids in access records, and asserts both same-subgroup and
+cross-subgroup same-epoch diagnostics.
 
 `016_subgroup_level_bootstrap_test.hip` starts `subgroup-level` mode coverage.
-It uses the existing per-thread access records as a bootstrap, but changes the
-conflict predicate to subgroup identity: cross-subgroup same-epoch conflicts
-report, while same-subgroup conflicts intentionally do not report by this
-mode's contract.
+It uses `subgroup_level_context` with the existing per-thread access records as
+a bootstrap, but changes the conflict predicate to subgroup identity:
+cross-subgroup same-epoch conflicts report, while same-subgroup conflicts
+intentionally do not report by this mode's contract.

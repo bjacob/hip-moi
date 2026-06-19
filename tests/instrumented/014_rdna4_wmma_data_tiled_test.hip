@@ -72,14 +72,14 @@ namespace
         return static_cast<float>(acc);
     }
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     __device__ f16x8_t load_global_fragment(const _Float16* global_fragments, int fragment_index)
@@ -93,7 +93,7 @@ namespace
         reinterpret_cast<f32x8_t*>(global_fragments)[fragment_index] = fragment;
     }
 
-    __device__ void load_data_tiled_fragments_to_lds(hip_moi::context& ctx,
+    __device__ void load_data_tiled_fragments_to_lds(hip_moi::thread_level_context& ctx,
                                                      f16x8_t*          a_shared,
                                                      f16x8_t*          b_shared,
                                                      const _Float16*   a_global,
@@ -106,7 +106,7 @@ namespace
         ctx.lds_store(&b_shared[lane], load_global_fragment(b_global, base + lane));
     }
 
-    __device__ void wmma_f16_mac_from_data_tiled_lds(hip_moi::context& ctx,
+    __device__ void wmma_f16_mac_from_data_tiled_lds(hip_moi::thread_level_context& ctx,
                                                      f32x8_t&          acc,
                                                      const f16x8_t*    a_shared,
                                                      const f16x8_t*    b_shared)
@@ -131,7 +131,7 @@ namespace
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -150,7 +150,7 @@ namespace
         __shared__ f16x8_t a_shared[2][kThreadCount];
         __shared__ f16x8_t b_shared[2][kThreadCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};
@@ -184,7 +184,7 @@ namespace
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         f32x8_t acc = {};

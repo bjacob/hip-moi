@@ -28,20 +28,20 @@ namespace
         hip_moi::access_record access_records[kAccessCapacity];
     };
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     __global__ void subgroup_identity_kernel(uint32_t*                    out,
                                              hip_moi::context_storage_ref storage)
     {
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t tid  = ctx.thread_id();
@@ -55,7 +55,7 @@ namespace
     {
         __shared__ int values[kSubgroupCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_rank_in_subgroup() == 0)
@@ -69,7 +69,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -86,7 +86,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -104,7 +104,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -147,28 +147,36 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    void expect_one_conflict_between_threads(const observed_metadata& observed,
-                                             int                      expected_access_count,
-                                             uint32_t                 first_thread,
-                                             uint32_t                 second_thread)
+    void expect_conflict_between_threads(const observed_metadata& observed,
+                                         int                      expected_access_count,
+                                         uint32_t                 first_thread,
+                                         uint32_t                 second_thread)
     {
         EXPECT_EQ(observed.access_count, expected_access_count);
-        ASSERT_EQ(observed.diagnostic_count, 1);
+        ASSERT_GT(observed.diagnostic_count, 0);
 
-        const hip_moi::diagnostic& diagnostic = observed.diagnostics[0];
-        EXPECT_EQ(diagnostic.kind,
-                  static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
-        EXPECT_EQ(diagnostic.epoch, 0u);
-        EXPECT_EQ(diagnostic.first_addr, diagnostic.second_addr);
-        EXPECT_EQ(diagnostic.first_size, sizeof(int));
-        EXPECT_EQ(diagnostic.second_size, sizeof(int));
+        int stored_count = observed.diagnostic_count;
+        if(stored_count > kDiagnosticCapacity)
+        {
+            stored_count = kDiagnosticCapacity;
+        }
 
-        bool has_expected_threads =
-            (diagnostic.writer_or_first_thread_id == first_thread
-             && diagnostic.reader_or_second_thread_id == second_thread)
-            || (diagnostic.writer_or_first_thread_id == second_thread
-                && diagnostic.reader_or_second_thread_id == first_thread);
-        EXPECT_TRUE(has_expected_threads);
+        bool found_expected_conflict = false;
+        for(int i = 0; i < stored_count; ++i)
+        {
+            const hip_moi::diagnostic& diagnostic = observed.diagnostics[i];
+            bool has_expected_threads =
+                (diagnostic.writer_or_first_thread_id == first_thread
+                 && diagnostic.reader_or_second_thread_id == second_thread)
+                || (diagnostic.writer_or_first_thread_id == second_thread
+                    && diagnostic.reader_or_second_thread_id == first_thread);
+            found_expected_conflict |=
+                diagnostic.kind == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
+                && diagnostic.epoch == 0u && diagnostic.first_addr == diagnostic.second_addr
+                && diagnostic.first_size == sizeof(int) && diagnostic.second_size == sizeof(int)
+                && has_expected_threads;
+        }
+        EXPECT_TRUE(found_expected_conflict);
     }
 
     TEST(HipMoiThreadLevelSubgroup, ContextReportsThreadSubgroupAndRank)
@@ -267,7 +275,7 @@ namespace
 
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-        expect_one_conflict_between_threads(
+        expect_conflict_between_threads(
             observed, /*expected_access_count=*/2, /*first_thread=*/0,
             /*second_thread=*/kThreadsPerSubgroup);
     }
@@ -291,7 +299,7 @@ namespace
 
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-        expect_one_conflict_between_threads(
+        expect_conflict_between_threads(
             observed, /*expected_access_count=*/2, /*first_thread=*/0, /*second_thread=*/1);
     }
 

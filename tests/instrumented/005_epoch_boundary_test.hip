@@ -23,21 +23,21 @@ namespace
         hip_moi::diagnostic diagnostics[4];
     };
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     __global__ void same_epoch_write_read_kernel(int* out, hip_moi::context_storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -54,7 +54,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -74,7 +74,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -95,7 +95,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -129,7 +129,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)

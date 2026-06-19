@@ -29,21 +29,21 @@ namespace
         hip_moi::diagnostic diagnostics[kStoredDiagnosticCapacity];
     };
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     __global__ void access_log_overflow_kernel(hip_moi::context_storage_ref storage)
     {
         __shared__ int values[kAccessOverflowAccessCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -58,7 +58,7 @@ namespace
     {
         __shared__ int values[kThreadCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);

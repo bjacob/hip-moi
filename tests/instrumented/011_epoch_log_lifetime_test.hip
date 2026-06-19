@@ -25,14 +25,14 @@ namespace
         hip_moi::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     __global__ void long_scalar_producer_consumer_kernel(
@@ -40,7 +40,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         for(int iter = 0; iter < kIterationCount; ++iter)
@@ -66,7 +66,7 @@ namespace
     {
         __shared__ int values[kThreadCount];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);
@@ -87,7 +87,7 @@ namespace
     {
         __shared__ int values[3];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)

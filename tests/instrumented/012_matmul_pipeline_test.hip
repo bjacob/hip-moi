@@ -86,18 +86,18 @@ namespace
         return acc;
     }
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    __device__ hip_moi::thread_level_context make_context(hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
     template <int MTile, int NTile, int KTile>
-    __device__ void load_matmul_tile(hip_moi::context& ctx,
+    __device__ void load_matmul_tile(hip_moi::thread_level_context& ctx,
                                      int*              a_shared,
                                      int*              b_shared,
                                      const int*        a_global,
@@ -121,7 +121,7 @@ namespace
 
     template <int MTile, int NTile, int KTile>
     __device__ int matmul_mac_from_lds(
-        hip_moi::context& ctx, const int* a_shared, const int* b_shared, int m, int n)
+        hip_moi::thread_level_context& ctx, const int* a_shared, const int* b_shared, int m, int n)
     {
         int acc = 0;
         for(int k = 0; k < KTile; ++k)
@@ -139,7 +139,7 @@ namespace
         __shared__ int a_shared[2][2 * 2];
         __shared__ int b_shared[2][2 * 2];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);
@@ -176,7 +176,7 @@ namespace
         __shared__ int a_shared[2][2 * 2];
         __shared__ int b_shared[2][2 * 2];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int tid = static_cast<int>(threadIdx.x);
@@ -223,7 +223,7 @@ namespace
         __shared__ int a_shared[2];
         __shared__ int b_shared[2];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(threadIdx.x == 0)
@@ -262,7 +262,7 @@ namespace
         __shared__ int a_shared[2 * 2];
         __shared__ int b_shared[2 * 2];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         load_matmul_tile<2, 2, 2>(
@@ -291,7 +291,7 @@ namespace
         __shared__ int a_shared[2 * 2];
         __shared__ int b_shared[2 * 2];
 
-        hip_moi::context ctx = make_context(storage);
+        hip_moi::thread_level_context ctx = make_context(storage);
         ctx.init_workgroup();
 
         load_matmul_tile<2, 2, 2>(

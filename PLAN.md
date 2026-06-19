@@ -70,17 +70,21 @@ foundation:
   and numerically check their outputs.
 * The same source also contains compile-only diagnostic-positive and hard
   synchronization references that are intentionally not launched.
-* `include/hip_moi/hip_moi.hpp` exists with the first public API skeleton:
-  `config`, `access_record`, `diagnostic`, `subgroup_state`,
-  `context_storage_ref`, `static_context_storage`, and `context`.
-* The current `context` implementation is intentionally only a pass-through
-  skeleton in synchronization scope, but now has real same-epoch access
-  logging: `init_workgroup()` initializes counters, epoch storage, and access
-  record validity; `lds_load<T>` and `lds_store<T>` record the LDS byte range
-  before performing the real access; and `syncthreads()` executes a real barrier
-  while advancing the first epoch slot. Detector metadata initialization and
-  epoch increments use detector-internal device fences before releasing the
-  workgroup so global-memory metadata is visible to the participating threads.
+* The public headers are split by role. `hip_moi/common.hpp` contains shared
+  records, storage views, config, and small helper routines.
+  `hip_moi/thread_level_context.hpp` contains `thread_level_context`.
+  `hip_moi/subgroup_level_context.hpp` contains `subgroup_level_context`.
+  `hip_moi/host_context.hpp` contains host ownership and reporting, and
+  `hip_moi/hip_moi.hpp` is the umbrella include.
+* The current `thread_level_context` and `subgroup_level_context`
+  implementations are intentionally still bootstrapped on the same access-record
+  storage. Both have real same-epoch access logging: `init_workgroup()`
+  initializes counters, epoch storage, and access record validity;
+  `lds_load<T>` and `lds_store<T>` record the LDS byte range before performing
+  the real access; and `syncthreads()` executes a real barrier while advancing
+  epoch slots. Detector metadata initialization and epoch increments use
+  detector-internal device fences before releasing the workgroup so
+  global-memory metadata is visible to the participating threads.
 * `tests/instrumented/001_safe_mvp_test.hip` contains the first instrumented
   kernel test. It passes caller-provided global-memory metadata storage into a
   kernel, performs a same-thread instrumented LDS store/load, checks the
@@ -146,13 +150,14 @@ foundation:
   against the same exact host-reference matmul.
 * `tests/instrumented/015_thread_level_subgroup_test.hip` starts
   multi-subgroup `thread-level` coverage. It uses a 64-thread workgroup split
-  into two 32-thread subgroups, checks the `context` thread/subgroup/rank
-  helpers, verifies subgroup ids recorded in access records, and asserts
-  same-subgroup and cross-subgroup same-epoch diagnostics.
+  into two 32-thread subgroups, checks the `thread_level_context`
+  thread/subgroup/rank helpers, verifies subgroup ids recorded in access
+  records, and asserts same-subgroup and cross-subgroup same-epoch diagnostics.
 * `tests/instrumented/016_subgroup_level_bootstrap_test.hip` starts
-  `subgroup-level` coverage. It selects the mode through `config::mode`, reuses
-  the existing access records as a semantic bootstrap, reports cross-subgroup
-  same-epoch conflicts, and intentionally ignores same-subgroup conflicts.
+  `subgroup-level` coverage. It uses `subgroup_level_context` as a separate
+  type, reuses the existing access records as a semantic bootstrap, reports
+  cross-subgroup same-epoch conflicts, and intentionally ignores same-subgroup
+  conflicts.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -171,10 +176,10 @@ The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: dissociate `subgroup-level` hot metadata. The mode
-selection surface and semantic bootstrap now exist, so the next goal is to give
-`subgroup-level` its own access records and storage layout while keeping shared
-helpers small and non-constraining.
+Next implementation slice: dissociate `subgroup-level` hot metadata. The two
+typed context surfaces and semantic bootstrap now exist, so the next goal is to
+give `subgroup-level` its own access records and storage layout while keeping
+shared helpers small and non-constraining.
 
 ## Foundations
 
@@ -303,11 +308,6 @@ Use an explicit user-provided context from day one:
 ```c++
 namespace hip_moi {
 
-enum class instrumentation_mode {
-  thread_level,
-  subgroup_level,
-};
-
 struct config {
   // Number of threads participating in this context.
   int thread_count;
@@ -315,8 +315,6 @@ struct config {
   int threads_per_subgroup;
   // Number of subgroups represented in this context.
   int subgroup_count;
-  // Instrumentation granularity. Defaults to thread-level mode.
-  instrumentation_mode mode = instrumentation_mode::thread_level;
 };
 
 struct access_record;
@@ -343,29 +341,28 @@ struct static_context_storage {
   __device__ context_storage_ref ref();
 };
 
-class context {
+class thread_level_context {
  public:
   // Binds the context to caller-provided storage and runtime shape metadata.
-  __device__ context(context_storage_ref storage, config cfg);
+  __device__ thread_level_context(context_storage_ref storage, config cfg);
 
-  // Initializes shared metadata for this workgroup before instrumented use.
-  __device__ void init_workgroup();
-
-  // Records and performs an LDS load.
-  template <typename T>
-  __device__ T lds_load(const T* ptr);
-
-  // Records and performs an LDS store.
-  template <typename T>
-  __device__ void lds_store(T* ptr, T value);
-
-  // Performs a real full-workgroup synchronization and advances the epoch.
-  __device__ void syncthreads();
-
-  // Queries whether this context has recorded diagnostics.
-  __device__ bool has_error() const;
-  __device__ int error_count() const;
+  // Thread-level diagnostics report conflicts between distinct threads.
+  // Provides init_workgroup, templated lds_load/lds_store, syncthreads,
+  // has_error/error_count, and thread/subgroup identity helpers.
 };
+
+class subgroup_level_context {
+ public:
+  // Binds the context to caller-provided storage and runtime shape metadata.
+  __device__ subgroup_level_context(context_storage_ref storage, config cfg);
+
+  // Subgroup-level diagnostics report conflicts between distinct subgroups and
+  // intentionally ignore same-subgroup conflicts.
+  // Provides the same user-facing operations as thread_level_context.
+};
+
+// Temporary compatibility alias while older examples migrate.
+using context = thread_level_context;
 
 struct host_context_options {
   int access_record_capacity;
@@ -494,7 +491,7 @@ __global__ void kernel(int* out, hip_moi::context_storage_ref storage) {
       /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
       /*subgroup_count=*/1,
   };
-  hip_moi::context ctx(storage, cfg);
+  hip_moi::thread_level_context ctx(storage, cfg);
 
   ctx.init_workgroup();
   ctx.syncthreads();
@@ -863,8 +860,9 @@ Incremental instrumented test growth:
     workgroup, cross-subgroup conflicts, same-subgroup conflicts, and
     full-workgroup synchronization separating subgroups. Done.
 15. Add `subgroup-level` mode tests: cross-subgroup conflicts still report,
-    same-subgroup conflicts intentionally do not report, and the explicit mode
-    selection surface is exercised. Done for the semantic bootstrap.
+    same-subgroup conflicts intentionally do not report, and the explicit
+    `subgroup_level_context` surface is exercised. Done for the semantic
+    bootstrap.
 16. Add mode-aware diagnostic metadata and host reports for `subgroup-level`
     mode, so reports can identify subgroup-to-subgroup conflicts without
     pretending to identify exact causative threads.
@@ -927,7 +925,10 @@ library teaches us the right subgroup abstractions.
 
 3. Design the `subgroup-level` mode. Done for the bootstrap surface.
    * Define the mode as intentionally ignoring same-subgroup conflicts.
-   * Select the mode through `config::mode`, defaulting to `thread_level`.
+   * Use a separate `subgroup_level_context` type rather than a runtime mode
+     field on `config`.
+   * Keep `using context = thread_level_context` only as a temporary
+     compatibility alias.
    * Allow a temporary bootstrap that reuses `thread-level` records only long
      enough to validate semantics.
    * Target separate `subgroup-level` records and storage as the optimized
@@ -1005,13 +1006,13 @@ threads in the same subgroup.
 * Use `subgroup_level` as the code-facing mode name and `subgroup-level` in
   prose.
 * Document its false-negative contract.
-* Users currently select the mode through `config::mode`; omitted aggregate
-  initializers default to `thread_level`.
+* Users select the mode by choosing the context type:
+  `thread_level_context` or `subgroup_level_context`.
 * Prefer separate hot metadata structures for the two modes. The public context
   surface may remain similar, but `subgroup-level` should not be constrained to
   reuse `thread-level` access records.
-* Decide whether mode selection must be compile-time for the hot path or can be
-  a runtime value that clang optimizes away in local use.
+* Keep mode selection compile-time by construction: the class type carries the
+  contract.
 * Avoid virtual dispatch in device code.
 * Design a compact `subgroup-level` access record that tracks subgroup id but
   can omit thread id.

@@ -28,36 +28,65 @@ namespace
         hip_moi::access_record access_records[kAccessCapacity];
     };
 
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage,
-                                             hip_moi::instrumentation_mode mode)
+    __device__ hip_moi::thread_level_context make_thread_level_context(
+        hip_moi::context_storage_ref storage)
     {
         hip_moi::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
-            /*mode=*/mode,
         };
-        return hip_moi::context(storage, cfg);
+        return hip_moi::thread_level_context(storage, cfg);
     }
 
-    __global__ void subgroup_level_mode_query_kernel(uint32_t*                    out,
-                                                     hip_moi::context_storage_ref storage)
+    __device__ hip_moi::subgroup_level_context make_subgroup_level_context(
+        hip_moi::context_storage_ref storage)
     {
-        hip_moi::context ctx = make_context(storage, hip_moi::instrumentation_mode::subgroup_level);
+        hip_moi::config cfg{
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*subgroup_count=*/kSubgroupCount,
+        };
+        return hip_moi::subgroup_level_context(storage, cfg);
+    }
+
+    __global__ void subgroup_level_identity_kernel(uint32_t*                    out,
+                                                   hip_moi::context_storage_ref storage)
+    {
+        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        ctx.init_workgroup();
+
+        uint32_t tid  = ctx.thread_id();
+        uint32_t base = 3 * tid;
+        out[base + 0] = tid;
+        out[base + 1] = ctx.subgroup_id();
+        out[base + 2] = ctx.thread_rank_in_subgroup();
+    }
+
+    __global__ void same_subgroup_same_epoch_subgroup_level_kernel(
+        hip_moi::context_storage_ref storage)
+    {
+        __shared__ int value;
+
+        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
         {
-            out[0] = static_cast<uint32_t>(ctx.mode());
+            ctx.lds_store(&value, 23);
+        }
+        if(ctx.thread_id() == 1)
+        {
+            (void)ctx.lds_load(&value);
         }
     }
 
-    __global__ void same_subgroup_same_epoch_kernel(hip_moi::context_storage_ref  storage,
-                                                   hip_moi::instrumentation_mode mode)
+    __global__ void same_subgroup_same_epoch_thread_level_kernel(
+        hip_moi::context_storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage, mode);
+        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -74,7 +103,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage, hip_moi::instrumentation_mode::subgroup_level);
+        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -92,7 +121,7 @@ namespace
     {
         __shared__ int value;
 
-        hip_moi::context ctx = make_context(storage, hip_moi::instrumentation_mode::subgroup_level);
+        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -188,7 +217,7 @@ namespace
         EXPECT_TRUE(saw_second_subgroup);
     }
 
-    TEST(HipMoiSubgroupLevelBootstrap, ContextReportsConfiguredMode)
+    TEST(HipMoiSubgroupLevelBootstrap, ContextReportsThreadSubgroupAndRank)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
@@ -197,13 +226,12 @@ namespace
             /*subgroup_capacity=*/kSubgroupCount));
 
         uint32_t* device_output = nullptr;
-        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(uint32_t)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 3 * kThreadCount * sizeof(uint32_t)));
 
-        uint32_t initial = 0xffffffffu;
         HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
+            hipMemset(device_output, 0xff, 3 * kThreadCount * sizeof(uint32_t)));
 
-        hipLaunchKernelGGL(subgroup_level_mode_query_kernel,
+        hipLaunchKernelGGL(subgroup_level_identity_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -213,10 +241,16 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
-        uint32_t output = 0xffffffffu;
+        uint32_t output[3 * kThreadCount] = {};
         HIP_MOI_TEST_HIP_ASSERT(
-            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
-        EXPECT_EQ(output, static_cast<uint32_t>(hip_moi::instrumentation_mode::subgroup_level));
+            hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+
+        for(uint32_t tid = 0; tid < static_cast<uint32_t>(kThreadCount); ++tid)
+        {
+            EXPECT_EQ(output[3 * tid + 0], tid);
+            EXPECT_EQ(output[3 * tid + 1], tid / kThreadsPerSubgroup);
+            EXPECT_EQ(output[3 * tid + 2], tid % kThreadsPerSubgroup);
+        }
 
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
@@ -233,13 +267,12 @@ namespace
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount));
 
-        hipLaunchKernelGGL(same_subgroup_same_epoch_kernel,
+        hipLaunchKernelGGL(same_subgroup_same_epoch_subgroup_level_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
                            0,
-                           storage.ref(),
-                           hip_moi::instrumentation_mode::subgroup_level);
+                           storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
@@ -257,13 +290,12 @@ namespace
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount));
 
-        hipLaunchKernelGGL(same_subgroup_same_epoch_kernel,
+        hipLaunchKernelGGL(same_subgroup_same_epoch_thread_level_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
                            0,
-                           storage.ref(),
-                           hip_moi::instrumentation_mode::thread_level);
+                           storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 

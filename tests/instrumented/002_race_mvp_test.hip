@@ -25,7 +25,7 @@ namespace
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
             /*subgroup_count=*/1,
         };
-        hip_moi::context ctx(storage, cfg);
+        hip_moi::thread_level_context ctx(storage, cfg);
 
         ctx.init_workgroup();
 

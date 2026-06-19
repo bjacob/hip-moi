@@ -43,7 +43,7 @@ __global__ void plain_producer_consumer_kernel(int* out)
 ```
 
 To instrument the same kernel, pass a hip-moi storage view, create a
-`hip_moi::context`, replace the LDS accesses with `ctx.lds_store` and
+`hip_moi::thread_level_context`, replace the LDS accesses with `ctx.lds_store` and
 `ctx.lds_load`, and replace the barrier with `ctx.syncthreads()`:
 
 ```c++
@@ -56,7 +56,7 @@ __global__ void producer_consumer_kernel(int* out, hip_moi::context_storage_ref 
         /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
         /*subgroup_count=*/1,
     };
-    hip_moi::context ctx(storage, cfg);
+    hip_moi::thread_level_context ctx(storage, cfg);
 
     ctx.init_workgroup();
 
@@ -133,7 +133,7 @@ __global__ void same_epoch_race_kernel(int* out, hip_moi::context_storage_ref st
         /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
         /*subgroup_count=*/1,
     };
-    hip_moi::context ctx(storage, cfg);
+    hip_moi::thread_level_context ctx(storage, cfg);
 
     ctx.init_workgroup();
 
@@ -259,7 +259,7 @@ __global__ void instrumented_data_tiled_wmma_kernel(
     __shared__ f16x8_t a_shared[kThreadCount];
     __shared__ f16x8_t b_shared[kThreadCount];
 
-    hip_moi::context ctx = make_context(storage);
+    hip_moi::thread_level_context ctx = make_context(storage);
     ctx.init_workgroup();
 
     int lane = static_cast<int>(threadIdx.x) & 31;
