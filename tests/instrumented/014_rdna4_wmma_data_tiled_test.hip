@@ -93,6 +93,12 @@ namespace
         return result;
     }
 
+    __device__ void store_global_fragment(float* global_fragments, int fragment_index,
+                                          f32x8_t fragment)
+    {
+        reinterpret_cast<f32x8_t*>(global_fragments)[fragment_index] = fragment;
+    }
+
     __device__ void load_data_tiled_fragments_to_lds(hip_moi::context& ctx,
                                                      f16x8_t*          a_shared,
                                                      f16x8_t*          b_shared,
@@ -120,10 +126,7 @@ namespace
     __device__ void store_accumulator(const f32x8_t& acc, float* out)
     {
         int lane = static_cast<int>(threadIdx.x) & 31;
-        for(int elem = 0; elem < 8; ++elem)
-        {
-            out[data_tiled_fragment_offset(lane, elem)] = acc[elem];
-        }
+        store_global_fragment(out, lane, acc);
     }
 
     __global__ void data_tiled_single_buffer_kernel(const _Float16*             a_global,

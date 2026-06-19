@@ -133,6 +133,11 @@ namespace
         return result;
     }
 
+    __device__ void store_global_fragment(float* global_fragments, int lane, f32x8_t fragment)
+    {
+        reinterpret_cast<f32x8_t*>(global_fragments)[lane] = fragment;
+    }
+
     __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
                                                  const _Float16* b_global,
                                                  float*          c_global)
@@ -154,10 +159,7 @@ namespace
 
         __syncthreads();
 
-        for(int elem = 0; elem < 8; ++elem)
-        {
-            c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
-        }
+        store_global_fragment(c_global, lane, acc);
     }
 
     __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
@@ -195,10 +197,7 @@ namespace
 
         ctx.syncthreads();
 
-        for(int elem = 0; elem < 8; ++elem)
-        {
-            c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
-        }
+        store_global_fragment(c_global, lane, acc);
     }
 } // namespace
 

@@ -126,10 +126,10 @@ foundation:
   gfx12-gated packed-layout test. It uses the same WMMA intrinsic, but each
   thread's A/B fragment is a contiguous 16-byte object at byte offset
   `lane * 16`, and each thread's C accumulator fragment is a contiguous
-  32-byte object at byte offset `lane * 32`. The test includes a
-  diagnostic-positive neighbor-fragment overwrite. The packed A/B/C fragments
-  are generated from logical tiles and checked against the same exact
-  host-reference matmul.
+  32-byte object at byte offset `lane * 32`, stored with one `f32x8_t` vector
+  store. The test includes a diagnostic-positive neighbor-fragment overwrite.
+  The packed A/B/C fragments are generated from logical tiles and checked
+  against the same exact host-reference matmul.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock

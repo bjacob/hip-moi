@@ -223,10 +223,7 @@ __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
 
     __syncthreads();
 
-    for(int elem = 0; elem < 8; ++elem)
-    {
-        c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
-    }
+    store_global_fragment(c_global, lane, acc);
 }
 ```
 
@@ -244,6 +241,15 @@ __host__ __device__ int data_tiled_fragment_offset(int lane, int elem)
 int offset = data_tiled_fragment_offset(lane, idx);
 a[offset]  = static_cast<_Float16>(a_value(m, k));
 b[offset]  = static_cast<_Float16>(b_value(n, k));
+```
+
+The C path uses the same packed fragment idea as a vector store:
+
+```c++
+__device__ void store_global_fragment(float* global_fragments, int lane, f32x8_t fragment)
+{
+    reinterpret_cast<f32x8_t*>(global_fragments)[lane] = fragment;
+}
 ```
 
 The instrumented version changes only the LDS-related operations and the
@@ -277,10 +283,7 @@ __global__ void instrumented_data_tiled_wmma_kernel(
 
     ctx.syncthreads();
 
-    for(int elem = 0; elem < 8; ++elem)
-    {
-        c_global[data_tiled_fragment_offset(lane, elem)] = acc[elem];
-    }
+    store_global_fragment(c_global, lane, acc);
 }
 ```
 
