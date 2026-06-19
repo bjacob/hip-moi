@@ -119,3 +119,8 @@ split into two 32-thread subgroups, data-tiled vector fragments, double-buffered
 two-tile LDS staging, exact host-reference output checks, and a missing-barrier
 cross-subgroup diagnostic case checked in both `thread-level` and
 `subgroup-level` modes.
+
+`019_rdna4_multisubgroup_wmma_row_major_test.hip` is the conventional
+row-major companion to `018`. It uses two subgroups, per-subgroup row-major
+A/B/C tiles, double-buffered LDS staging, exact host-reference output checks,
+and a missing-barrier cross-subgroup diagnostic case checked in both modes.

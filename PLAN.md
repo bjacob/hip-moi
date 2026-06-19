@@ -190,6 +190,12 @@ foundation:
   double-buffered two-tile LDS staging, exact host-reference output checks, and
   a missing-barrier cross-subgroup diagnostic case checked in both
   `thread-level` and `subgroup-level` modes.
+* `tests/instrumented/019_rdna4_multisubgroup_wmma_row_major_test.hip` is the
+  matching gfx12-gated row-major WMMA bridge test under both modes. It uses a
+  64-thread workgroup split into two 32-thread subgroups, conventional
+  row-major A/B/C tiles, double-buffered two-tile LDS staging, exact
+  host-reference output checks, and a missing-barrier cross-subgroup diagnostic
+  case checked in both `thread-level` and `subgroup-level` modes.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -205,22 +211,19 @@ foundation:
   The tutorial now presents thread-level and subgroup-level modes as peers, and
   the single-subgroup instrumented tests now mark themselves in their file names
   while checking subgroup-level silence for representative diagnostic-positive
-  intra-subgroup races. The first real multi-subgroup RDNA4 WMMA data-tiled
-  test under both modes now exists. Diagnostic quality work, matching
-  multi-subgroup row-major WMMA coverage, and low-overhead
-  subgroup-representative logs are still future work.
+  intra-subgroup races. Real multi-subgroup RDNA4 WMMA bridge tests now exist
+  for both data-tiled and row-major layouts under both modes. Diagnostic quality
+  work and low-overhead subgroup-representative logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: either add matching multi-subgroup row-major RDNA4
-WMMA coverage, or explicitly decide that the current data-tiled multi-subgroup
-test is enough real-kernel coverage for now and move to the lower-overhead
-subgroup-representative API design. The current `subgroup-level` mode still
-logs each instrumented access call; the representative question is what explicit
-API can summarize a known collective/tile-shaped LDS footprint once per subgroup
-without pretending to summarize arbitrary per-thread pointer accesses.
+Next implementation slice: start the lower-overhead subgroup-representative API
+design. The current `subgroup-level` mode still logs each instrumented access
+call; the representative question is what explicit API can summarize a known
+collective/tile-shaped LDS footprint once per subgroup without pretending to
+summarize arbitrary per-thread pointer accesses.
 
 ## Foundations
 
