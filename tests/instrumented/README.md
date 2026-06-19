@@ -60,3 +60,7 @@ unsynchronized transpose diagnostic case.
 `011_epoch_log_lifetime_test.hip` verifies that access-log storage is reused at
 epoch boundaries, so long synchronized loops can run with capacity sized for one
 epoch rather than the whole kernel.
+
+`012_matmul_pipeline_test.hip` covers double-buffered and pipeline-like matmul
+LDS patterns, including safe ping-pong buffering and diagnostic-positive buffer
+reuse/partial-overwrite cases.

@@ -104,6 +104,9 @@ foundation:
 * `tests/instrumented/011_epoch_log_lifetime_test.hip` verifies that access-log
   storage is reused at epoch boundaries, so long synchronized loops can run with
   capacity sized for one epoch rather than the whole kernel.
+* `tests/instrumented/012_matmul_pipeline_test.hip` covers double-buffered and
+  pipeline-like matmul LDS idioms: safe ping-pong buffering plus
+  diagnostic-positive buffer reuse and partial tile overwrite cases.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -111,9 +114,10 @@ foundation:
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
-  tests, looped epoch tests, tiled LDS tests, and simple matmul-like tests
-  exist. Epoch-local access-log lifetime now exists. Diagnostic quality work and
-  low-overhead per-thread logs are still future work.
+  tests, looped epoch tests, tiled LDS tests, simple matmul-like tests, and
+  pipeline-like matmul tests exist. Epoch-local access-log lifetime now exists.
+  Diagnostic quality work and low-overhead per-thread logs are still future
+  work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -649,6 +653,7 @@ tests/instrumented/
   009_tiled_lds_test.hip
   010_matmul_like_test.hip
   011_epoch_log_lifetime_test.hip
+  012_matmul_pipeline_test.hip
   test_support.hpp
 ```
 
@@ -673,6 +678,8 @@ unsynchronized transpose diagnostic.
 and a scalar missing-barrier diagnostic.
 `011_epoch_log_lifetime_test.hip` asserts that access-log capacity is scoped to
 the active epoch rather than the cumulative kernel trace.
+`012_matmul_pipeline_test.hip` asserts double-buffered and pipeline-like matmul
+LDS patterns, including diagnostic-positive buffer reuse cases.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -706,7 +713,9 @@ Incremental instrumented test growth:
 10. Add matmul-like LDS cases. Done.
 11. Add epoch-local access-log lifetime so long synchronized loops do not fill
     the log with obsolete epochs. Done.
-12. Improve diagnostic quality with labels/source locations and first-conflict
+12. Add double-buffered and pipeline-like matmul LDS cases, including more
+    diagnostic-positive matmul-shaped races. Done.
+13. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.
