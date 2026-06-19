@@ -42,6 +42,7 @@ namespace
     {
         int access_count;
         int coalescing_access_count;
+        int coalescing_fallback_count;
         int coalescing_group_count;
         int coalesced_access_count;
         int diagnostic_count;
@@ -216,6 +217,10 @@ namespace
                                           storage.coalescing_access_count_device(),
                                           sizeof(observed->coalescing_access_count),
                                           hipMemcpyDeviceToHost));
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_fallback_count,
+                                          storage.coalescing_fallback_count_device(),
+                                          sizeof(observed->coalescing_fallback_count),
+                                          hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->coalescing_group_count,
                                           storage.coalescing_group_count_device(),
                                           sizeof(observed->coalescing_group_count),
@@ -228,10 +233,13 @@ namespace
                                           storage.diagnostic_count_device(),
                                           sizeof(observed->diagnostic_count),
                                           hipMemcpyDeviceToHost));
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalescing_access_records,
-                                          storage.coalescing_access_records_device(),
-                                          sizeof(observed->coalescing_access_records),
-                                          hipMemcpyDeviceToHost));
+        if(storage.coalescing_access_records_device())
+        {
+            HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalescing_access_records,
+                                              storage.coalescing_access_records_device(),
+                                              sizeof(observed->coalescing_access_records),
+                                              hipMemcpyDeviceToHost));
+        }
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(observed->coalesced_access_records,
                                           storage.coalesced_access_records_device(),
                                           sizeof(observed->coalesced_access_records),
@@ -239,14 +247,17 @@ namespace
     }
 
     template <typename Kernel>
-    void run_case(Kernel kernel, observed_metadata* observed, int group_capacity = kGroupCapacity)
+    void run_case(Kernel             kernel,
+                  observed_metadata* observed,
+                  int                group_capacity              = kGroupCapacity,
+                  int                coalescing_access_capacity  = kCoalescingAccessCapacity)
     {
         hip_moi::test::subgroup_level_device_context_storage storage;
         storage.allocate(
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
-            /*coalescing_access_capacity=*/kCoalescingAccessCapacity,
+            /*coalescing_access_capacity=*/coalescing_access_capacity,
             /*coalescing_group_capacity=*/group_capacity);
 
         hipLaunchKernelGGL(kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
@@ -336,6 +347,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, kThreadsPerSubgroup);
         EXPECT_EQ(observed.coalescing_access_count, 0);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 0);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -348,9 +360,26 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.diagnostic_count, 0);
         expect_one_coalescing_access_per_lane(observed, kContiguousSite, /*expected_subgroup=*/1);
+    }
+
+    TEST(HipMoiSubgroupLevelCoalescing, OptedInSiteWithoutCoalescingStorageFallsBackToExactRecords)
+    {
+        observed_metadata observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(contiguous_site_kernel,
+                                         &observed,
+                                         /*group_capacity=*/1,
+                                         /*coalescing_access_capacity=*/0));
+
+        EXPECT_EQ(observed.access_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_access_count, 0);
+        EXPECT_EQ(observed.coalescing_fallback_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_group_count, 0);
+        EXPECT_EQ(observed.coalesced_access_count, 0);
+        EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
     TEST(HipMoiSubgroupLevelCoalescing, ContiguousLanePatternProducesSummary)
@@ -358,6 +387,7 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(contiguous_site_kernel, &observed));
 
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalesced_access_count, 1);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_TRUE(has_summary(observed,
@@ -373,6 +403,7 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(fixed_stride_site_kernel, &observed));
 
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalesced_access_count, 1);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_TRUE(
@@ -389,6 +420,7 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(descending_site_kernel, &observed));
 
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalesced_access_count, 1);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_TRUE(has_summary(observed,
@@ -406,6 +438,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -418,6 +451,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -430,6 +464,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, kSubgroupCount);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -454,6 +489,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, 8 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 8);
         EXPECT_EQ(observed.coalesced_access_count, 8);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -514,6 +550,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, 2 * kThreadsPerSubgroup);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 2);
         EXPECT_EQ(observed.coalesced_access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
@@ -541,6 +578,7 @@ namespace
 
         EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.coalescing_access_count, kThreadCount);
+        EXPECT_EQ(observed.coalescing_fallback_count, 0);
         EXPECT_EQ(observed.coalescing_group_count, 1);
         EXPECT_EQ(observed.coalesced_access_count, kSubgroupCount);
         EXPECT_EQ(observed.diagnostic_count, 0);

@@ -113,6 +113,7 @@ namespace hip_moi
             int                       coalescing_access_record_capacity = 0;
             int*                      coalescing_access_count           = nullptr;
             int*                      epoch_coalescing_access_count     = nullptr;
+            int*                      coalescing_fallback_count         = nullptr;
             coalescing_group_record* coalescing_group_records         = nullptr;
             int                      coalescing_group_record_capacity = 0;
             int*                     coalescing_group_count           = nullptr;
@@ -138,6 +139,7 @@ namespace hip_moi
             int                     coalesced_access_count;
             int                      coalescing_access_count;
             int                      epoch_coalescing_access_count;
+            int                      coalescing_fallback_count;
             int                     coalescing_group_count;
 
             __device__ storage_ref ref()
@@ -159,6 +161,7 @@ namespace hip_moi
                     CoalescingAccessCapacity,
                     &coalescing_access_count,
                     &epoch_coalescing_access_count,
+                    &coalescing_fallback_count,
                     coalescing_group_records,
                     CoalescingGroupCapacity,
                     &coalescing_group_count,
@@ -199,6 +202,10 @@ namespace hip_moi
                 if(storage_.epoch_coalescing_access_count)
                 {
                     *storage_.epoch_coalescing_access_count = 0;
+                }
+                if(storage_.coalescing_fallback_count)
+                {
+                    *storage_.coalescing_fallback_count = 0;
                 }
                 if(storage_.coalescing_group_count)
                 {
@@ -393,9 +400,14 @@ namespace hip_moi
             record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
         {
             access_record record = make_access_record(ptr, byte_count, kind, site);
-            if(site.allows_coalescing() && record_coalescing_access(record))
+            bool          wants_coalescing = site.allows_coalescing();
+            if(wants_coalescing && record_coalescing_access(record))
             {
                 return;
+            }
+            if(wants_coalescing)
+            {
+                record_coalescing_fallback();
             }
 
             record_exact_access(record);
@@ -463,6 +475,14 @@ namespace hip_moi
             storage_.coalescing_access_records[coalescing_access_index].valid = 1;
             __threadfence();
             return true;
+        }
+
+        __device__ void record_coalescing_fallback() const
+        {
+            if(storage_.coalescing_fallback_count)
+            {
+                (void)atomicAdd(storage_.coalescing_fallback_count, 1);
+            }
         }
 
         __device__ bool same_coalescing_key(const coalescing_access_record& first,
@@ -1186,9 +1206,9 @@ namespace hip_moi
             return false;
         }
 
-        __device__ bool exact_record_has_coalesced_summary(const access_record& exact,
-                                                           int                  first_summary_index,
-                                                           int summary_scan_limit) const
+        __device__ bool record_has_coalesced_summary(const access_record& exact,
+                                                     int                  first_summary_index,
+                                                     int                  summary_scan_limit) const
         {
             for(int i = first_summary_index; i < summary_scan_limit; ++i)
             {
@@ -1201,9 +1221,9 @@ namespace hip_moi
             return false;
         }
 
-        __device__ bool exact_record_has_coalesced_summary(const coalescing_access_record& exact,
-                                                           int first_summary_index,
-                                                           int summary_scan_limit) const
+        __device__ bool record_has_coalesced_summary(const coalescing_access_record& exact,
+                                                     int first_summary_index,
+                                                     int summary_scan_limit) const
         {
             for(int i = first_summary_index; i < summary_scan_limit; ++i)
             {
@@ -1245,7 +1265,7 @@ namespace hip_moi
                         for(int j = 0; j < exact_scan_limit; ++j)
                         {
                             access_record exact = storage_.access_records[j];
-                            if(exact_record_has_coalesced_summary(
+                            if(record_has_coalesced_summary(
                                    exact, first_summary_index, summary_scan_limit))
                             {
                                 continue;
@@ -1262,7 +1282,7 @@ namespace hip_moi
                         for(int j = 0; j < coalescing_scan_limit; ++j)
                         {
                             coalescing_access_record exact = storage_.coalescing_access_records[j];
-                            if(exact_record_has_coalesced_summary(
+                            if(record_has_coalesced_summary(
                                    exact, first_summary_index, summary_scan_limit))
                             {
                                 continue;
@@ -1281,15 +1301,14 @@ namespace hip_moi
                 for(int i = 0; i < exact_scan_limit; ++i)
                 {
                     access_record first = storage_.access_records[i];
-                    if(exact_record_has_coalesced_summary(
-                           first, first_summary_index, summary_scan_limit))
+                    if(record_has_coalesced_summary(first, first_summary_index, summary_scan_limit))
                     {
                         continue;
                     }
                     for(int j = i + 1; j < exact_scan_limit; ++j)
                     {
                         access_record second = storage_.access_records[j];
-                        if(exact_record_has_coalesced_summary(
+                        if(record_has_coalesced_summary(
                                second, first_summary_index, summary_scan_limit))
                         {
                             continue;
@@ -1308,7 +1327,7 @@ namespace hip_moi
                     for(int j = 0; j < coalescing_scan_limit; ++j)
                     {
                         coalescing_access_record second = storage_.coalescing_access_records[j];
-                        if(exact_record_has_coalesced_summary(
+                        if(record_has_coalesced_summary(
                                second, first_summary_index, summary_scan_limit))
                         {
                             continue;
@@ -1329,15 +1348,14 @@ namespace hip_moi
             for(int i = 0; i < coalescing_scan_limit; ++i)
             {
                 coalescing_access_record first = storage_.coalescing_access_records[i];
-                if(exact_record_has_coalesced_summary(
-                       first, first_summary_index, summary_scan_limit))
+                if(record_has_coalesced_summary(first, first_summary_index, summary_scan_limit))
                 {
                     continue;
                 }
                 for(int j = i + 1; j < coalescing_scan_limit; ++j)
                 {
                     coalescing_access_record second = storage_.coalescing_access_records[j];
-                    if(exact_record_has_coalesced_summary(
+                    if(record_has_coalesced_summary(
                            second, first_summary_index, summary_scan_limit))
                     {
                         continue;

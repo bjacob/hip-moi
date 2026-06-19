@@ -59,13 +59,14 @@ foundation:
   README, and a CMake subtree that builds the examples and registers them as
   CTests. The tutorial CTests include both a passing synchronized example,
   expected-failing diagnosed examples, a subgroup-level cross-subgroup
-  diagnostic example, and a gfx12-gated real RDNA4 data-tiled WMMA matmul
-  example. The README is the tutorial's primary content: it introduces
-  `thread-level` and `subgroup-level` as peer instrumentation modes, then
-  explains each example as a plain HIP kernel first and as the corresponding
-  hip-moi instrumented kernel second. The standalone `.hip` programs serve as
-  compiled companions. The matmul tutorial presents the data-tiled layout
-  through per-lane vector fragment loads and stores.
+  diagnostic example, a subgroup-level coalescing opt-in example, and a
+  gfx12-gated real RDNA4 data-tiled WMMA matmul example. The README is the
+  tutorial's primary content: it introduces `thread-level` and `subgroup-level`
+  as peer instrumentation modes, then explains each example as a plain HIP
+  kernel first and as the corresponding hip-moi instrumented kernel second. The
+  standalone `.hip` programs serve as compiled companions. The matmul tutorial
+  presents the data-tiled layout through per-lane vector fragment loads and
+  stores.
 * `docs/coalescing.md` explains the current coalescing model: users opt in with
   nonzero `site_id` values, default zero-site accesses remain exact-only, the
   current implementation emits summaries at epoch boundaries, thread-level
@@ -76,7 +77,10 @@ foundation:
   thread/lane-to-address shapes. For subgroup-level opted-in accesses,
   `coalescing_access_record` is also the hot-path access representation when
   storage is available; ordinary exact `access_record` logging is used only for
-  default-site accesses and coalescing-access overflow/fallback.
+  default-site accesses and coalescing-access overflow/fallback. The doc now
+  specifies the subgroup-level coalescing counters, including
+  `coalescing_fallback_count` for opted-in accesses that fell back to exact
+  records.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -224,15 +228,20 @@ foundation:
   at `ctx.syncthreads()`, while default-site, repeated dynamic-instance, and
   irregular address patterns remain exact-only.
 * `tests/instrumented/022_subgroup_level_coalescing_test.hip` covers
-  subgroup-level coalescing coalescing access logs and summaries. It checks that default
-  site ids do not write coalescing access records, opted-in sites write one coalescing access record per
-  lane, contiguous and fixed-stride lane patterns summarize, repeated lanes are
-  rejected, and independent subgroups produce separate summaries.
+  subgroup-level coalescing access logs and summaries. It checks that default
+  site ids do not write coalescing access records, opted-in sites write one
+  coalescing access record per lane when storage exists, opted-in sites fall
+  back to exact records when coalescing access storage is absent, contiguous and
+  fixed-stride lane patterns summarize, repeated lanes are rejected, and
+  independent subgroups produce separate summaries.
 * `tests/instrumented/023_subgroup_level_coalesced_conflict_test.hip` starts
   using subgroup-level coalesced summaries in conflict detection. It checks
-  summary-vs-summary diagnostics, summary-vs-exact diagnostics, read/read
-  silence, disjoint summaries, and fixed-stride gaps whose enclosing spans
-  overlap but whose represented per-lane byte ranges do not.
+  summary-vs-summary diagnostics, summary-vs-exact diagnostics,
+  summary-vs-unsummarized coalescing diagnostics, coalescing-storage overflow
+  and absent-storage exact fallback, read/read silence for coalesced and
+  unsummarized coalescing accesses, disjoint summaries, and fixed-stride gaps
+  whose enclosing spans overlap but whose represented per-lane byte ranges do
+  not.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -273,7 +282,10 @@ foundation:
   optional epoch-close grouping scratch storage: when supplied, it builds one
   group record per subgroup/site/kind/size key in an open-addressed scratch
   table before summary validation, avoiding the older prior-record leader scan
-  across many distinct sites. Thread-level mode does not compress its hot access
+  across many distinct sites. Subgroup-level storage also tracks
+  `coalescing_fallback_count`, the number of opted-in accesses that could not
+  use the coalescing access log and therefore fell back to ordinary exact
+  records. Thread-level mode does not compress its hot access
   log yet.
 
 The reference corpus is a map of desired coverage, not an obligation to
@@ -1324,6 +1336,12 @@ Incremental instrumented test growth:
 34. Reduce the remaining subgroup-level coalescing costs. The next costs are
     per-group coalescing-access-log validation scans and hot-path traffic: one
     coalescing access record is still written per opted-in participating lane.
+35. Add subgroup-level coalescing fallback observability and exact-fallback
+    coverage. Done: subgroup-level storage now has `coalescing_fallback_count`
+    for opted-in accesses that fall back to exact records, the tests cover
+    absent coalescing access storage, coalescing access overflow, repeated-lane
+    summary-vs-unsummarized conflicts, and unsummarized read/read silence, and
+    the tutorial has a compiled subgroup-level coalescing opt-in example.
 
 Layer 1: toy deterministic kernels.
 
@@ -1460,6 +1478,9 @@ library teaches us the right subgroup abstractions.
     * Subgroup-level opted-in accesses now use `coalescing_access_record` as the
       hot-path access log when storage is available, falling back to ordinary
       exact records when it is not. Done.
+    * Subgroup-level coalescing fallback is now observable through
+      `coalescing_fallback_count`, and tests cover both absent storage and
+      full-buffer fallback. Done.
     * Further hot-path compression can come later, after the remaining
       epoch-close costs are small enough to make coalescing a credible
       optimization for broad kernels.

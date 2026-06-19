@@ -67,8 +67,9 @@ hip_moi::subgroup_level_host_context moi(options);
 
 Custom `storage_ref` users can instead populate the
 `coalescing_access_records`, `coalescing_access_record_capacity`,
-`coalescing_access_count`, and `epoch_coalescing_access_count` fields directly.
-They may also provide `coalescing_group_records`,
+`coalescing_access_count`, `epoch_coalescing_access_count`, and
+`coalescing_fallback_count` fields directly. They may also provide
+`coalescing_group_records`,
 `coalescing_group_record_capacity`, and `coalescing_group_count` scratch
 storage to make subgroup-level summary construction cheaper across many
 distinct sites. If group storage is absent or fills up, hip-moi falls back to
@@ -98,6 +99,9 @@ buffer pointers null. In that case the summary pass returns immediately, and no
 coalescing metadata is produced. For subgroup-level mode, users may also leave
 the coalescing access pointers null; then opted-in accesses fall back to the
 ordinary exact `access_record` path and no subgroup summaries are produced.
+If a `coalescing_fallback_count` counter is present, it is incremented once for
+each opted-in subgroup-level access that takes this exact-record fallback path.
+Default-site accesses do not increment that counter.
 
 ### Opted-In Sites
 
@@ -110,8 +114,9 @@ In subgroup-level mode, an opted-in access writes a
 coalescing access storage is supplied and has capacity. That record carries the
 access address and the thread's lane within the subgroup. If coalescing access
 storage is absent or full, the access falls back to the ordinary exact
-`access_record` path. The subgroup-level diagnostic `access_record` stays
-compact and does not grow a lane or thread-id field.
+`access_record` path and increments `coalescing_fallback_count` when that
+counter is present. The subgroup-level diagnostic `access_record` stays compact
+and does not grow a lane or thread-id field.
 When group scratch storage is supplied, epoch close first builds compact
 `coalescing_group_record` entries keyed by subgroup/site/kind/size in an
 open-addressed scratch table. Those group records accumulate lane masks and
@@ -148,6 +153,24 @@ group, plus the one coalescing access record written per opted-in lane. The
 group scratch table is fixed-capacity and open-addressed, so unusually high
 collision pressure or too little scratch capacity falls back to the older
 coalescing-access scan path.
+
+### Counters
+
+`coalescing_access_count` counts opted-in subgroup-level accesses that entered
+the coalescing access path while coalescing access storage was present. It may
+exceed `coalescing_access_record_capacity`; only the first
+`coalescing_access_record_capacity` records are stored.
+
+`coalescing_fallback_count` counts opted-in subgroup-level accesses that could
+not use a coalescing access record and therefore logged an ordinary exact
+`access_record`. That includes the two currently observable hot-path fallback
+cases: no coalescing access storage and a full coalescing access buffer.
+
+`coalescing_group_count` counts subgroup-level group scratch slots occupied at
+epoch close when group scratch is supplied. If group scratch is absent, full, or
+too collision-heavy, summary construction falls back to the coalescing-access
+scan path; this does not by itself increment `coalescing_fallback_count`,
+because the accesses were still recorded in the coalescing access log.
 
 ## Representation
 
@@ -278,7 +301,7 @@ The current code does not summarize:
 * a single summary spanning multiple subgroups; subgroup-level mode emits one
   summary per subgroup,
 * subgroup-level opted-in accesses when no coalescing access storage was
-  supplied,
+  supplied; these accesses fall back to ordinary exact records,
 * accesses that are not visible to hip-moi because they were raw LDS loads or
   stores instead of `ctx.lds_load` / `ctx.lds_store`.
 
@@ -287,5 +310,6 @@ storage was supplied or when that scratch storage fills up; those cases fall
 back to the older coalescing-access scan path.
 
 This means coalescing is currently most useful as a way to observe and diagnose
-simple, regular all-thread LDS access sites. It is not yet a performance
-feature users should rely on to reduce instrumentation overhead.
+simple, regular all-thread LDS access sites. Subgroup-level coalescing has
+started reducing exact access-log traffic for opted-in sites, but it is still a
+conservative optimization path that users should validate on their kernels.

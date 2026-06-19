@@ -103,14 +103,14 @@ namespace hip_moi::test
                           coalesced_access_record_capacity_ * sizeof(coalesced_access_record)));
             if constexpr(has_coalescing_access_records)
             {
+                HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_count_, sizeof(int)));
+                HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&epoch_coalescing_access_count_, sizeof(int)));
+                HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_fallback_count_, sizeof(int)));
                 if(coalescing_access_record_capacity_ > 0)
                 {
                     HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_records_,
                                                       coalescing_access_record_capacity_
                                                           * sizeof(coalescing_access_record)));
-                    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_count_, sizeof(int)));
-                    HIP_MOI_TEST_HIP_ASSERT(
-                        hipMalloc(&epoch_coalescing_access_count_, sizeof(int)));
                 }
                 if constexpr(has_coalescing_group_records)
                 {
@@ -154,6 +154,7 @@ namespace hip_moi::test
                     coalescing_access_record_capacity_,
                     coalescing_access_count_,
                     epoch_coalescing_access_count_,
+                    coalescing_fallback_count_,
                     coalescing_group_records_,
                     coalescing_group_record_capacity_,
                     coalescing_group_count_,
@@ -216,6 +217,11 @@ namespace hip_moi::test
         int* coalescing_access_count_device() const
         {
             return coalescing_access_count_;
+        }
+
+        int* coalescing_fallback_count_device() const
+        {
+            return coalescing_fallback_count_;
         }
 
         int* coalescing_group_count_device() const
@@ -291,6 +297,11 @@ namespace hip_moi::test
                 (void)hipFree(epoch_coalescing_access_count_);
                 epoch_coalescing_access_count_ = nullptr;
             }
+            if(coalescing_fallback_count_)
+            {
+                (void)hipFree(coalescing_fallback_count_);
+                coalescing_fallback_count_ = nullptr;
+            }
             if(coalescing_group_count_)
             {
                 (void)hipFree(coalescing_group_count_);
@@ -310,6 +321,7 @@ namespace hip_moi::test
         int*                     coalesced_access_count_           = nullptr;
         int*                      coalescing_access_count_           = nullptr;
         int*                      epoch_coalescing_access_count_     = nullptr;
+        int*                      coalescing_fallback_count_         = nullptr;
         int*                     coalescing_group_count_           = nullptr;
         int                      access_record_capacity_           = 0;
         int                      coalesced_access_record_capacity_ = 0;

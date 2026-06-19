@@ -294,6 +294,73 @@ hip-moi: HIP_MOI_CHECK failed at ...
 
 The compiled companion is `005_subgroup_level_cross_subgroup_race.hip`.
 
+## Opting In to Coalescing
+
+Coalescing does not change the user-facing access shape. Start with a plain
+subgroup-tiled kernel where each thread writes and later reads one LDS element:
+
+```c++
+__global__ void plain_subgroup_tile_kernel(int* out)
+{
+    __shared__ int values[kThreadCount];
+
+    int thread = static_cast<int>(threadIdx.x);
+    values[thread] = thread + 7;
+
+    __syncthreads();
+
+    out[thread] = values[thread];
+}
+```
+
+The instrumented kernel still calls `ctx.lds_store`, `ctx.lds_load`, and
+`ctx.syncthreads()`. The only new detail is the nonzero site id passed at
+regular access sites:
+
+```c++
+__global__ void subgroup_tile_kernel(
+    int* out, hip_moi::subgroup_level_context::storage_ref storage)
+{
+    __shared__ int values[kThreadCount];
+
+    hip_moi::subgroup_level_context::config cfg{
+        /*thread_count=*/static_cast<int>(blockDim.x),
+        /*threads_per_subgroup=*/32,
+        /*subgroup_count=*/2,
+    };
+    hip_moi::subgroup_level_context ctx(storage, cfg);
+
+    ctx.init_workgroup();
+
+    int thread = static_cast<int>(threadIdx.x);
+    ctx.lds_store(&values[thread], thread + 7, HIP_MOI_SITE_ID());
+
+    ctx.syncthreads();
+
+    out[thread] = ctx.lds_load(&values[thread], HIP_MOI_SITE_ID());
+    ctx.finish();
+}
+```
+
+On the host, supply subgroup-level coalescing storage. If that storage is absent
+or fills up, hip-moi falls back to exact access records and still remains
+correct:
+
+```c++
+hip_moi::host_context_options options;
+options.access_record_capacity = 128;
+options.coalesced_access_record_capacity = 16;
+options.coalescing_access_record_capacity = 128;
+options.coalescing_group_record_capacity = 16;
+options.diagnostic_capacity = 8;
+options.subgroup_capacity = 2;
+
+hip_moi::subgroup_level_host_context moi(options);
+```
+
+The compiled companion is `006_subgroup_level_coalescing.hip`. The lower-level
+counter and fallback semantics are documented in `docs/coalescing.md`.
+
 ## Scope-Based Checking
 
 The destructor path is also a first-class usage pattern. This example returns to

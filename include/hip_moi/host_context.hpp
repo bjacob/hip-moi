@@ -179,6 +179,7 @@ namespace hip_moi
                         options_.coalescing_access_record_capacity,
                         coalescing_access_count_,
                         epoch_coalescing_access_count_,
+                        coalescing_fallback_count_,
                         coalescing_group_records_,
                         options_.coalescing_group_record_capacity,
                         coalescing_group_count_,
@@ -388,17 +389,19 @@ namespace hip_moi
                                       "coalesced_access_records");
                 if constexpr(has_coalescing_access_records)
                 {
+                    hip_allocate_or_abort(
+                        &coalescing_access_count_, sizeof(int), "coalescing_access_count");
+                    hip_allocate_or_abort(&epoch_coalescing_access_count_,
+                                          sizeof(int),
+                                          "epoch_coalescing_access_count");
+                    hip_allocate_or_abort(
+                        &coalescing_fallback_count_, sizeof(int), "coalescing_fallback_count");
                     if(options_.coalescing_access_record_capacity > 0)
                     {
                         hip_allocate_or_abort(&coalescing_access_records_,
                                               options_.coalescing_access_record_capacity
                                                   * sizeof(coalescing_access_record),
                                               "coalescing_access_records");
-                        hip_allocate_or_abort(
-                            &coalescing_access_count_, sizeof(int), "coalescing_access_count");
-                        hip_allocate_or_abort(&epoch_coalescing_access_count_,
-                                              sizeof(int),
-                                              "epoch_coalescing_access_count");
                     }
                     if constexpr(has_coalescing_group_records)
                     {
@@ -439,6 +442,14 @@ namespace hip_moi
                                     "coalesced_access_records");
                 if constexpr(has_coalescing_access_records)
                 {
+                    hip_memset_or_abort(
+                        coalescing_access_count_, 0, sizeof(int), "coalescing_access_count");
+                    hip_memset_or_abort(epoch_coalescing_access_count_,
+                                        0,
+                                        sizeof(int),
+                                        "epoch_coalescing_access_count");
+                    hip_memset_or_abort(
+                        coalescing_fallback_count_, 0, sizeof(int), "coalescing_fallback_count");
                     if(options_.coalescing_access_record_capacity > 0)
                     {
                         hip_memset_or_abort(coalescing_access_records_,
@@ -446,12 +457,6 @@ namespace hip_moi
                                             options_.coalescing_access_record_capacity
                                                 * sizeof(coalescing_access_record),
                                             "coalescing_access_records");
-                        hip_memset_or_abort(
-                            coalescing_access_count_, 0, sizeof(int), "coalescing_access_count");
-                        hip_memset_or_abort(epoch_coalescing_access_count_,
-                                            0,
-                                            sizeof(int),
-                                            "epoch_coalescing_access_count");
                     }
                     if constexpr(has_coalescing_group_records)
                     {
@@ -578,6 +583,11 @@ namespace hip_moi
                     (void)hipFree(epoch_coalescing_access_count_);
                     epoch_coalescing_access_count_ = nullptr;
                 }
+                if(coalescing_fallback_count_)
+                {
+                    (void)hipFree(coalescing_fallback_count_);
+                    coalescing_fallback_count_ = nullptr;
+                }
                 if(coalescing_group_count_)
                 {
                     (void)hipFree(coalescing_group_count_);
@@ -603,6 +613,7 @@ namespace hip_moi
             int*                     coalesced_access_count_   = nullptr;
             int*                      coalescing_access_count_       = nullptr;
             int*                      epoch_coalescing_access_count_ = nullptr;
+            int*                      coalescing_fallback_count_     = nullptr;
             int*                     coalescing_group_count_       = nullptr;
         };
     } // namespace detail
