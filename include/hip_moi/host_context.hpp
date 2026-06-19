@@ -48,7 +48,8 @@ namespace hip_moi
                              "hip-moi diagnostic %d: kind=%s epoch=%u "
                              "first_thread=%u second_thread=%u "
                              "first_addr=0x%llx second_addr=0x%llx "
-                             "first_size=%u second_size=%u\n",
+                             "first_size=%u second_size=%u "
+                             "first_site=0x%llx second_site=0x%llx\n",
                              index,
                              kind_name,
                              diagnostic_record.epoch,
@@ -57,7 +58,9 @@ namespace hip_moi
                              static_cast<unsigned long long>(diagnostic_record.first_addr),
                              static_cast<unsigned long long>(diagnostic_record.second_addr),
                              diagnostic_record.first_size,
-                             diagnostic_record.second_size);
+                             diagnostic_record.second_size,
+                             static_cast<unsigned long long>(diagnostic_record.first_site_id),
+                             static_cast<unsigned long long>(diagnostic_record.second_site_id));
             }
         };
 
@@ -80,7 +83,8 @@ namespace hip_moi
                              "hip-moi diagnostic %d: kind=%s epoch=%u "
                              "first_subgroup=%u second_subgroup=%u "
                              "first_addr=0x%llx second_addr=0x%llx "
-                             "first_size=%u second_size=%u\n",
+                             "first_size=%u second_size=%u "
+                             "first_site=0x%llx second_site=0x%llx\n",
                              index,
                              kind_name,
                              diagnostic_record.epoch,
@@ -89,7 +93,9 @@ namespace hip_moi
                              static_cast<unsigned long long>(diagnostic_record.first_addr),
                              static_cast<unsigned long long>(diagnostic_record.second_addr),
                              diagnostic_record.first_size,
-                             diagnostic_record.second_size);
+                             diagnostic_record.second_size,
+                             static_cast<unsigned long long>(diagnostic_record.first_site_id),
+                             static_cast<unsigned long long>(diagnostic_record.second_site_id));
             }
         };
 

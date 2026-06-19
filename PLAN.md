@@ -215,16 +215,19 @@ foundation:
   intra-subgroup races. Real multi-subgroup RDNA4 WMMA bridge tests now exist
   for both data-tiled and row-major layouts under both modes. Diagnostic quality
   work, access-level multi-subgroup refinement, and synchronization lowering
-  notes are still future work. Automatic coalescing of regular access records is
-  a possible later optimization, keyed by explicit nonzero `site_id` values.
+  notes are still future work. Exact `site_id` plumbing now exists: callers may
+  pass an explicit `hip_moi::site_id`, `HIP_MOI_SITE_ID()` builds nonzero site
+  ids by compile-time hashing, and access records plus diagnostics carry compact
+  numeric site ids. Automatic coalescing of regular access records is a possible
+  later optimization, keyed by explicit nonzero `site_id` values.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: improve the existing access-level instrumentation
-path before adding a new user contract. The near-term work should add labels or
-`site_id` values, improve first-conflict preservation and host reporting, keep
+Next implementation slice: improve diagnostics on top of the access-level
+instrumentation path. The near-term work should preserve first-conflict
+information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
 `ctx.lds_load`/`ctx.lds_store`, and start recording synchronization-lowering
 notes for `ctx.syncthreads()` and lower-level builtins.
@@ -1077,6 +1080,7 @@ Incremental instrumented test growth:
 22. Add the `site_id` wrapper, optional `site_id` arguments to `lds_load` and
     `lds_store`, and the `HIP_MOI_SITE_ID()` macro. Store compact site ids in
     access records and diagnostics without changing exact detector behavior.
+    Done.
 23. Improve diagnostic quality with site ids, labels/source locations, and
     first-conflict preservation.
 24. Keep broadening ordinary access-level multi-subgroup coverage where it

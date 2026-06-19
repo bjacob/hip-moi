@@ -32,6 +32,7 @@ namespace hip_moi
             uint32_t  epoch;
             uint32_t  kind;
             uint32_t  valid;
+            uint64_t  site_id;
         };
 
         struct diagnostic
@@ -44,6 +45,8 @@ namespace hip_moi
             uintptr_t second_addr;
             uint32_t  first_size;
             uint32_t  second_size;
+            uint64_t  first_site_id;
+            uint64_t  second_site_id;
         };
 
         struct storage_ref
@@ -124,22 +127,22 @@ namespace hip_moi
         }
 
         template <typename T>
-        __device__ T lds_load(const T* ptr)
+        __device__ T lds_load(const T* ptr, site_id site = no_site_id)
         {
             static_assert(std::is_trivially_copyable<T>::value,
                           "hip_moi::thread_level_context::lds_load requires a trivially copyable "
                           "type");
-            record_access(ptr, sizeof(T), access_kind::load);
+            record_access(ptr, sizeof(T), access_kind::load, site);
             return *ptr;
         }
 
         template <typename T>
-        __device__ void lds_store(T* ptr, T value)
+        __device__ void lds_store(T* ptr, T value, site_id site = no_site_id)
         {
             static_assert(std::is_trivially_copyable<T>::value,
                           "hip_moi::thread_level_context::lds_store requires a trivially "
                           "copyable type");
-            record_access(ptr, sizeof(T), access_kind::store);
+            record_access(ptr, sizeof(T), access_kind::store, site);
             *ptr = value;
         }
 
@@ -213,7 +216,8 @@ namespace hip_moi
                    && detail::byte_ranges_overlap(first, second);
         }
 
-        __device__ void record_access(const void* ptr, uint32_t byte_count, access_kind kind)
+        __device__ void
+            record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
         {
             if(!storage_.access_records || !storage_.access_count || !storage_.epoch_access_count
                || storage_.access_record_capacity <= 0)
@@ -230,6 +234,7 @@ namespace hip_moi
                 detail::current_epoch(storage_, subgroup),
                 static_cast<uint32_t>(kind),
                 1,
+                site.value(),
             };
 
             (void)atomicAdd(storage_.access_count, 1);
@@ -281,6 +286,8 @@ namespace hip_moi
                                         second.address,
                                         first.byte_count,
                                         second.byte_count,
+                                        first.site_id,
+                                        second.site_id,
                                     });
         }
 
@@ -296,6 +303,8 @@ namespace hip_moi
                                         record.address,
                                         record.byte_count,
                                         record.byte_count,
+                                        record.site_id,
+                                        record.site_id,
                                     });
         }
 

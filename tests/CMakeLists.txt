@@ -123,3 +123,5 @@ if(_hip_moi_build_rdna4_tests)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_multisubgroup_wmma_row_major_test
                     instrumented/019_rdna4_multisubgroup_wmma_row_major_test.hip)
 endif()
+hip_moi_add_gtest(hip_moi_instrumented_site_id_test
+                  instrumented/020_site_id_test.hip)

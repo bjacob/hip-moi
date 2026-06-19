@@ -124,3 +124,9 @@ cross-subgroup diagnostic case checked in both `thread-level` and
 row-major companion to `018`. It uses two subgroups, per-subgroup row-major
 A/B/C tiles, double-buffered LDS staging, exact host-reference output checks,
 and a missing-barrier cross-subgroup diagnostic case checked in both modes.
+
+`020_site_id_test.hip` covers exact source-site id plumbing. It checks that
+`HIP_MOI_SITE_ID()` produces nonzero compile-time ids, default accesses still
+record `site_id == 0`, explicit site ids are stored in access records, and both
+thread-level and subgroup-level diagnostics carry site ids without changing the
+detector's exact behavior.
