@@ -98,7 +98,7 @@ namespace
         return static_cast<float>(acc);
     }
 
-    bool check_reference_output(const float* output)
+    bool check_reference_output(const float* output, const char* label)
     {
         for(int m = 0; m < kTileM; ++m)
         {
@@ -109,7 +109,8 @@ namespace
                 if(actual != expected)
                 {
                     std::fprintf(stderr,
-                                 "C[%d,%d] mismatch: expected %.1f, got %.1f\n",
+                                 "%s C[%d,%d] mismatch: expected %.1f, got %.1f\n",
+                                 label,
                                  m,
                                  n,
                                  expected,
@@ -119,16 +120,6 @@ namespace
             }
         }
         return true;
-    }
-
-    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
-    {
-        hip_moi::config cfg{
-            /*thread_count=*/static_cast<int>(blockDim.x),
-            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
-            /*subgroup_count=*/1,
-        };
-        return hip_moi::context(storage, cfg);
     }
 
     __device__ f16x8_t load_global_fragment(const _Float16* global_fragments, int lane)
@@ -142,10 +133,49 @@ namespace
         return result;
     }
 
-    __global__ void data_tiled_wmma_kernel(const _Float16*             a_global,
-                                           const _Float16*             b_global,
-                                           float*                      c_global,
-                                           hip_moi::context_storage_ref storage)
+    __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
+                                                 const _Float16* b_global,
+                                                 float*          c_global)
+    {
+        __shared__ f16x8_t a_shared[kThreadCount];
+        __shared__ f16x8_t b_shared[kThreadCount];
+
+        int lane = static_cast<int>(threadIdx.x) & 31;
+
+        a_shared[lane] = load_global_fragment(a_global, lane);
+        b_shared[lane] = load_global_fragment(b_global, lane);
+
+        __syncthreads();
+
+        f16x8_t a   = a_shared[lane];
+        f16x8_t b   = b_shared[lane];
+        f32x8_t acc = {};
+        acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, acc);
+
+        __syncthreads();
+
+        int n = lane & 15;
+        for(int elem = 0; elem < 8; ++elem)
+        {
+            int m                              = rdna4_wmma_acc_m(lane, elem);
+            c_global[row_major(m, n, kTileN)] = acc[elem];
+        }
+    }
+
+    __device__ hip_moi::context make_context(hip_moi::context_storage_ref storage)
+    {
+        hip_moi::config cfg{
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
+            /*subgroup_count=*/1,
+        };
+        return hip_moi::context(storage, cfg);
+    }
+
+    __global__ void instrumented_data_tiled_wmma_kernel(const _Float16*             a_global,
+                                                        const _Float16*             b_global,
+                                                        float*                      c_global,
+                                                        hip_moi::context_storage_ref storage)
     {
         __shared__ f16x8_t a_shared[kThreadCount];
         __shared__ f16x8_t b_shared[kThreadCount];
@@ -180,46 +210,67 @@ int main()
 {
     _Float16 host_a[kPackedTileElements];
     _Float16 host_b[kPackedTileElements];
-    float    host_c[kOutputElements] = {};
+    float    plain_c[kOutputElements]       = {};
+    float    instrumented_c[kOutputElements] = {};
     fill_data_tiled_inputs(host_a, host_b);
 
     _Float16* device_a = nullptr;
     _Float16* device_b = nullptr;
-    float*    device_c = nullptr;
+    float*    device_plain_c = nullptr;
+    float*    device_moi_c   = nullptr;
     check_hip(hipMalloc(&device_a, sizeof(host_a)), "hipMalloc(device_a)");
     check_hip(hipMalloc(&device_b, sizeof(host_b)), "hipMalloc(device_b)");
-    check_hip(hipMalloc(&device_c, sizeof(host_c)), "hipMalloc(device_c)");
+    check_hip(hipMalloc(&device_plain_c, sizeof(plain_c)), "hipMalloc(device_plain_c)");
+    check_hip(hipMalloc(&device_moi_c, sizeof(instrumented_c)), "hipMalloc(device_moi_c)");
     check_hip(hipMemcpy(device_a, host_a, sizeof(host_a), hipMemcpyHostToDevice),
               "hipMemcpy(device_a)");
     check_hip(hipMemcpy(device_b, host_b, sizeof(host_b), hipMemcpyHostToDevice),
               "hipMemcpy(device_b)");
 
-    hip_moi::host_context moi(context_options());
-    hipLaunchKernelGGL(data_tiled_wmma_kernel,
+    hipLaunchKernelGGL(plain_data_tiled_wmma_kernel,
                        dim3(1),
                        dim3(kThreadCount),
                        0,
                        0,
                        device_a,
                        device_b,
-                       device_c,
+                       device_plain_c);
+    check_hip(hipGetLastError(), "hipGetLastError(plain)");
+    check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(plain)");
+
+    hip_moi::host_context moi(context_options());
+    hipLaunchKernelGGL(instrumented_data_tiled_wmma_kernel,
+                       dim3(1),
+                       dim3(kThreadCount),
+                       0,
+                       0,
+                       device_a,
+                       device_b,
+                       device_moi_c,
                        moi.device_ref());
-    check_hip(hipGetLastError(), "hipGetLastError");
+    check_hip(hipGetLastError(), "hipGetLastError(instrumented)");
 
     HIP_MOI_CHECK(moi);
 
-    check_hip(hipMemcpy(host_c, device_c, sizeof(host_c), hipMemcpyDeviceToHost),
-              "hipMemcpy(host_c)");
+    check_hip(hipMemcpy(plain_c, device_plain_c, sizeof(plain_c), hipMemcpyDeviceToHost),
+              "hipMemcpy(plain_c)");
+    check_hip(hipMemcpy(instrumented_c,
+                        device_moi_c,
+                        sizeof(instrumented_c),
+                        hipMemcpyDeviceToHost),
+              "hipMemcpy(instrumented_c)");
 
     check_hip(hipFree(device_a), "hipFree(device_a)");
     check_hip(hipFree(device_b), "hipFree(device_b)");
-    check_hip(hipFree(device_c), "hipFree(device_c)");
+    check_hip(hipFree(device_plain_c), "hipFree(device_plain_c)");
+    check_hip(hipFree(device_moi_c), "hipFree(device_moi_c)");
 
-    if(!check_reference_output(host_c))
+    if(!check_reference_output(plain_c, "plain")
+       || !check_reference_output(instrumented_c, "instrumented"))
     {
         return EXIT_FAILURE;
     }
 
-    std::printf("hip-moi tutorial 004: RDNA4 data-tiled WMMA matmul passed\n");
+    std::printf("hip-moi tutorial 004: plain and instrumented matmul passed\n");
     return EXIT_SUCCESS;
 }

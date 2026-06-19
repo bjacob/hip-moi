@@ -36,6 +36,20 @@ namespace
         return options;
     }
 
+    [[maybe_unused]] __global__ void plain_same_epoch_race_kernel(int* out)
+    {
+        __shared__ int value;
+
+        if(threadIdx.x == 0)
+        {
+            value = 123;
+        }
+        if(threadIdx.x == 1)
+        {
+            out[0] = value;
+        }
+    }
+
     __global__ void same_epoch_race_kernel(int* out, hip_moi::context_storage_ref storage)
     {
         __shared__ int value;

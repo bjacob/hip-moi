@@ -45,7 +45,10 @@ foundation:
   README, and a CMake subtree that builds the examples and registers them as
   CTests. The tutorial CTests include both a passing synchronized example,
   expected-failing diagnosed examples, and a gfx12-gated real RDNA4
-  data-tiled WMMA matmul example.
+  data-tiled WMMA matmul example. The README is the tutorial's primary content:
+  each example is explained as a plain HIP kernel first, then as the
+  corresponding hip-moi instrumented kernel, while the standalone `.hip`
+  programs serve as compiled companions.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.

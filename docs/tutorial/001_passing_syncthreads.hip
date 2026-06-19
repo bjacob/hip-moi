@@ -36,6 +36,23 @@ namespace
         return options;
     }
 
+    __global__ void plain_producer_consumer_kernel(int* out)
+    {
+        __shared__ int value;
+
+        if(threadIdx.x == 0)
+        {
+            value = 41;
+        }
+
+        __syncthreads();
+
+        if(threadIdx.x == 1)
+        {
+            out[0] = value + 1;
+        }
+    }
+
     __global__ void producer_consumer_kernel(int* out, hip_moi::context_storage_ref storage)
     {
         __shared__ int value;
@@ -68,34 +85,46 @@ int main()
     hip_moi::host_context moi(small_context_options());
 
     int* device_output = nullptr;
-    check_hip(hipMalloc(&device_output, sizeof(int)), "hipMalloc");
+    check_hip(hipMalloc(&device_output, 2 * sizeof(int)), "hipMalloc");
 
-    int initial = -1;
-    check_hip(hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice),
+    int initial[2] = {-1, -1};
+    check_hip(hipMemcpy(device_output, initial, sizeof(initial), hipMemcpyHostToDevice),
               "hipMemcpy(device_output)");
+
+    hipLaunchKernelGGL(plain_producer_consumer_kernel,
+                       dim3(1),
+                       dim3(kThreadCount),
+                       0,
+                       0,
+                       device_output);
+    check_hip(hipGetLastError(), "hipGetLastError(plain)");
+    check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(plain)");
 
     hipLaunchKernelGGL(producer_consumer_kernel,
                        dim3(1),
                        dim3(kThreadCount),
                        0,
                        0,
-                       device_output,
+                       device_output + 1,
                        moi.device_ref());
-    check_hip(hipGetLastError(), "hipGetLastError");
+    check_hip(hipGetLastError(), "hipGetLastError(instrumented)");
 
     HIP_MOI_CHECK(moi);
 
-    int output = -1;
-    check_hip(hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost),
+    int output[2] = {-1, -1};
+    check_hip(hipMemcpy(output, device_output, sizeof(output), hipMemcpyDeviceToHost),
               "hipMemcpy(output)");
     check_hip(hipFree(device_output), "hipFree");
 
-    if(output != 42)
+    if(output[0] != 42 || output[1] != 42)
     {
-        std::fprintf(stderr, "expected output 42, got %d\n", output);
+        std::fprintf(stderr,
+                     "expected outputs 42 and 42, got %d and %d\n",
+                     output[0],
+                     output[1]);
         return EXIT_FAILURE;
     }
 
-    std::printf("hip-moi tutorial 001: output=%d\n", output);
+    std::printf("hip-moi tutorial 001: plain=%d instrumented=%d\n", output[0], output[1]);
     return EXIT_SUCCESS;
 }
