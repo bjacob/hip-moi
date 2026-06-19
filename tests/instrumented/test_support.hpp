@@ -39,6 +39,7 @@ namespace hip_moi::test
     {
     public:
         using access_record = typename Context::access_record;
+        using coalesced_access_record = typename Context::coalesced_access_record;
         using diagnostic    = typename Context::diagnostic;
         using storage_ref   = typename Context::storage_ref;
 
@@ -55,11 +56,15 @@ namespace hip_moi::test
         void allocate(int access_capacity, int diagnostic_capacity, int subgroup_capacity)
         {
             access_record_capacity_ = access_capacity;
+            coalesced_access_record_capacity_ = access_capacity;
             diagnostic_capacity_    = diagnostic_capacity;
             subgroup_capacity_      = subgroup_capacity;
 
             HIP_MOI_TEST_HIP_ASSERT(
                 hipMalloc(&access_records_, access_capacity * sizeof(access_record)));
+            HIP_MOI_TEST_HIP_ASSERT(
+                hipMalloc(&coalesced_access_records_,
+                          coalesced_access_record_capacity_ * sizeof(coalesced_access_record)));
             HIP_MOI_TEST_HIP_ASSERT(
                 hipMalloc(&diagnostics_, diagnostic_capacity * sizeof(diagnostic)));
             HIP_MOI_TEST_HIP_ASSERT(
@@ -67,6 +72,7 @@ namespace hip_moi::test
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&epoch_access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&diagnostic_count_, sizeof(int)));
+            HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalesced_access_count_, sizeof(int)));
         }
 
         storage_ref ref() const
@@ -81,6 +87,9 @@ namespace hip_moi::test
                 access_count_,
                 epoch_access_count_,
                 diagnostic_count_,
+                coalesced_access_records_,
+                coalesced_access_record_capacity_,
+                coalesced_access_count_,
             };
         }
 
@@ -94,9 +103,19 @@ namespace hip_moi::test
             return access_records_;
         }
 
+        coalesced_access_record* coalesced_access_records_device() const
+        {
+            return coalesced_access_records_;
+        }
+
         int* access_count_device() const
         {
             return access_count_;
+        }
+
+        int* coalesced_access_count_device() const
+        {
+            return coalesced_access_count_;
         }
 
         int* diagnostic_count_device() const
@@ -111,6 +130,11 @@ namespace hip_moi::test
             {
                 (void)hipFree(access_records_);
                 access_records_ = nullptr;
+            }
+            if(coalesced_access_records_)
+            {
+                (void)hipFree(coalesced_access_records_);
+                coalesced_access_records_ = nullptr;
             }
             if(diagnostics_)
             {
@@ -137,17 +161,25 @@ namespace hip_moi::test
                 (void)hipFree(diagnostic_count_);
                 diagnostic_count_ = nullptr;
             }
+            if(coalesced_access_count_)
+            {
+                (void)hipFree(coalesced_access_count_);
+                coalesced_access_count_ = nullptr;
+            }
         }
 
-        access_record*  access_records_         = nullptr;
-        diagnostic*     diagnostics_            = nullptr;
-        subgroup_state* subgroup_states_        = nullptr;
-        int*            access_count_           = nullptr;
-        int*            epoch_access_count_     = nullptr;
-        int*            diagnostic_count_       = nullptr;
-        int             access_record_capacity_ = 0;
-        int             diagnostic_capacity_    = 0;
-        int             subgroup_capacity_      = 0;
+        access_record*           access_records_                   = nullptr;
+        coalesced_access_record* coalesced_access_records_         = nullptr;
+        diagnostic*              diagnostics_                      = nullptr;
+        subgroup_state*          subgroup_states_                  = nullptr;
+        int*                     access_count_                     = nullptr;
+        int*                     epoch_access_count_               = nullptr;
+        int*                     diagnostic_count_                 = nullptr;
+        int*                     coalesced_access_count_           = nullptr;
+        int                      access_record_capacity_           = 0;
+        int                      coalesced_access_record_capacity_ = 0;
+        int                      diagnostic_capacity_              = 0;
+        int                      subgroup_capacity_                = 0;
     };
 
     using thread_level_device_context_storage

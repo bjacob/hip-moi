@@ -19,6 +19,7 @@ namespace hip_moi
     struct host_context_options
     {
         int access_record_capacity = 1024;
+        int coalesced_access_record_capacity = 1024;
         int diagnostic_capacity    = 64;
         int subgroup_capacity      = 1;
 
@@ -105,6 +106,7 @@ namespace hip_moi
         public:
             using device_context = typename Traits::device_context;
             using access_record  = typename device_context::access_record;
+            using coalesced_access_record = typename device_context::coalesced_access_record;
             using diagnostic     = typename device_context::diagnostic;
             using storage_ref    = typename device_context::storage_ref;
 
@@ -157,6 +159,9 @@ namespace hip_moi
                     access_count_,
                     epoch_access_count_,
                     diagnostic_count_,
+                    coalesced_access_records_,
+                    options_.coalesced_access_record_capacity,
+                    coalesced_access_count_,
                 };
             }
 
@@ -311,14 +316,16 @@ namespace hip_moi
 
             void validate_options_or_abort() const
             {
-                if(options_.access_record_capacity <= 0 || options_.diagnostic_capacity <= 0
-                   || options_.subgroup_capacity <= 0)
+                if(options_.access_record_capacity <= 0
+                   || options_.coalesced_access_record_capacity <= 0
+                   || options_.diagnostic_capacity <= 0 || options_.subgroup_capacity <= 0)
                 {
                     std::fprintf(stderr,
                                  "hip-moi: %s capacities must all be positive "
-                                 "(access=%d diagnostics=%d subgroups=%d)\n",
+                                 "(access=%d coalesced_access=%d diagnostics=%d subgroups=%d)\n",
                                  Traits::name(),
                                  options_.access_record_capacity,
+                                 options_.coalesced_access_record_capacity,
                                  options_.diagnostic_capacity,
                                  options_.subgroup_capacity);
                     std::fflush(stderr);
@@ -331,6 +338,10 @@ namespace hip_moi
                 hip_allocate_or_abort(&access_records_,
                                       options_.access_record_capacity * sizeof(access_record),
                                       "access_records");
+                hip_allocate_or_abort(&coalesced_access_records_,
+                                      options_.coalesced_access_record_capacity
+                                          * sizeof(coalesced_access_record),
+                                      "coalesced_access_records");
                 hip_allocate_or_abort(&diagnostics_,
                                       options_.diagnostic_capacity * sizeof(diagnostic),
                                       "diagnostics");
@@ -340,6 +351,8 @@ namespace hip_moi
                 hip_allocate_or_abort(&access_count_, sizeof(int), "access_count");
                 hip_allocate_or_abort(&epoch_access_count_, sizeof(int), "epoch_access_count");
                 hip_allocate_or_abort(&diagnostic_count_, sizeof(int), "diagnostic_count");
+                hip_allocate_or_abort(
+                    &coalesced_access_count_, sizeof(int), "coalesced_access_count");
             }
 
             void clear_device_metadata_or_abort()
@@ -348,6 +361,11 @@ namespace hip_moi
                                     0,
                                     options_.access_record_capacity * sizeof(access_record),
                                     "access_records");
+                hip_memset_or_abort(coalesced_access_records_,
+                                    0,
+                                    options_.coalesced_access_record_capacity
+                                        * sizeof(coalesced_access_record),
+                                    "coalesced_access_records");
                 hip_memset_or_abort(diagnostics_,
                                     0,
                                     options_.diagnostic_capacity * sizeof(diagnostic),
@@ -359,6 +377,8 @@ namespace hip_moi
                 hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
                 hip_memset_or_abort(epoch_access_count_, 0, sizeof(int), "epoch_access_count");
                 hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
+                hip_memset_or_abort(
+                    coalesced_access_count_, 0, sizeof(int), "coalesced_access_count");
             }
 
             template <typename T>
@@ -407,6 +427,11 @@ namespace hip_moi
                     (void)hipFree(diagnostics_);
                     diagnostics_ = nullptr;
                 }
+                if(coalesced_access_records_)
+                {
+                    (void)hipFree(coalesced_access_records_);
+                    coalesced_access_records_ = nullptr;
+                }
                 if(subgroup_states_)
                 {
                     (void)hipFree(subgroup_states_);
@@ -427,6 +452,11 @@ namespace hip_moi
                     (void)hipFree(diagnostic_count_);
                     diagnostic_count_ = nullptr;
                 }
+                if(coalesced_access_count_)
+                {
+                    (void)hipFree(coalesced_access_count_);
+                    coalesced_access_count_ = nullptr;
+                }
             }
 
             host_context_options options_;
@@ -436,11 +466,13 @@ namespace hip_moi
             std::FILE*           diagnostic_stream_     = stderr;
             int                  last_diagnostic_count_ = 0;
             access_record*       access_records_        = nullptr;
+            coalesced_access_record* coalesced_access_records_ = nullptr;
             diagnostic*          diagnostics_           = nullptr;
             subgroup_state*      subgroup_states_       = nullptr;
             int*                 access_count_          = nullptr;
             int*                 epoch_access_count_    = nullptr;
             int*                 diagnostic_count_      = nullptr;
+            int*                     coalesced_access_count_   = nullptr;
         };
     } // namespace detail
 

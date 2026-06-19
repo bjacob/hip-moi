@@ -125,3 +125,5 @@ if(_hip_moi_build_rdna4_tests)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_site_id_test
                   instrumented/020_site_id_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_coalescing_opportunity_test
+                  instrumented/021_coalescing_opportunity_test.hip)

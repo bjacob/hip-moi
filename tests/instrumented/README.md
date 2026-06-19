@@ -130,3 +130,9 @@ and a missing-barrier cross-subgroup diagnostic case checked in both modes.
 record `site_id == 0`, explicit site ids are stored in access records, and both
 thread-level and subgroup-level diagnostics carry site ids without changing the
 detector's exact behavior.
+
+`021_coalescing_opportunity_test.hip` covers the first conservative use of
+nonzero site ids for regular-access summaries. Thread-level contiguous and
+fixed-stride sites produce one coalescing summary at `ctx.syncthreads()`, while
+default-site accesses, repeated dynamic instances, and irregular address
+patterns remain exact-only.

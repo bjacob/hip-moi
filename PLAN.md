@@ -197,6 +197,16 @@ foundation:
   row-major A/B/C tiles, double-buffered two-tile LDS staging, exact
   host-reference output checks, and a missing-barrier cross-subgroup diagnostic
   case checked in both `thread-level` and `subgroup-level` modes.
+* `tests/instrumented/020_site_id_test.hip` covers exact source-site id
+  plumbing. It checks that `HIP_MOI_SITE_ID()` produces nonzero compile-time
+  ids, default accesses still record `site_id == 0`, explicit site ids are
+  stored in access records, and both thread-level and subgroup-level
+  diagnostics carry site ids without changing the detector's exact behavior.
+* `tests/instrumented/021_coalescing_opportunity_test.hip` covers the first
+  conservative thread-level coalescing-opportunity pass. It checks that
+  nonzero-site contiguous and fixed-stride all-thread stores produce one summary
+  at `ctx.syncthreads()`, while default-site, repeated dynamic-instance, and
+  irregular address patterns remain exact-only.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -218,8 +228,11 @@ foundation:
   notes are still future work. Exact `site_id` plumbing now exists: callers may
   pass an explicit `hip_moi::site_id`, `HIP_MOI_SITE_ID()` builds nonzero site
   ids by compile-time hashing, and access records plus diagnostics carry compact
-  numeric site ids. Automatic coalescing of regular access records is a possible
-  later optimization, keyed by explicit nonzero `site_id` values.
+  numeric site ids. A first conservative thread-level coalescing-opportunity
+  pass now exists: at `ctx.syncthreads()`, exact access records from a just-ended
+  epoch are scanned for nonzero-site contiguous or fixed-stride thread-to-address
+  patterns, and summaries are written to a separate summary buffer. These
+  summaries do not yet drive diagnostics or hot-path compression.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -229,8 +242,9 @@ Next implementation slice: improve diagnostics on top of the access-level
 instrumentation path. The near-term work should preserve first-conflict
 information, make host reports more useful now that site ids exist, keep
 expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, and start recording synchronization-lowering
-notes for `ctx.syncthreads()` and lower-level builtins.
+`ctx.lds_load`/`ctx.lds_store`, continue the coalescing line by designing
+subgroup-level proof metadata, and start recording synchronization-lowering notes
+for `ctx.syncthreads()` and lower-level builtins.
 
 ## Foundations
 
@@ -380,6 +394,21 @@ class thread_level_context {
     uint32_t epoch;
     uint32_t kind;
     uint32_t valid;
+    uint64_t site_id;
+  };
+
+  struct coalesced_access_record {
+    uintptr_t first_address;
+    uint32_t byte_count;
+    uint32_t span_byte_count;
+    uint32_t first_thread_id;
+    uint32_t subgroup_id;
+    uint32_t epoch;
+    uint32_t kind;
+    uint32_t participant_count;
+    uint32_t valid;
+    int64_t address_stride;
+    uint64_t site_id;
   };
 
   struct diagnostic {
@@ -391,6 +420,8 @@ class thread_level_context {
     uintptr_t second_addr;
     uint32_t first_size;
     uint32_t second_size;
+    uint64_t first_site_id;
+    uint64_t second_site_id;
   };
 
   // Non-owning view of thread-level detector metadata buffers.
@@ -404,6 +435,9 @@ class thread_level_context {
     int* access_count;
     int* epoch_access_count;
     int* diagnostic_count;
+    coalesced_access_record* coalesced_access_records;
+    int coalesced_access_record_capacity;
+    int* coalesced_access_count;
   };
 
   // Optional fixed-capacity storage helper for users who want static storage.
@@ -435,6 +469,20 @@ class subgroup_level_context {
     uint32_t epoch;
     uint32_t kind;
     uint32_t valid;
+    uint64_t site_id;
+  };
+
+  struct coalesced_access_record {
+    uintptr_t first_address;
+    uint32_t byte_count;
+    uint32_t span_byte_count;
+    uint32_t subgroup_id;
+    uint32_t epoch;
+    uint32_t kind;
+    uint32_t participant_count;
+    uint32_t valid;
+    int64_t address_stride;
+    uint64_t site_id;
   };
 
   struct diagnostic {
@@ -446,6 +494,8 @@ class subgroup_level_context {
     uintptr_t second_addr;
     uint32_t first_size;
     uint32_t second_size;
+    uint64_t first_site_id;
+    uint64_t second_site_id;
   };
 
   // Non-owning view of subgroup-level detector metadata buffers.
@@ -459,6 +509,9 @@ class subgroup_level_context {
     int* access_count;
     int* epoch_access_count;
     int* diagnostic_count;
+    coalesced_access_record* coalesced_access_records;
+    int coalesced_access_record_capacity;
+    int* coalesced_access_count;
   };
 
   template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
@@ -489,6 +542,7 @@ using context = thread_level_context;
 
 struct host_context_options {
   int access_record_capacity;
+  int coalesced_access_record_capacity;
   int diagnostic_capacity;
   int subgroup_capacity;
 
@@ -553,8 +607,10 @@ Notes:
 * `lds_load` and `lds_store` should take an optional `site_id` argument with
   default value `hip_moi::no_site_id`. The default `site_id{0}` means exact
   logging only and does not allow coalescing. A nonzero site id opts that
-  access site into possible future automatic coalescing, while preserving exact
-  diagnostic semantics as the fallback.
+  access site into possible automatic coalescing, while preserving exact
+  diagnostic semantics as the fallback. The current implementation only writes
+  thread-level coalescing summaries at epoch boundaries; diagnostics still use
+  the exact access records.
 * `site_id` should be a tiny explicit wrapper around `uint64_t`, not a naked
   integer in the public API. The explicit constructor and getter prevent
   accidental argument-order mixups, especially in `lds_store(ptr, value, site)`.
@@ -581,7 +637,9 @@ Notes:
   necessarily summarized by the leader's address. Any lower-overhead path should
   be automatic, implicit, and conservative: the user still instruments actual
   HIP LDS accesses, while the detector may coalesce records only when it proves
-  a regularity pattern for a nonzero `site_id`.
+  a regularity pattern for a nonzero `site_id`. The first proof pass recognizes
+  thread-level contiguous and fixed-stride patterns and records them separately;
+  it does not yet compress the hot access path.
 * The target design is plain dissociation of mode-specific hot metadata:
   `thread-level` keeps per-thread identity in its records, while
   `subgroup-level` uses records and diagnostics shaped around
@@ -697,6 +755,22 @@ coalescing is safe for a site in an epoch, it must fall back to exact records.
 Dynamic instance identity is intentionally out of scope at first. If the same
 thread/subgroup/site appears more than once in one epoch, treat that site as
 non-coalescible for that epoch.
+
+The current first step is not hot-path compression. `thread_level_context`
+records exact accesses as before, then at `ctx.syncthreads()` has one thread
+scan the just-ended epoch for nonzero-site regularity. When a site has one
+record per contiguous thread id and its addresses follow a non-overlapping
+fixed stride, hip-moi writes a `coalesced_access_record` summary. Default
+`site_id{0}` accesses, repeated dynamic instances at one site, and irregular
+address patterns remain exact-only. These summaries are currently diagnostic
+metadata and test or planning evidence; conflict diagnostics still come from the
+exact access log.
+
+`subgroup_level_context` already has separate summary storage in its public
+shape, but it does not yet produce summaries. Because subgroup-level hot records
+intentionally omit thread id, subgroup-level coalescing needs separate proof
+metadata, likely a compact participating-rank mask or equivalent, rather than
+reintroducing per-thread identity into the subgroup-level access record.
 
 On every `lds_load<T>` or `lds_store<T>`:
 
@@ -1091,7 +1165,13 @@ Incremental instrumented test growth:
 26. Explore automatic coalescing of access records only after site ids exist.
     Coalescing must be conservative, implicit, and keyed by nonzero site ids; if
     a site has repeated dynamic instances in one epoch or no recognized
-    regularity pattern, keep exact records.
+    regularity pattern, keep exact records. Done for the first thread-level
+    summary-only slice: contiguous and fixed-stride nonzero-site patterns are
+    summarized at epoch boundaries without changing exact diagnostics.
+27. Design subgroup-level coalescing proof metadata and only then consider
+    hot-path compression. The likely first proof artifact is a compact rank mask
+    per subgroup/site/epoch/kind, separate from the subgroup-level access
+    record so that the hot diagnostic record can keep omitting thread id.
 
 Layer 1: toy deterministic kernels.
 
@@ -1200,7 +1280,7 @@ library teaches us the right subgroup abstractions.
      assembly-level model.
    * Do not infer HIP-level cross-thread synchronization from naked fences.
 
-10. Keep automatic access coalescing as a possible later optimization.
+10. Keep automatic access coalescing conservative and implicit.
     * The user-facing API remains access-level: users call `ctx.lds_load` and
       `ctx.lds_store` at the places where HIP code actually loads and stores
       LDS.
@@ -1213,8 +1293,10 @@ library teaches us the right subgroup abstractions.
     * If a static site executes multiple dynamic instances in one epoch, leave
       it uncoalesced for that epoch. This keeps the initial model safe without
       solving dynamic instance identity.
-    * The first implementation should only record site ids and optionally report
-      coalescing opportunities; hot-path compression can come later.
+    * The first implementation records thread-level coalescing opportunities at
+      epoch boundaries in a separate summary buffer. Done.
+    * Hot-path compression can come later, after the summaries have been useful
+      in tests and after subgroup-level proof metadata has been designed.
 
 ## Plan beyond the MVP
 

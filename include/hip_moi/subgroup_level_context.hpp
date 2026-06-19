@@ -34,6 +34,20 @@ namespace hip_moi
             uint64_t  site_id;
         };
 
+        struct coalesced_access_record
+        {
+            uintptr_t first_address;
+            uint32_t  byte_count;
+            uint32_t  span_byte_count;
+            uint32_t  subgroup_id;
+            uint32_t  epoch;
+            uint32_t  kind;
+            uint32_t  participant_count;
+            uint32_t  valid;
+            int64_t   address_stride;
+            uint64_t  site_id;
+        };
+
         struct diagnostic
         {
             uint32_t  kind;
@@ -53,26 +67,34 @@ namespace hip_moi
             using access_record_type = access_record;
             using diagnostic_type    = diagnostic;
 
-            access_record*  access_records;
-            int             access_record_capacity;
-            diagnostic*     diagnostics;
-            int             diagnostic_capacity;
-            subgroup_state* subgroup_states;
-            int             subgroup_capacity;
-            int*            access_count;
-            int*            epoch_access_count;
-            int*            diagnostic_count;
+            access_record*           access_records;
+            int                      access_record_capacity;
+            diagnostic*              diagnostics;
+            int                      diagnostic_capacity;
+            subgroup_state*          subgroup_states;
+            int                      subgroup_capacity;
+            int*                     access_count;
+            int*                     epoch_access_count;
+            int*                     diagnostic_count;
+            coalesced_access_record* coalesced_access_records         = nullptr;
+            int                      coalesced_access_record_capacity = 0;
+            int*                     coalesced_access_count           = nullptr;
         };
 
-        template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
+        template <int AccessCapacity,
+                  int DiagnosticCapacity,
+                  int SubgroupCapacity        = 1,
+                  int CoalescedAccessCapacity = AccessCapacity>
         struct static_context_storage
         {
-            access_record  access_records[AccessCapacity];
-            diagnostic     diagnostics[DiagnosticCapacity];
-            subgroup_state subgroup_states[SubgroupCapacity];
-            int            access_count;
-            int            epoch_access_count;
-            int            diagnostic_count;
+            access_record           access_records[AccessCapacity];
+            diagnostic              diagnostics[DiagnosticCapacity];
+            subgroup_state          subgroup_states[SubgroupCapacity];
+            coalesced_access_record coalesced_access_records[CoalescedAccessCapacity];
+            int                     access_count;
+            int                     epoch_access_count;
+            int                     diagnostic_count;
+            int                     coalesced_access_count;
 
             __device__ storage_ref ref()
             {
@@ -86,6 +108,9 @@ namespace hip_moi
                     &access_count,
                     &epoch_access_count,
                     &diagnostic_count,
+                    coalesced_access_records,
+                    CoalescedAccessCapacity,
+                    &coalesced_access_count,
                 };
             }
         };
@@ -112,6 +137,10 @@ namespace hip_moi
                 {
                     *storage_.diagnostic_count = 0;
                 }
+                if(storage_.coalesced_access_count)
+                {
+                    *storage_.coalesced_access_count = 0;
+                }
                 for(int i = 0; storage_.subgroup_states && i < storage_.subgroup_capacity; ++i)
                 {
                     storage_.subgroup_states[i].epoch = 0;
@@ -119,6 +148,12 @@ namespace hip_moi
                 for(int i = 0; storage_.access_records && i < storage_.access_record_capacity; ++i)
                 {
                     storage_.access_records[i].valid = 0;
+                }
+                for(int i = 0; storage_.coalesced_access_records
+                               && i < storage_.coalesced_access_record_capacity;
+                    ++i)
+                {
+                    storage_.coalesced_access_records[i].valid = 0;
                 }
                 __threadfence();
             }
