@@ -83,3 +83,9 @@ thread's C accumulator fragment is a contiguous 32-byte object at byte offset
 diagnostic-positive neighbor-fragment overwrite. The packed A/B/C fragments are
 generated from logical tiles and checked against the same exact host-side
 reference matmul.
+
+`015_thread_level_subgroup_test.hip` starts multi-subgroup coverage for
+`thread-level` mode. It uses a 64-thread workgroup split into two 32-thread
+subgroups, checks `context` subgroup identity helpers, verifies subgroup ids in
+access records, and asserts both same-subgroup and cross-subgroup same-epoch
+diagnostics.

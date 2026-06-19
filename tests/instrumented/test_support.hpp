@@ -73,6 +73,11 @@ namespace hip_moi::test
             return diagnostics_;
         }
 
+        hip_moi::access_record* access_records_device() const
+        {
+            return access_records_;
+        }
+
         int* access_count_device() const
         {
             return access_count_;

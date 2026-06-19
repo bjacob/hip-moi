@@ -115,7 +115,7 @@ namespace hip_moi
 
         __device__ void init_workgroup()
         {
-            if(threadIdx.x == 0)
+            if(thread_id() == 0)
             {
                 if(storage_.access_count)
                 {
@@ -163,13 +163,17 @@ namespace hip_moi
         __device__ void syncthreads()
         {
             __syncthreads();
-            if(threadIdx.x == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
+            if(thread_id() == 0 && storage_.subgroup_states && storage_.subgroup_capacity > 0)
             {
                 if(storage_.epoch_access_count)
                 {
                     *storage_.epoch_access_count = 0;
                 }
-                ++storage_.subgroup_states[0].epoch;
+                int subgroup_count = stored_subgroup_count();
+                for(int i = 0; i < subgroup_count; ++i)
+                {
+                    ++storage_.subgroup_states[i].epoch;
+                }
                 __threadfence();
             }
             __syncthreads();
@@ -190,7 +194,12 @@ namespace hip_moi
             return cfg_;
         }
 
-    private:
+        __device__ uint32_t thread_id() const
+        {
+            return static_cast<uint32_t>(threadIdx.x
+                                         + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z));
+        }
+
         __device__ uint32_t subgroup_id() const
         {
             if(cfg_.threads_per_subgroup <= 0)
@@ -198,14 +207,37 @@ namespace hip_moi
                 return 0;
             }
 
-            uint32_t subgroup = static_cast<uint32_t>(threadIdx.x / cfg_.threads_per_subgroup);
-            if(cfg_.subgroup_count <= 0)
+            uint32_t subgroup = thread_id() / static_cast<uint32_t>(cfg_.threads_per_subgroup);
+            uint32_t subgroup_count = configured_subgroup_count();
+            return subgroup < subgroup_count ? subgroup : subgroup_count - 1;
+        }
+
+        __device__ uint32_t thread_rank_in_subgroup() const
+        {
+            if(cfg_.threads_per_subgroup <= 0)
+            {
+                return thread_id();
+            }
+            return thread_id() % static_cast<uint32_t>(cfg_.threads_per_subgroup);
+        }
+
+    private:
+        __device__ uint32_t configured_subgroup_count() const
+        {
+            return cfg_.subgroup_count > 0 ? static_cast<uint32_t>(cfg_.subgroup_count) : 1u;
+        }
+
+        __device__ int stored_subgroup_count() const
+        {
+            if(!storage_.subgroup_states || storage_.subgroup_capacity <= 0)
             {
                 return 0;
             }
 
-            uint32_t subgroup_count = static_cast<uint32_t>(cfg_.subgroup_count);
-            return subgroup < subgroup_count ? subgroup : subgroup_count - 1;
+            uint32_t configured_count = configured_subgroup_count();
+            uint32_t storage_capacity = static_cast<uint32_t>(storage_.subgroup_capacity);
+            return static_cast<int>(configured_count < storage_capacity ? configured_count
+                                                                        : storage_capacity);
         }
 
         __device__ uint32_t current_epoch(uint32_t subgroup) const
@@ -282,8 +314,7 @@ namespace hip_moi
         __device__ bool conflicts_with(const access_record& first,
                                        const access_record& second) const
         {
-            return first.valid && first.epoch == second.epoch
-                   && first.subgroup_id == second.subgroup_id && first.thread_id != second.thread_id
+            return first.valid && first.epoch == second.epoch && first.thread_id != second.thread_id
                    && (is_write(first.kind) || is_write(second.kind))
                    && byte_ranges_overlap(first, second);
         }
@@ -300,7 +331,7 @@ namespace hip_moi
             access_record record{
                 reinterpret_cast<uintptr_t>(ptr),
                 byte_count,
-                static_cast<uint32_t>(threadIdx.x),
+                thread_id(),
                 subgroup,
                 current_epoch(subgroup),
                 static_cast<uint32_t>(kind),

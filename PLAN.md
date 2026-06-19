@@ -144,6 +144,11 @@ foundation:
   store. The test includes a diagnostic-positive neighbor-fragment overwrite.
   The packed A/B/C fragments are generated from logical tiles and checked
   against the same exact host-reference matmul.
+* `tests/instrumented/015_thread_level_subgroup_test.hip` starts
+  multi-subgroup `thread-level` coverage. It uses a 64-thread workgroup split
+  into two 32-thread subgroups, checks the `context` thread/subgroup/rank
+  helpers, verifies subgroup ids recorded in access records, and asserts
+  same-subgroup and cross-subgroup same-epoch diagnostics.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -152,19 +157,18 @@ foundation:
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
   cases, epoch-boundary tests, first all-thread array cases, metadata capacity
   tests, looped epoch tests, tiled LDS tests, simple matmul-like tests,
-  pipeline-like matmul tests, and RDNA4 WMMA row-major/data-tiled tests exist.
-  Epoch-local access-log lifetime now exists. Multi-subgroup workgroups,
-  `subgroup-level` mode, diagnostic quality work, and low-overhead per-thread
-  logs are still future work.
+  pipeline-like matmul tests, RDNA4 WMMA row-major/data-tiled tests, and first
+  multi-subgroup `thread-level` tests exist. Epoch-local access-log lifetime now
+  exists. `subgroup-level` mode, diagnostic quality work, and low-overhead
+  per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: multi-subgroup groundwork and instrumentation-mode
-design. The immediate goal is to make subgroup identity operational, then decide
-how a `thread-level` HIP mode and a lower-overhead `subgroup-level` mode
-coexist without compromising either contract.
+Next implementation slice: `subgroup-level` mode design and first prototype.
+The immediate goal is to decide how `thread-level` HIP mode and lower-overhead
+`subgroup-level` mode coexist without compromising either contract.
 
 ## Foundations
 
@@ -753,6 +757,7 @@ tests/instrumented/
   012_matmul_pipeline_test.hip
   013_rdna4_wmma_row_major_test.hip
   014_rdna4_wmma_data_tiled_test.hip
+  015_thread_level_subgroup_test.hip
   test_support.hpp
 ```
 
@@ -788,6 +793,10 @@ inputs, and host-reference output checks.
 coverage for packed A/B/C fragments laid out at `lane * fragment_size` byte
 offsets, with packed data generated from logical tiles and checked against a
 host-reference matmul.
+`015_thread_level_subgroup_test.hip` asserts first multi-subgroup
+`thread-level` behavior: helper-derived subgroup identity, per-record subgroup
+ids, same-subgroup diagnostics, cross-subgroup diagnostics, and full-workgroup
+barrier separation across subgroups.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -828,7 +837,7 @@ Incremental instrumented test growth:
     and data-tiled packed fragments. Done.
 14. Add `thread-level` multi-subgroup tests: at least two subgroups in one
     workgroup, cross-subgroup conflicts, same-subgroup conflicts, and
-    full-workgroup synchronization separating subgroups.
+    full-workgroup synchronization separating subgroups. Done.
 15. Add `subgroup-level` mode tests: cross-subgroup conflicts still report,
     same-subgroup conflicts intentionally do not report, and the mode contract
     is visible in diagnostic metadata and host reports.
@@ -874,14 +883,15 @@ Layer 2: API behavior tests.
 The refined MVP is now defined less by diagnostic polish and more by whether the
 library teaches us the right subgroup abstractions.
 
-1. Make subgroup identity operational.
+1. Make subgroup identity operational. Done for the first `thread-level` slice.
    * Compute `subgroup_id` and thread rank within subgroup from runtime config.
    * Support `subgroup_count > 1` in storage initialization and epoch state.
    * Keep `ctx.syncthreads()` as a full-workgroup operation initially, advancing
      all subgroup epochs together.
    * Add two-subgroup tests using one workgroup.
 
-2. Preserve the existing `thread-level` HIP mode.
+2. Preserve the existing `thread-level` HIP mode. Done for first
+   multi-subgroup diagnostics.
    * Continue detecting same-epoch conflicts between any two different threads.
    * Include same-subgroup and cross-subgroup diagnostic-positive tests.
    * Keep this mode principled in the HIP/LLVM memory model.
