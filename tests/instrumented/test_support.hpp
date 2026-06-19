@@ -39,7 +39,8 @@ namespace hip_moi::test
     {
     public:
         using access_record = typename Context::access_record;
-        using coalesced_access_record = typename Context::coalesced_access_record;
+        using coalesced_access_record =
+            typename hip_moi::detail::optional_coalesced_access_record<Context>::type;
         using coalescing_access_record =
             typename hip_moi::detail::optional_coalescing_access_record<Context>::type;
         using coalescing_group_record =
@@ -47,6 +48,8 @@ namespace hip_moi::test
         using diagnostic    = typename Context::diagnostic;
         using storage_ref   = typename Context::storage_ref;
 
+        static constexpr bool has_coalesced_access_records
+            = hip_moi::detail::optional_coalesced_access_record<Context>::available;
         static constexpr bool has_coalescing_access_records
             = hip_moi::detail::optional_coalescing_access_record<Context>::available;
         static constexpr bool has_coalescing_group_records
@@ -98,9 +101,13 @@ namespace hip_moi::test
 
             HIP_MOI_TEST_HIP_ASSERT(
                 hipMalloc(&access_records_, access_capacity * sizeof(access_record)));
-            HIP_MOI_TEST_HIP_ASSERT(
-                hipMalloc(&coalesced_access_records_,
-                          coalesced_access_record_capacity_ * sizeof(coalesced_access_record)));
+            if constexpr(has_coalesced_access_records)
+            {
+                HIP_MOI_TEST_HIP_ASSERT(
+                    hipMalloc(&coalesced_access_records_,
+                              coalesced_access_record_capacity_ * sizeof(coalesced_access_record)));
+                HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalesced_access_count_, sizeof(int)));
+            }
             if constexpr(has_coalescing_access_records)
             {
                 HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalescing_access_count_, sizeof(int)));
@@ -130,7 +137,6 @@ namespace hip_moi::test
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&epoch_access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&diagnostic_count_, sizeof(int)));
-            HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&coalesced_access_count_, sizeof(int)));
         }
 
         storage_ref ref() const
@@ -160,7 +166,7 @@ namespace hip_moi::test
                     coalescing_group_count_,
                 };
             }
-            else
+            else if constexpr(has_coalesced_access_records)
             {
                 return storage_ref{
                     access_records_,
@@ -175,6 +181,20 @@ namespace hip_moi::test
                     coalesced_access_records_,
                     coalesced_access_record_capacity_,
                     coalesced_access_count_,
+                };
+            }
+            else
+            {
+                return storage_ref{
+                    access_records_,
+                    access_record_capacity_,
+                    diagnostics_,
+                    diagnostic_capacity_,
+                    subgroup_states_,
+                    subgroup_capacity_,
+                    access_count_,
+                    epoch_access_count_,
+                    diagnostic_count_,
                 };
             }
         }

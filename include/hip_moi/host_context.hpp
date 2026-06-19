@@ -108,7 +108,8 @@ namespace hip_moi
         public:
             using device_context = typename Traits::device_context;
             using access_record  = typename device_context::access_record;
-            using coalesced_access_record = typename device_context::coalesced_access_record;
+            using coalesced_access_record =
+                typename optional_coalesced_access_record<device_context>::type;
             using coalescing_access_record =
                 typename optional_coalescing_access_record<device_context>::type;
             using coalescing_group_record =
@@ -116,6 +117,8 @@ namespace hip_moi
             using diagnostic     = typename device_context::diagnostic;
             using storage_ref    = typename device_context::storage_ref;
 
+            static constexpr bool has_coalesced_access_records
+                = optional_coalesced_access_record<device_context>::available;
             static constexpr bool has_coalescing_access_records
                 = optional_coalescing_access_record<device_context>::available;
             static constexpr bool has_coalescing_group_records
@@ -185,7 +188,7 @@ namespace hip_moi
                         coalescing_group_count_,
                     };
                 }
-                else
+                else if constexpr(has_coalesced_access_records)
                 {
                     return storage_ref{
                         access_records_,
@@ -200,6 +203,20 @@ namespace hip_moi
                         coalesced_access_records_,
                         options_.coalesced_access_record_capacity,
                         coalesced_access_count_,
+                    };
+                }
+                else
+                {
+                    return storage_ref{
+                        access_records_,
+                        options_.access_record_capacity,
+                        diagnostics_,
+                        options_.diagnostic_capacity,
+                        subgroup_states_,
+                        options_.subgroup_capacity,
+                        access_count_,
+                        epoch_access_count_,
+                        diagnostic_count_,
                     };
                 }
             }
@@ -356,7 +373,6 @@ namespace hip_moi
             void validate_options_or_abort() const
             {
                 if(options_.access_record_capacity <= 0
-                   || options_.coalesced_access_record_capacity <= 0
                    || options_.coalescing_access_record_capacity < 0
                    || options_.coalescing_group_record_capacity < 0
                    || options_.diagnostic_capacity <= 0 || options_.subgroup_capacity <= 0)
@@ -376,6 +392,19 @@ namespace hip_moi
                     std::fflush(stderr);
                     std::abort();
                 }
+                if constexpr(has_coalesced_access_records)
+                {
+                    if(options_.coalesced_access_record_capacity <= 0)
+                    {
+                        std::fprintf(stderr,
+                                     "hip-moi: %s coalesced access capacity must be positive "
+                                     "(coalesced_access=%d)\n",
+                                     Traits::name(),
+                                     options_.coalesced_access_record_capacity);
+                        std::fflush(stderr);
+                        std::abort();
+                    }
+                }
             }
 
             void allocate_or_abort()
@@ -383,10 +412,15 @@ namespace hip_moi
                 hip_allocate_or_abort(&access_records_,
                                       options_.access_record_capacity * sizeof(access_record),
                                       "access_records");
-                hip_allocate_or_abort(&coalesced_access_records_,
-                                      options_.coalesced_access_record_capacity
-                                          * sizeof(coalesced_access_record),
-                                      "coalesced_access_records");
+                if constexpr(has_coalesced_access_records)
+                {
+                    hip_allocate_or_abort(&coalesced_access_records_,
+                                          options_.coalesced_access_record_capacity
+                                              * sizeof(coalesced_access_record),
+                                          "coalesced_access_records");
+                    hip_allocate_or_abort(
+                        &coalesced_access_count_, sizeof(int), "coalesced_access_count");
+                }
                 if constexpr(has_coalescing_access_records)
                 {
                     hip_allocate_or_abort(
@@ -425,8 +459,6 @@ namespace hip_moi
                 hip_allocate_or_abort(&access_count_, sizeof(int), "access_count");
                 hip_allocate_or_abort(&epoch_access_count_, sizeof(int), "epoch_access_count");
                 hip_allocate_or_abort(&diagnostic_count_, sizeof(int), "diagnostic_count");
-                hip_allocate_or_abort(
-                    &coalesced_access_count_, sizeof(int), "coalesced_access_count");
             }
 
             void clear_device_metadata_or_abort()
@@ -435,11 +467,16 @@ namespace hip_moi
                                     0,
                                     options_.access_record_capacity * sizeof(access_record),
                                     "access_records");
-                hip_memset_or_abort(coalesced_access_records_,
-                                    0,
-                                    options_.coalesced_access_record_capacity
-                                        * sizeof(coalesced_access_record),
-                                    "coalesced_access_records");
+                if constexpr(has_coalesced_access_records)
+                {
+                    hip_memset_or_abort(coalesced_access_records_,
+                                        0,
+                                        options_.coalesced_access_record_capacity
+                                            * sizeof(coalesced_access_record),
+                                        "coalesced_access_records");
+                    hip_memset_or_abort(
+                        coalesced_access_count_, 0, sizeof(int), "coalesced_access_count");
+                }
                 if constexpr(has_coalescing_access_records)
                 {
                     hip_memset_or_abort(
@@ -483,8 +520,6 @@ namespace hip_moi
                 hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
                 hip_memset_or_abort(epoch_access_count_, 0, sizeof(int), "epoch_access_count");
                 hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
-                hip_memset_or_abort(
-                    coalesced_access_count_, 0, sizeof(int), "coalesced_access_count");
             }
 
             template <typename T>

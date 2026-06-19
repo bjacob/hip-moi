@@ -131,12 +131,6 @@ record `site_id == 0`, explicit site ids are stored in access records, and both
 thread-level and subgroup-level diagnostics carry site ids without changing the
 detector's exact behavior.
 
-`021_coalescing_opportunity_test.hip` covers the first conservative use of
-nonzero site ids for regular-access summaries. Thread-level contiguous and
-fixed-stride sites produce one coalescing summary at `ctx.syncthreads()`, while
-default-site accesses, repeated dynamic instances, and irregular address
-patterns remain exact-only.
-
 `022_subgroup_level_coalescing_test.hip` covers subgroup-level coalescing access
 logs and summaries. It verifies that default site ids do not write coalescing
 access records, opted-in sites write one coalescing access record per lane and

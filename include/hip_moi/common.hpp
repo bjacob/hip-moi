@@ -62,6 +62,22 @@ namespace hip_moi
     namespace detail
     {
         template <typename Context, typename = void>
+        struct optional_coalesced_access_record
+        {
+            using type                      = unsigned char;
+            static constexpr bool available = false;
+        };
+
+        template <typename Context>
+        struct optional_coalesced_access_record<
+            Context,
+            std::void_t<typename Context::coalesced_access_record>>
+        {
+            using type                      = typename Context::coalesced_access_record;
+            static constexpr bool available = true;
+        };
+
+        template <typename Context, typename = void>
         struct optional_coalescing_access_record
         {
             using type                      = unsigned char;

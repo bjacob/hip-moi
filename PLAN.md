@@ -69,12 +69,12 @@ foundation:
   stores.
 * `docs/coalescing.md` explains the current coalescing model: users opt in with
   nonzero `site_id` values, default zero-site accesses remain exact-only, the
-  current implementation emits summaries at epoch boundaries, thread-level
-  summaries are still opportunity metadata, subgroup-level summaries now
+  current implementation emits subgroup-level summaries at epoch boundaries,
+  thread-level mode remains exact-record based, subgroup-level summaries
   participate in epoch-close conflict detection, subgroup-level mode proves
   summaries from a separate optional lane-based coalescing access log, and the
   detected patterns are currently limited to simple contiguous or fixed-stride
-  thread/lane-to-address shapes. For subgroup-level opted-in accesses,
+  lane-to-address shapes. For subgroup-level opted-in accesses,
   `coalescing_access_record` is also the hot-path access representation when
   storage is available; ordinary exact `access_record` logging is used only for
   default-site accesses and coalescing-access overflow/fallback. The doc now
@@ -222,11 +222,6 @@ foundation:
   ids, default accesses still record `site_id == 0`, explicit site ids are
   stored in access records, and both thread-level and subgroup-level
   diagnostics carry site ids without changing the detector's exact behavior.
-* `tests/instrumented/021_coalescing_opportunity_test.hip` covers the first
-  conservative thread-level coalescing-opportunity pass. It checks that
-  nonzero-site contiguous and fixed-stride all-thread stores produce one summary
-  at `ctx.syncthreads()`, while default-site, repeated dynamic-instance, and
-  irregular address patterns remain exact-only.
 * `tests/instrumented/022_subgroup_level_coalescing_test.hip` covers
   subgroup-level coalescing access logs and summaries. It checks that default
   site ids do not write coalescing access records, opted-in sites write one
@@ -263,11 +258,9 @@ foundation:
   notes are still future work. Exact `site_id` plumbing now exists: callers may
   pass an explicit `hip_moi::site_id`, `HIP_MOI_SITE_ID()` builds nonzero site
   ids by compile-time hashing, and access records plus diagnostics carry compact
-  numeric site ids. A first conservative thread-level coalescing-opportunity
-  pass now exists: at `ctx.syncthreads()`, exact access records from a just-ended
-  epoch are scanned for nonzero-site contiguous or fixed-stride thread-to-address
-  patterns, and summaries are written to a separate summary buffer. A matching
-  subgroup-level coalescing-access pass now exists: nonzero-site subgroup
+  numeric site ids. Thread-level coalescing has been dropped for now; thread-level
+  mode remains exact-record based because its contract requires per-thread race
+  visibility. The subgroup-level coalescing-access pass remains: nonzero-site subgroup
   accesses write lane/address `coalescing_access_record`s instead of ordinary
   exact `access_record`s when coalescing access storage is available, and
   `ctx.syncthreads()` summarizes proven contiguous or fixed-stride
@@ -275,7 +268,7 @@ foundation:
   epoch close: newly emitted summaries are compared with other summaries and
   with unsummarized exact or coalescing access records, then remaining
   unsummarized exact and coalescing access records are compared with each other.
-  Thread-level summaries remain opportunity metadata. The subgroup-level summary
+  The subgroup-level summary
   builder now avoids per-lane coalescing-access-log rescans for each candidate
   group by accumulating lane masks and endpoints in one scan and validating the
   fixed-stride pattern in one additional scan. Subgroup-level mode also has
@@ -285,8 +278,7 @@ foundation:
   across many distinct sites. Subgroup-level storage also tracks
   `coalescing_fallback_count`, the number of opted-in accesses that could not
   use the coalescing access log and therefore fell back to ordinary exact
-  records. Thread-level mode does not compress its hot access
-  log yet.
+  records.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
@@ -664,11 +656,10 @@ Notes:
   mode field.
 * `lds_load` and `lds_store` should take an optional `site_id` argument with
   default value `hip_moi::no_site_id`. The default `site_id{0}` means exact
-  logging only and does not allow coalescing. A nonzero site id opts that
-  access site into possible automatic coalescing, while preserving exact
-  diagnostic semantics as the fallback. The current implementation only writes
-  thread-level coalescing summaries at epoch boundaries; diagnostics still use
-  the exact access records.
+  logging only and does not allow coalescing. In subgroup-level mode, a nonzero
+  site id opts that access site into possible automatic coalescing when
+  coalescing storage is supplied, while preserving exact diagnostic semantics as
+  the fallback. In thread-level mode, site ids are diagnostic metadata only.
 * `site_id` should be a tiny explicit wrapper around `uint64_t`, not a naked
   integer in the public API. The explicit constructor and getter prevent
   accidental argument-order mixups, especially in `lds_store(ptr, value, site)`.
@@ -695,9 +686,9 @@ Notes:
   necessarily summarized by the leader's address. Any lower-overhead path should
   be automatic, implicit, and conservative: the user still instruments actual
   HIP LDS accesses, while the detector may coalesce records only when it proves
-  a regularity pattern for a nonzero `site_id`. The first summary pass recognizes
-  thread-level contiguous and fixed-stride patterns and records them separately;
-  it does not yet compress the hot access path.
+  a regularity pattern for a nonzero `site_id`. The active coalescing path is
+  subgroup-level only; the earlier thread-level summary experiment was removed
+  because it did not serve a clear optimization goal.
 * The target design is plain dissociation of mode-specific hot metadata:
   `thread-level` keeps per-thread identity in its records, while
   `subgroup-level` uses records and diagnostics shaped around
@@ -804,25 +795,11 @@ instrumented access call. That is intentional for now because it keeps the API
 close to ordinary HIP code: users instrument the LDS accesses they actually
 wrote.
 
-A possible later optimization may automatically coalesce multiple exact
-access-level records when they share a nonzero `site_id` and obey a provable
-regularity pattern, such as contiguous, fixed-stride, or known tile-shaped
-thread-to-address mappings. This should remain implicit: users still instrument
-the LDS accesses they actually wrote. If the detector cannot prove that
-coalescing is safe for a site in an epoch, it must fall back to exact records.
-Dynamic instance identity is intentionally out of scope at first. If the same
-thread/subgroup/site appears more than once in one epoch, treat that site as
-non-coalescible for that epoch.
-
-The current first step is not hot-path compression. `thread_level_context`
-records exact accesses as before, then at `ctx.syncthreads()` has one thread
-scan the just-ended epoch for nonzero-site regularity. When a site has one
-record per contiguous thread id and its addresses follow a non-overlapping
-fixed stride, hip-moi writes a `coalesced_access_record` summary. Default
-`site_id{0}` accesses, repeated dynamic instances at one site, and irregular
-address patterns remain exact-only. Thread-level summaries are currently
-diagnostic metadata and test or planning evidence; thread-level conflict
-diagnostics still come from the exact access log.
+Automatic coalescing is currently subgroup-level only. A possible later
+thread-level optimization would need a fresh design, not a mechanical mirror of
+the subgroup-level path, because thread-level diagnostics require per-thread
+race visibility. In thread-level mode, `site_id` remains useful diagnostic
+metadata but does not trigger summary construction.
 
 `subgroup_level_context` has separate summary storage and now produces summaries
 through a separate coalescing access path. Because subgroup-level ordinary exact
@@ -904,10 +881,9 @@ must be called uniformly by all threads in the workgroup.
 On `ctx.syncthreads()` in `thread-level` mode:
 
 1. Execute the real full-workgroup synchronization.
-2. Emit coalescing-opportunity summaries for nonzero-site exact records.
-3. Advance the epoch.
-4. Clear or logically invalidate access records from the previous epoch.
-5. Ensure detector metadata updates are complete before returning, using
+2. Advance the epoch.
+3. Clear or logically invalidate access records from the previous epoch.
+4. Ensure detector metadata updates are complete before returning, using
    detector-internal synchronization if needed.
 
 The actual call should preserve HIP semantics. If `ctx.syncthreads()` delegates
@@ -1291,9 +1267,10 @@ Incremental instrumented test growth:
 26. Explore automatic coalescing of access records only after site ids exist.
     Coalescing must be conservative, implicit, and keyed by nonzero site ids; if
     a site has repeated dynamic instances in one epoch or no recognized
-    regularity pattern, keep exact records. Done for the first thread-level
-    summary-only slice: contiguous and fixed-stride nonzero-site patterns are
-    summarized at epoch boundaries without changing exact diagnostics.
+    regularity pattern, keep exact records. Done for the subgroup-level path.
+    The first thread-level summary-only experiment was removed because it did
+    not provide a clear optimization win and would require a separate design to
+    preserve per-thread race visibility.
 27. Design subgroup-level coalescing access metadata and only then consider
     hot-path compression. The first path should be a separate optional
     coalescing access log keyed by subgroup/epoch/site/kind/byte size and
@@ -1342,6 +1319,11 @@ Incremental instrumented test growth:
     absent coalescing access storage, coalescing access overflow, repeated-lane
     summary-vs-unsummarized conflicts, and unsummarized read/read silence, and
     the tutorial has a compiled subgroup-level coalescing opt-in example.
+36. Drop the thread-level coalescing experiment. Done:
+    `thread_level_context` no longer owns coalesced summary storage or scans
+    epochs for regular access patterns, and the dedicated thread-level
+    coalescing-opportunity test target was removed. Thread-level site ids remain
+    as exact-record and diagnostic metadata.
 
 Layer 1: toy deterministic kernels.
 
@@ -1455,16 +1437,17 @@ library teaches us the right subgroup abstractions.
       `ctx.lds_store` at the places where HIP code actually loads and stores
       LDS.
     * A nonzero `site_id` marks an access site as eligible for possible
-      coalescing. `site_id{0}` means exact logging only.
+      coalescing in subgroup-level mode. `site_id{0}` means exact logging only.
     * Coalescing is allowed only when the detector proves a regularity pattern
       for records sharing epoch, subgroup, access kind, byte size, and site id.
       Candidate patterns include contiguous, fixed-stride, and eventually
-      tile-shaped thread-to-address mappings.
+      tile-shaped lane-to-address mappings.
     * If a static site executes multiple dynamic instances in one epoch, leave
       it uncoalesced for that epoch. This keeps the initial model safe without
       solving dynamic instance identity.
-    * The first implementation records thread-level coalescing opportunities at
-      epoch boundaries in a separate summary buffer. Done.
+    * The first thread-level summary experiment was removed. Thread-level mode
+      stays exact-record based for now because its diagnostics need per-thread
+      race visibility. Done.
     * Subgroup-level coalescing access metadata and summary-based conflict
       detection now exist. Done.
     * Subgroup-level exact pairwise work is now skipped for exact records covered
