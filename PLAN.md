@@ -184,6 +184,12 @@ foundation:
   separate cross-subgroup communication, looped conflict epochs, tiled row
   layouts, tiled row collisions, and matmul-shaped cooperative tile sharing with
   both safe and missing-barrier cases.
+* `tests/instrumented/018_rdna4_multisubgroup_wmma_data_tiled_test.hip` is a
+  gfx12-gated real WMMA bridge test under both modes. It uses a 64-thread
+  workgroup split into two 32-thread subgroups, data-tiled vector fragments,
+  double-buffered two-tile LDS staging, exact host-reference output checks, and
+  a missing-barrier cross-subgroup diagnostic case checked in both
+  `thread-level` and `subgroup-level` modes.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -199,19 +205,22 @@ foundation:
   The tutorial now presents thread-level and subgroup-level modes as peers, and
   the single-subgroup instrumented tests now mark themselves in their file names
   while checking subgroup-level silence for representative diagnostic-positive
-  intra-subgroup races.
-  Diagnostic quality work and low-overhead subgroup-representative logs are
-  still future work.
+  intra-subgroup races. The first real multi-subgroup RDNA4 WMMA data-tiled
+  test under both modes now exists. Diagnostic quality work, matching
+  multi-subgroup row-major WMMA coverage, and low-overhead
+  subgroup-representative logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: design the lower-overhead subgroup-representative
-recording path for tile-shaped accesses. The current `subgroup-level` mode still
-logs each instrumented access call; the next question is what explicit API can
-summarize a known collective/tile-shaped LDS footprint once per subgroup without
-pretending to summarize arbitrary per-thread pointer accesses.
+Next implementation slice: either add matching multi-subgroup row-major RDNA4
+WMMA coverage, or explicitly decide that the current data-tiled multi-subgroup
+test is enough real-kernel coverage for now and move to the lower-overhead
+subgroup-representative API design. The current `subgroup-level` mode still
+logs each instrumented access call; the representative question is what explicit
+API can summarize a known collective/tile-shaped LDS footprint once per subgroup
+without pretending to summarize arbitrary per-thread pointer accesses.
 
 ## Foundations
 
@@ -894,6 +903,7 @@ tests/instrumented/
   015_thread_level_subgroup_test.hip
   016_subgroup_level_bootstrap_test.hip
   017_subgroup_level_multisubgroup_test.hip
+  018_rdna4_multisubgroup_wmma_data_tiled_test.hip
   test_support.hpp
 ```
 
@@ -946,6 +956,10 @@ do not report, and the explicit `subgroup_level_context` surface is exercised.
 `017_subgroup_level_multisubgroup_test.hip` asserts richer subgroup-level
 multi-subgroup behavior: array, loop, tiled, and matmul-shaped cross-subgroup
 LDS sharing across a four-subgroup workgroup.
+`018_rdna4_multisubgroup_wmma_data_tiled_test.hip` asserts real RDNA4/gfx12
+multi-subgroup WMMA coverage under both modes: data-tiled vector fragment LDS
+staging, double-buffered two-tile loops, exact host-reference output checks, and
+cross-subgroup missing-barrier diagnostics.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -1005,10 +1019,13 @@ Incremental instrumented test growth:
 20. Rename single-subgroup instrumented tests with a fixed-width numeric prefix
     followed by `single_subgroup`, and add subgroup-level companion checks for
     deterministic diagnostic-positive single-subgroup race cases. Done.
-21. Prototype lower-overhead subgroup-representative logging for tile-shaped
+21. Add real multi-subgroup RDNA4 WMMA coverage under both `thread-level` and
+    `subgroup-level` modes. Done for the first data-tiled double-buffered
+    fragment-staging slice.
+22. Prototype lower-overhead subgroup-representative logging for tile-shaped
     accesses if the design is clear enough; otherwise document the blockers and
     keep using all-thread logging filtered by subgroup id.
-22. Improve diagnostic quality with labels/source locations and first-conflict
+23. Improve diagnostic quality with labels/source locations and first-conflict
     preservation.
 
 Layer 1: toy deterministic kernels.

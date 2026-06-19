@@ -117,3 +117,7 @@ hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_bootstrap_test
                   instrumented/016_subgroup_level_bootstrap_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_multisubgroup_test
                   instrumented/017_subgroup_level_multisubgroup_test.hip)
+if(_hip_moi_build_rdna4_tests)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_multisubgroup_wmma_data_tiled_test
+                    instrumented/018_rdna4_multisubgroup_wmma_data_tiled_test.hip)
+endif()

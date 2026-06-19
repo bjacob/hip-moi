@@ -107,3 +107,15 @@ It uses `subgroup_level_context` with the existing per-thread access records as
 a bootstrap, but changes the conflict predicate to subgroup identity:
 cross-subgroup same-epoch conflicts report, while same-subgroup conflicts
 intentionally do not report by this mode's contract.
+
+`017_subgroup_level_multisubgroup_test.hip` broadens `subgroup-level` coverage
+to a 128-thread, four-subgroup workgroup. It covers array, loop, tiled, and
+matmul-shaped LDS sharing patterns with both safe and missing-barrier
+cross-subgroup cases.
+
+`018_rdna4_multisubgroup_wmma_data_tiled_test.hip` is the first real
+multi-subgroup RDNA4 WMMA test under both modes. It uses a 64-thread workgroup
+split into two 32-thread subgroups, data-tiled vector fragments, double-buffered
+two-tile LDS staging, exact host-reference output checks, and a missing-barrier
+cross-subgroup diagnostic case checked in both `thread-level` and
+`subgroup-level` modes.
