@@ -98,23 +98,25 @@ foundation:
 * `tests/instrumented/009_tiled_lds_test.hip` covers 2D tiled LDS idioms:
   row-major copy, transpose, skewed stride, blocked layout, diagonal gather,
   striped load/store, and an unsynchronized transpose diagnostic case.
+* `tests/instrumented/010_matmul_like_test.hip` covers small cooperative LDS
+  matmul idioms: simple 2x2 and 4x4 tiles, a chunked K loop, and a scalar
+  missing-barrier diagnostic.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
   would risk. These atomics and fences are detector-internal and must not be
   treated as user-program synchronization by the shadow model.
 * Access logging, basic conflict diagnostics, host reporting, byte-range edge
-  cases, epoch-boundary tests, first all-thread array cases, and metadata
-  capacity tests, looped epoch tests, and tiled LDS tests exist. Epoch clearing,
-  broader real-kernel idioms, and low-overhead per-thread logs are still future
-  work.
+  cases, epoch-boundary tests, first all-thread array cases, metadata capacity
+  tests, looped epoch tests, tiled LDS tests, and simple matmul-like tests
+  exist. Epoch clearing and low-overhead per-thread logs are still future work.
 
 The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: add simple matmul-like LDS idioms, starting with a
-small pattern that keeps the current MVP synchronization contract intact.
+Next implementation slice: make access-log lifetime epoch-local so long
+synchronized loops do not consume capacity forever.
 
 ## Foundations
 
@@ -640,6 +642,7 @@ tests/instrumented/
   007_metadata_capacity_test.hip
   008_loop_epoch_test.hip
   009_tiled_lds_test.hip
+  010_matmul_like_test.hip
   test_support.hpp
 ```
 
@@ -660,6 +663,8 @@ buffer truncation behavior, including the user-facing host report.
 safe barriers and repeated missing-barrier diagnostics.
 `009_tiled_lds_test.hip` asserts 2D tile layouts, tiled gathers, and an
 unsynchronized transpose diagnostic.
+`010_matmul_like_test.hip` asserts cooperative LDS matmul-like access patterns
+and a scalar missing-barrier diagnostic.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -690,7 +695,9 @@ Incremental instrumented test growth:
 8. Add loops when repeated epochs are solid. Done.
 9. Add tiled LDS cases when the basic machinery has survived enough pressure.
    Done.
-10. Add matmul-like LDS cases.
+10. Add matmul-like LDS cases. Done.
+11. Add epoch-local access-log lifetime so long synchronized loops do not fill
+    the log with obsolete epochs.
 
 Layer 1: toy deterministic kernels.
 

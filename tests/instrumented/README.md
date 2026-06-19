@@ -53,3 +53,6 @@ diagnostics, and diagnostic epoch numbering across iterations.
 `009_tiled_lds_test.hip` covers 2D tiled LDS patterns: row-major, transpose,
 skewed stride, blocked layout, diagonal gather, striped load/store, and an
 unsynchronized transpose diagnostic case.
+
+`010_matmul_like_test.hip` covers small cooperative LDS matmul idioms: simple
+2x2 and 4x4 tiles, a chunked K loop, and a scalar missing-barrier diagnostic.
