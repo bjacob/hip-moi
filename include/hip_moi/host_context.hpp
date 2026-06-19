@@ -58,12 +58,28 @@ namespace hip_moi
                                           const thread_level_context::diagnostic& diagnostic_record,
                                           const char*                             kind_name)
             {
+                if(static_cast<diagnostic_kind>(diagnostic_record.kind)
+                   == diagnostic_kind::barrier_divergence)
+                {
+                    std::fprintf(stream,
+                                 "hip-moi diagnostic %d: kind=%s epoch=%u "
+                                 "expected_threads=%u observed_threads=%u "
+                                 "site_id=0x%llx\n",
+                                 index,
+                                 kind_name,
+                                 diagnostic_record.epoch,
+                                 diagnostic_record.expected_thread_count,
+                                 diagnostic_record.observed_thread_count,
+                                 static_cast<unsigned long long>(diagnostic_record.first_site_id));
+                    return;
+                }
+
                 std::fprintf(stream,
                              "hip-moi diagnostic %d: kind=%s epoch=%u "
                              "first_thread=%u second_thread=%u "
                              "first_addr=0x%llx second_addr=0x%llx "
                              "first_size=%u second_size=%u "
-                             "first_site=0x%llx second_site=0x%llx\n",
+                             "first_site_id=0x%llx second_site_id=0x%llx\n",
                              index,
                              kind_name,
                              diagnostic_record.epoch,
@@ -93,12 +109,28 @@ namespace hip_moi
                                   const subgroup_level_context::diagnostic& diagnostic_record,
                                   const char*                               kind_name)
             {
+                if(static_cast<diagnostic_kind>(diagnostic_record.kind)
+                   == diagnostic_kind::barrier_divergence)
+                {
+                    std::fprintf(stream,
+                                 "hip-moi diagnostic %d: kind=%s epoch=%u "
+                                 "expected_threads=%u observed_threads=%u "
+                                 "site_id=0x%llx\n",
+                                 index,
+                                 kind_name,
+                                 diagnostic_record.epoch,
+                                 diagnostic_record.expected_thread_count,
+                                 diagnostic_record.observed_thread_count,
+                                 static_cast<unsigned long long>(diagnostic_record.first_site_id));
+                    return;
+                }
+
                 std::fprintf(stream,
                              "hip-moi diagnostic %d: kind=%s epoch=%u "
                              "first_subgroup=%u second_subgroup=%u "
                              "first_addr=0x%llx second_addr=0x%llx "
                              "first_size=%u second_size=%u "
-                             "first_site=0x%llx second_site=0x%llx\n",
+                             "first_site_id=0x%llx second_site_id=0x%llx\n",
                              index,
                              kind_name,
                              diagnostic_record.epoch,
@@ -176,7 +208,7 @@ namespace hip_moi
                 diagnostics_consumed_ = false;
                 if constexpr(has_coalescing_access_records)
                 {
-                    return storage_ref{
+                    storage_ref ref{
                         access_records_,
                         access_record_capacity_,
                         diagnostics_,
@@ -198,10 +230,12 @@ namespace hip_moi
                         coalescing_group_record_capacity_,
                         coalescing_group_count_,
                     };
+                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    return ref;
                 }
                 else if constexpr(has_coalesced_access_records)
                 {
-                    return storage_ref{
+                    storage_ref ref{
                         access_records_,
                         access_record_capacity_,
                         diagnostics_,
@@ -215,10 +249,12 @@ namespace hip_moi
                         coalesced_access_record_capacity_,
                         coalesced_access_count_,
                     };
+                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    return ref;
                 }
                 else
                 {
-                    return storage_ref{
+                    storage_ref ref{
                         access_records_,
                         access_record_capacity_,
                         diagnostics_,
@@ -229,6 +265,8 @@ namespace hip_moi
                         epoch_access_count_,
                         diagnostic_count_,
                     };
+                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    return ref;
                 }
             }
 
@@ -378,6 +416,8 @@ namespace hip_moi
                     return "access_conflict";
                 case diagnostic_kind::metadata_full:
                     return "metadata_full";
+                case diagnostic_kind::barrier_divergence:
+                    return "barrier_divergence";
                 }
                 return "unknown";
             }
@@ -557,7 +597,7 @@ namespace hip_moi
                 }
                 append_slice_size<diagnostic>(&offset, diagnostic_capacity_);
                 append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
-                append_slice_size<int>(&offset, 3);
+                append_slice_size<int>(&offset, 4);
                 return offset;
             }
 
@@ -605,6 +645,7 @@ namespace hip_moi
                 assign_slice<int>(device_storage_, 1, &offset, &access_count_);
                 assign_slice<int>(device_storage_, 1, &offset, &epoch_access_count_);
                 assign_slice<int>(device_storage_, 1, &offset, &diagnostic_count_);
+                assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
                 layout_bytes_ = offset;
             }
 
@@ -884,6 +925,10 @@ namespace hip_moi
                 hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
                 hip_memset_or_abort(epoch_access_count_, 0, sizeof(int), "epoch_access_count");
                 hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
+                hip_memset_or_abort(simulated_barrier_arrival_count_,
+                                    0,
+                                    sizeof(int),
+                                    "simulated_barrier_arrival_count");
             }
 
             static void
@@ -923,6 +968,7 @@ namespace hip_moi
                 access_count_                  = nullptr;
                 epoch_access_count_            = nullptr;
                 diagnostic_count_              = nullptr;
+                simulated_barrier_arrival_count_ = nullptr;
                 coalesced_access_count_        = nullptr;
                 coalescing_access_count_       = nullptr;
                 epoch_coalescing_access_count_ = nullptr;
@@ -954,6 +1000,7 @@ namespace hip_moi
             int*                 access_count_          = nullptr;
             int*                 epoch_access_count_    = nullptr;
             int*                 diagnostic_count_      = nullptr;
+            int*                      simulated_barrier_arrival_count_   = nullptr;
             int*                     coalesced_access_count_   = nullptr;
             int*                      coalescing_access_count_       = nullptr;
             int*                      epoch_coalescing_access_count_ = nullptr;

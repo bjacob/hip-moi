@@ -147,3 +147,9 @@ coalesced summaries in deferred epoch-close conflict detection. It checks
 summary-vs-summary diagnostics, summary-vs-exact diagnostics, read/read
 silence, disjoint summaries, and fixed-stride gaps that overlap in span but not
 in represented per-lane byte ranges.
+
+`024_hard_synchronization_negative_test.hip` introduces non-hanging coverage for
+bad barrier patterns. It uses `ctx.simulate_syncthreads(participates)` as a
+uniform test-only call that records which threads would have reached a user
+barrier, reports `barrier_divergence` when participation is incomplete, and
+advances the modeled epoch only when all threads participate.

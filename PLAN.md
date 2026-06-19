@@ -243,6 +243,12 @@ foundation:
   unsummarized coalescing accesses, disjoint summaries, and fixed-stride gaps
   whose enclosing spans overlap but whose represented per-lane byte ranges do
   not.
+* `tests/instrumented/024_hard_synchronization_negative_test.hip` adds the first
+  non-hanging coverage for hard synchronization negatives. It uses
+  `ctx.simulate_syncthreads(participates)` as a uniform simulation call: all
+  threads execute the detector call, each thread declares whether it would have
+  reached the user barrier, incomplete participation emits
+  `barrier_divergence`, and complete participation advances the modeled epoch.
 * The current detector uses atomic reservation for access-log and diagnostic-log
   slots. Access records are published with a valid bit before scanning, avoiding
   the wavefront-divergent spinlock deadlock that a device-side metadata lock
@@ -260,7 +266,10 @@ foundation:
   while checking subgroup-level silence for representative diagnostic-positive
   intra-subgroup races. Real multi-subgroup RDNA4 WMMA bridge tests now exist
   for both data-tiled and row-major layouts under both modes. Diagnostic quality
-  work, access-level multi-subgroup refinement, and synchronization lowering
+  has a first user-facing polish slice: host reports now spell out
+  `first_site_id`/`second_site_id`, and the new simulated-barrier diagnostic
+  reports expected and observed thread counts instead of reusing access-conflict
+  wording. Access-level multi-subgroup refinement and synchronization lowering
   notes are still future work. Exact `site_id` plumbing now exists: callers may
   pass an explicit `hip_moi::site_id`, `HIP_MOI_SITE_ID()` builds nonzero site
   ids by compile-time hashing, and access records plus diagnostics carry compact
@@ -290,13 +299,11 @@ The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: improve diagnostics on top of the access-level
-instrumentation path. The near-term work should preserve first-conflict
-information, make host reports more useful now that site ids exist, keep
-expanding multi-subgroup tests that replace real LDS accesses with
-`ctx.lds_load`/`ctx.lds_store`, reduce remaining subgroup-level coalescing costs
-where that can be done without weakening correctness, and start recording
-lowering notes for `ctx.syncthreads()` and lower-level builtins.
+Next implementation slice: decide whether to take one more diagnostic-quality
+pass for source labels/first-useful-conflict stability, or move directly into
+the synchronization semantics ladder. The most natural semantic step is now
+synchronization-lowering notes followed by atomic access instrumentation without
+new ordering.
 
 ## Foundations
 
@@ -464,6 +471,8 @@ class thread_level_context {
     uint32_t second_size;
     uint64_t first_site_id;
     uint64_t second_site_id;
+    uint32_t expected_thread_count;
+    uint32_t observed_thread_count;
   };
 
   // Non-owning view of thread-level detector metadata buffers.
@@ -477,6 +486,7 @@ class thread_level_context {
     int* access_count;
     int* epoch_access_count;
     int* diagnostic_count;
+    int* simulated_barrier_arrival_count;
   };
 
   // Optional fixed-capacity storage helper for users who want static storage.
@@ -490,7 +500,7 @@ class thread_level_context {
 
   // Thread-level diagnostics report conflicts between distinct threads.
   // Provides init_workgroup, templated lds_load/lds_store, syncthreads,
-  // has_error/error_count, and thread/subgroup identity helpers.
+  // simulate_syncthreads, has_error/error_count, and thread/subgroup identity helpers.
 };
 
 class subgroup_level_context {
@@ -549,6 +559,8 @@ class subgroup_level_context {
     uint32_t second_size;
     uint64_t first_site_id;
     uint64_t second_site_id;
+    uint32_t expected_thread_count;
+    uint32_t observed_thread_count;
   };
 
   // Non-owning view of subgroup-level detector metadata buffers.
@@ -573,6 +585,7 @@ class subgroup_level_context {
     coalescing_group_record* coalescing_group_records;
     int coalescing_group_record_capacity;
     int* coalescing_group_count;
+    int* simulated_barrier_arrival_count;
   };
 
   template <int AccessCapacity, int DiagnosticCapacity, int SubgroupCapacity = 1>
@@ -1025,6 +1038,10 @@ struct diagnostic {
   uintptr_t second_addr;
   uint32_t first_size;
   uint32_t second_size;
+  uint64_t first_site_id;
+  uint64_t second_site_id;
+  uint32_t expected_thread_count;
+  uint32_t observed_thread_count;
 };
 ```
 
@@ -1040,6 +1057,10 @@ struct diagnostic {
   uintptr_t second_addr;
   uint32_t first_size;
   uint32_t second_size;
+  uint64_t first_site_id;
+  uint64_t second_site_id;
+  uint32_t expected_thread_count;
+  uint32_t observed_thread_count;
 };
 ```
 
@@ -1282,7 +1303,10 @@ Incremental instrumented test growth:
     access records and diagnostics without changing exact detector behavior.
     Done.
 23. Improve diagnostic quality with site ids, labels/source locations, and
-    first-conflict preservation.
+    first-conflict preservation. First slice done: host reports now use explicit
+    `first_site_id`/`second_site_id` labels for access conflicts, and
+    simulated-barrier diagnostics have dedicated expected/observed participant
+    wording. Source labels and first-useful-conflict stability remain open.
 24. Keep broadening ordinary access-level multi-subgroup coverage where it
     exercises real HIP code shapes.
 25. Start synchronization-lowering notes for `ctx.syncthreads()` and lower-level
@@ -1474,6 +1498,10 @@ library teaches us the right subgroup abstractions.
      one.
    * Add clearer mode-aware host diagnostics, especially for
      `subgroup-level` false negatives by design.
+   * First slice done: host reports now spell out `first_site_id` and
+     `second_site_id`, and `barrier_divergence` reports expected and observed
+     thread counts. Source labels and first-useful-conflict stability remain
+     open.
 
 9. Keep synchronization lowering notes on the horizon.
    * Compile tiny examples using `ctx.syncthreads()`, raw `__syncthreads()`,
@@ -1622,8 +1650,12 @@ Broaden the corpus before broadening the memory model too much.
 Add a way to test bad synchronization patterns that might otherwise hang.
 
 * Add simulation mode for synchronization APIs, where the library records
-  barrier intent without executing a real barrier.
-* Use simulation mode to diagnose missing participation in a barrier.
+  barrier intent without executing a divergent real barrier. Done for
+  `ctx.simulate_syncthreads(participates)`, a uniform detector call that counts
+  which threads would have reached the user barrier.
+* Use simulation mode to diagnose missing participation in a barrier. Done for
+  thread-level and subgroup-level contexts with `barrier_divergence`
+  diagnostics.
 * Keep real-barrier divergent tests separate, probably with process-level
   timeout handling if they are ever useful.
 

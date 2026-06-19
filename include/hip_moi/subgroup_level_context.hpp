@@ -90,6 +90,8 @@ namespace hip_moi
             uint32_t  second_size;
             uint64_t  first_site_id;
             uint64_t  second_site_id;
+            uint32_t  expected_thread_count = 0;
+            uint32_t  observed_thread_count = 0;
         };
 
         struct storage_ref
@@ -117,6 +119,7 @@ namespace hip_moi
             coalescing_group_record* coalescing_group_records         = nullptr;
             int                      coalescing_group_record_capacity = 0;
             int*                     coalescing_group_count           = nullptr;
+            int*                      simulated_barrier_arrival_count   = nullptr;
         };
 
         template <int AccessCapacity,
@@ -141,6 +144,7 @@ namespace hip_moi
             int                      epoch_coalescing_access_count;
             int                      coalescing_fallback_count;
             int                     coalescing_group_count;
+            int                      simulated_barrier_arrival_count;
 
             __device__ storage_ref ref()
             {
@@ -165,6 +169,7 @@ namespace hip_moi
                     coalescing_group_records,
                     CoalescingGroupCapacity,
                     &coalescing_group_count,
+                    &simulated_barrier_arrival_count,
                 };
             }
         };
@@ -210,6 +215,10 @@ namespace hip_moi
                 if(storage_.coalescing_group_count)
                 {
                     *storage_.coalescing_group_count = 0;
+                }
+                if(storage_.simulated_barrier_arrival_count)
+                {
+                    *storage_.simulated_barrier_arrival_count = 0;
                 }
                 for(int i = 0; storage_.subgroup_states && i < storage_.subgroup_capacity; ++i)
                 {
@@ -265,6 +274,39 @@ namespace hip_moi
                           "copyable type");
             record_access(ptr, sizeof(T), access_kind::store, site);
             *ptr = value;
+        }
+
+        __device__ void simulate_syncthreads(bool participates, site_id site = no_site_id)
+        {
+            if(!storage_.simulated_barrier_arrival_count)
+            {
+                return;
+            }
+
+            if(participates)
+            {
+                (void)atomicAdd(storage_.simulated_barrier_arrival_count, 1);
+            }
+
+            __syncthreads();
+            if(thread_id() == 0)
+            {
+                int observed_count = *storage_.simulated_barrier_arrival_count;
+                int expected_count = cfg_.thread_count > 0
+                                         ? cfg_.thread_count
+                                         : static_cast<int>(blockDim.x * blockDim.y * blockDim.z);
+                if(observed_count == expected_count)
+                {
+                    close_current_epoch(/*advance_epochs=*/true);
+                }
+                else
+                {
+                    emit_barrier_divergence(expected_count, observed_count, site);
+                }
+                *storage_.simulated_barrier_arrival_count = 0;
+                __threadfence();
+            }
+            __syncthreads();
         }
 
         __device__ void syncthreads()
@@ -1524,6 +1566,26 @@ namespace hip_moi
                                         record.byte_count,
                                         record.site_id,
                                         record.site_id,
+                                    });
+        }
+
+        __device__ void
+            emit_barrier_divergence(int expected_count, int observed_count, site_id site) const
+        {
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::barrier_divergence),
+                                        detail::current_epoch(storage_, /*subgroup=*/0),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        site.value(),
+                                        site.value(),
+                                        static_cast<uint32_t>(expected_count),
+                                        static_cast<uint32_t>(observed_count),
                                     });
         }
 

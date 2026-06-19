@@ -137,13 +137,14 @@ namespace hip_moi::test
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&epoch_access_count_, sizeof(int)));
             HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&diagnostic_count_, sizeof(int)));
+            HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&simulated_barrier_arrival_count_, sizeof(int)));
         }
 
         storage_ref ref() const
         {
             if constexpr(has_coalescing_access_records)
             {
-                return storage_ref{
+                storage_ref ref{
                     access_records_,
                     access_record_capacity_,
                     diagnostics_,
@@ -165,10 +166,12 @@ namespace hip_moi::test
                     coalescing_group_record_capacity_,
                     coalescing_group_count_,
                 };
+                ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                return ref;
             }
             else if constexpr(has_coalesced_access_records)
             {
-                return storage_ref{
+                storage_ref ref{
                     access_records_,
                     access_record_capacity_,
                     diagnostics_,
@@ -182,10 +185,12 @@ namespace hip_moi::test
                     coalesced_access_record_capacity_,
                     coalesced_access_count_,
                 };
+                ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                return ref;
             }
             else
             {
-                return storage_ref{
+                storage_ref ref{
                     access_records_,
                     access_record_capacity_,
                     diagnostics_,
@@ -196,6 +201,8 @@ namespace hip_moi::test
                     epoch_access_count_,
                     diagnostic_count_,
                 };
+                ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                return ref;
             }
         }
 
@@ -254,6 +261,11 @@ namespace hip_moi::test
             return diagnostic_count_;
         }
 
+        int* simulated_barrier_arrival_count_device() const
+        {
+            return simulated_barrier_arrival_count_;
+        }
+
     private:
         void release()
         {
@@ -302,6 +314,11 @@ namespace hip_moi::test
                 (void)hipFree(diagnostic_count_);
                 diagnostic_count_ = nullptr;
             }
+            if(simulated_barrier_arrival_count_)
+            {
+                (void)hipFree(simulated_barrier_arrival_count_);
+                simulated_barrier_arrival_count_ = nullptr;
+            }
             if(coalesced_access_count_)
             {
                 (void)hipFree(coalesced_access_count_);
@@ -338,6 +355,7 @@ namespace hip_moi::test
         int*                     access_count_                     = nullptr;
         int*                     epoch_access_count_               = nullptr;
         int*                     diagnostic_count_                 = nullptr;
+        int*                      simulated_barrier_arrival_count_   = nullptr;
         int*                     coalesced_access_count_           = nullptr;
         int*                      coalescing_access_count_           = nullptr;
         int*                      epoch_coalescing_access_count_     = nullptr;

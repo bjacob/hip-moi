@@ -406,6 +406,8 @@ namespace
         expect_contains(stderr_output, "hip-moi diagnostic 0: kind=access_conflict");
         expect_contains(stderr_output, "first_thread=");
         expect_contains(stderr_output, "second_thread=");
+        expect_contains(stderr_output, "first_site_id=");
+        expect_contains(stderr_output, "second_site_id=");
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
@@ -672,6 +674,8 @@ namespace
         expect_contains(stderr_output, "hip-moi diagnostic 0: kind=access_conflict");
         expect_contains(stderr_output, "first_subgroup=");
         expect_contains(stderr_output, "second_subgroup=");
+        expect_contains(stderr_output, "first_site_id=");
+        expect_contains(stderr_output, "second_site_id=");
         EXPECT_EQ(stderr_output.find("first_thread="), std::string::npos);
         EXPECT_EQ(stderr_output.find("second_thread="), std::string::npos);
 

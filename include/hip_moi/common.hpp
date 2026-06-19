@@ -49,9 +49,10 @@ namespace hip_moi
 
     enum class diagnostic_kind : uint32_t
     {
-        none            = 0,
-        access_conflict = 1,
-        metadata_full   = 2,
+        none               = 0,
+        access_conflict    = 1,
+        metadata_full      = 2,
+        barrier_divergence = 3,
     };
 
     struct subgroup_state
