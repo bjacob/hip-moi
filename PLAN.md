@@ -39,6 +39,16 @@ meeting ordinary HIP code where it is: users should instrument the LDS accesses
 they actually wrote, while the library improves diagnostics, multi-subgroup
 coverage, and synchronization modeling around that access-level API.
 
+Jakub's `/home/benoit/workspace/sanitizer-strategy` repository is now an
+explicit acceptance signal for this project. It frames the broader effort as a
+portfolio of ROCm correctness tools, with clear scope claims, deterministic
+reports where possible, fail-closed unsupported cases, and validation against
+real GEMM-style kernels. For hip-moi, the near-term translation is: prioritize
+ordinary LDS/shared-memory accesses in barrier-oriented kernels, multi-subgroup
+GEMM-shaped coverage, and low-overhead subgroup-level summaries. Atomics and
+fences remain important later memory-model work, but Jakub's current corpus
+points to waits/barriers and LDS access windows as the first path to value.
+
 ## Current status
 
 The repository has been initialized with the planning and test-harness
@@ -87,6 +97,16 @@ foundation:
   mode. Fine-grained typed capacities remain as advanced/test overrides, while
   `storage_ref` and `static_context_storage` remain available for users who
   deliberately provide their own storage.
+* Jakub's `/home/benoit/workspace/sanitizer-strategy` repository has been
+  studied for scoping and prioritization. The strongest signal for hip-moi is
+  the `rdna4_matmul/` harness: gfx1201 wave32 WMMA kernels using packed
+  data-tiled A/B/C fragments, all eight wavefronts of a 256-thread workgroup,
+  K-grouped LDS publication, no-pipeline/pipelined/double-buffered schedules,
+  deterministic missing-barrier negative variants, and exact small-integer
+  host-reference correctness checks. The strategy documents also make clear
+  that missing waits belong first to a final-ISA/static verifier, while
+  atomics/fences are later happens-before work rather than the immediate
+  dynamic LDS MVP.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -299,11 +319,13 @@ The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: decide whether to take one more diagnostic-quality
-pass for source labels/first-useful-conflict stability, or move directly into
-the synchronization semantics ladder. The most natural semantic step is now
-synchronization-lowering notes followed by atomic access instrumentation without
-new ordering.
+Next implementation slice: integrate Jakub's RDNA4 matmul corpus into hip-moi's
+own corpus. Do this in two phases: first add reference-only gfx12-gated cases
+that preserve the real kernel shapes and host-reference correctness checks;
+then instrument selected safe and missing-barrier variants with hip-moi. In
+parallel, tighten the documented scope boundary around unsupported raw
+accesses, atomics/fences, and missing-wait hazards, so unsupported cases are
+explicit coverage limits rather than silent promises.
 
 ## Foundations
 
@@ -384,6 +406,73 @@ not folklore. They are candidates for the actual model. This is why hip-moi
 should learn early how to represent multiple subgroups in one workgroup and how
 to focus on races between subgroups. Within-subgroup races remain possible
 research questions, but they are not the assembly-oriented MVP center of mass.
+
+## External strategy alignment
+
+Jakub's `sanitizer-strategy` repository should be treated as a product and
+acceptance signal. The recurring theme across the strategy notes is not "build
+one perfect sanitizer"; it is "build a portfolio of scoped tools that make
+clear claims and catch the real failures that matter to ROCm kernel authors,
+libraries, compilers, and agent-generated code."
+
+For hip-moi, the strongest near-term alignment points are:
+
+* Keep the primary dynamic tool focused on ordinary LDS/shared-memory accesses
+  and barrier epochs in real GEMM-like kernels.
+* Prefer deterministic diagnostics for the supported subset. If a faster mode
+  can miss bugs, say so explicitly and treat it as a sampled or approximate
+  signal, not as the exact contract.
+* Make unsupported cases loud in docs and APIs where possible. Raw LDS accesses
+  outside `ctx.lds_load`/`ctx.lds_store`, raw atomics/fences, and final-ISA
+  wait hazards are outside hip-moi's current source-level observation boundary.
+* Treat missing waits as a separate final-ISA/static-verifier problem. HIP-level
+  source instrumentation is not the right first tool for proving all required
+  `s_waitcnt` placement in generated assembly.
+* Treat atomics/fences as later happens-before modeling work. They are
+  semantically important, but Jakub's current GEMM corpus suggests that the
+  first useful dynamic LDS tool can reject or route them rather than implement a
+  full atomic/fence protocol immediately.
+* Keep subgroup-level mode central. The LDSSan-style sketch in the strategy
+  notes summarizes accesses by workgroup, barrier epoch, subgroup, access site,
+  active mask, access kind, width, and LDS address window. That is very close
+  to hip-moi's subgroup-level/coalescing direction.
+
+Jakub's `rdna4_matmul/` harness is the immediate corpus to integrate. It
+contains a self-contained gfx1201 wave32 WMMA testbed with:
+
+* packed WMMA data-tiled A, B, and C layout;
+* a production-shaped 16x8 WMMA-tile workgroup, eight wavefronts, and 256
+  threads;
+* smaller 8x8 and custom wave-grid variants;
+* FP16 and FP8 rows;
+* K-grouped LDS publication;
+* no-pipeline, pipelined, and double-buffered schedules;
+* racy variants for missing load/compute barriers and missing reuse barriers,
+  including deterministic conditional-barrier variants;
+* exact small-integer host-reference correctness checks and sampled large-shape
+  checks;
+* micro tests for LDS granularity, byte/cross-dword overlaps, same-wave write
+  collisions, probabilistic watchpoints, and hot-site sampling.
+
+Do not copy all of that machinery wholesale. The integration path should be:
+
+1. Add a reference-only hip-moi corpus slice that borrows the kernel shapes and
+   host-reference checking, not Jakub's inline TSAN policy implementation.
+2. Start with FP16 packed/data-tiled A/B/C and the production-shaped 16x8
+   pipelined schedule, because it is the clearest real-world bridge and already
+   matches hip-moi's tutorial direction.
+3. Add no-pipeline and double-buffered reference variants once the first
+   production-shaped reference passes.
+4. Add deterministic missing-barrier references that compile but are either not
+   launched or are launched only when wrapped by hip-moi instrumentation that
+   can diagnose them without relying on numeric output.
+5. Instrument selected variants with `subgroup_level_context` first, then with
+   `thread_level_context` only where the HIP-language per-thread contract adds
+   useful information.
+6. Keep Jakub's probabilistic, sampled, and same-wave policies as comparison
+   targets for future design. Same-wave checks matter for the future
+   assembly/DBI path, but they should not distract the immediate hip-moi MVP
+   from cross-subgroup LDS/barrier behavior.
 
 ## MVP
 
@@ -1180,6 +1269,12 @@ tests/instrumented/
   016_subgroup_level_bootstrap_test.hip
   017_subgroup_level_multisubgroup_test.hip
   018_rdna4_multisubgroup_wmma_data_tiled_test.hip
+  019_rdna4_multisubgroup_wmma_row_major_test.hip
+  020_site_id_test.hip
+  022_subgroup_level_coalescing_test.hip
+  023_subgroup_level_coalesced_conflict_test.hip
+  024_hard_synchronization_negative_test.hip
+  025_rdna4_jakub_packed_wmma_test.hip
   test_support.hpp
 ```
 
@@ -1236,6 +1331,33 @@ LDS sharing across a four-subgroup workgroup.
 multi-subgroup WMMA coverage under both modes: data-tiled vector fragment LDS
 staging, double-buffered two-tile loops, exact host-reference output checks, and
 cross-subgroup missing-barrier diagnostics.
+`019_rdna4_multisubgroup_wmma_row_major_test.hip` is the matching row-major
+bridge test under both modes.
+`020_site_id_test.hip` asserts exact source-site id plumbing and diagnostic
+metadata.
+`022_subgroup_level_coalescing_test.hip` asserts subgroup-level coalescing
+access logs and summaries.
+`023_subgroup_level_coalesced_conflict_test.hip` asserts subgroup-level
+coalesced summaries in conflict detection.
+`024_hard_synchronization_negative_test.hip` asserts simulated hard
+synchronization diagnostics without executing divergent real barriers.
+`025_rdna4_jakub_packed_wmma_test.hip` should be the first instrumented follow
+up to the Jakub reference bridge: a gfx12-gated subgroup-level hip-moi test for
+selected safe and missing-barrier packed FP16 WMMA variants.
+
+Planned reference corpus additions:
+
+```text
+tests/reference/
+  mvp_reference_kernels.hip
+  rdna4_jakub_matmul_reference.hip
+```
+
+`rdna4_jakub_matmul_reference.hip` should be the first integration point for
+`sanitizer-strategy/rdna4_matmul`: a gfx12-gated reference-only test that
+borrows the production-shaped packed FP16 WMMA kernel structure and
+host-reference correctness checks, but does not copy Jakub's inline TSAN policy
+machinery.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -1399,6 +1521,41 @@ Incremental instrumented test growth:
       asks for more subgroups than storage represents.
     * Keep tuning the auto-partition heuristic as real kernels teach us better
       ratios. This is no longer a blocker for The context allocation plan.
+39. Study Jakub's `sanitizer-strategy` repository and update scope. Done.
+    The plan now treats the repo as an acceptance signal: immediate work should
+    target ordinary LDS/shared-memory accesses, barrier epochs, multi-subgroup
+    GEMM-shaped kernels, explicit unsupported-case boundaries, and reference
+    integration from `rdna4_matmul/`.
+40. Add the first Jakub-corpus reference bridge.
+    * Create a gfx12-gated reference-only test derived from
+      `sanitizer-strategy/rdna4_matmul`.
+    * Start with FP16, packed/data-tiled A/B/C, production 16x8 WMMA-tile
+      workgroup, eight wavefronts, KGroup=2, and the pipelined schedule.
+    * Keep exact small-integer input generation and host-reference output
+      checks.
+    * Do not copy Jakub's inline Loom/probabilistic/same-wave policy layer into
+      hip-moi.
+41. Broaden the Jakub reference bridge.
+    * Add no-pipeline and double-buffered FP16 variants.
+    * Add deterministic missing-barrier variants as reference shapes.
+    * Add FP8 only after FP16 integration is stable, because FP16 already gives
+      the core WMMA/LDS/barrier shape with simpler value reasoning.
+42. Instrument selected Jakub-corpus variants.
+    * Start with the subgroup-level mode, because this is the clearest bridge to
+      the LDSSan/assembly-oriented direction.
+    * Instrument one safe pipelined packed FP16 variant and assert exact output
+      plus zero diagnostics.
+    * Instrument one missing load/compute barrier variant and one missing reuse
+      barrier variant and assert deterministic diagnostics.
+    * Add thread-level mirrors only where they teach something beyond the
+      subgroup-level contract.
+43. Add an unsupported-boundary pass.
+    * Document and, where an API exists, test that raw LDS accesses are outside
+      the observation boundary.
+    * Add explicit "unsupported sync" notes or hooks for atomics/fences before
+      implementing a full atomic/fence happens-before model.
+    * Keep missing waits documented as a final-ISA/static-verifier problem, not
+      as a promise of HIP source-level instrumentation.
 
 Layer 1: toy deterministic kernels.
 
@@ -1634,13 +1791,21 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 
 Broaden the corpus before broadening the memory model too much.
 
+* Treat `/home/benoit/workspace/sanitizer-strategy/rdna4_matmul` as the first
+  acceptance corpus. Integrate it reference-first, then instrument selected
+  variants.
 * Extract more LDS tiling patterns from
-  `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip`.
+  `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` after the Jakub bridge
+  is underway.
 * Cover vectorized LDS accesses.
 * Cover double-buffered LDS.
 * Cover repeated tile loops with multiple synchronization phases.
 * Keep RDNA4/gfx12-specific WMMA coverage split by input layout: conventional
   row-major tiles and data-tiled packed fragments.
+* Add a production-shaped packed/data-tiled FP16 WMMA reference with eight
+  wavefronts, 256 threads, KGroup=2, and exact host-reference checks.
+* Add deterministic missing-barrier variants modeled after Jakub's missing
+  load/compute barrier and missing compute/load reuse barrier rows.
 * For each useful real-kernel idiom, decide whether it belongs in
   `thread-level` mode, `subgroup-level` mode, or both.
 * Keep atomics out of these tests until the atomic model exists.
