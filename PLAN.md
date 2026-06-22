@@ -40,14 +40,22 @@ they actually wrote, while the library improves diagnostics, multi-subgroup
 coverage, and synchronization modeling around that access-level API.
 
 Jakub's `/home/benoit/workspace/sanitizer-strategy` repository is now an
-explicit acceptance signal for this project. It frames the broader effort as a
-portfolio of ROCm correctness tools, with clear scope claims, deterministic
-reports where possible, fail-closed unsupported cases, and validation against
-real GEMM-style kernels. For hip-moi, the near-term translation is: prioritize
-ordinary LDS/shared-memory accesses in barrier-oriented kernels, multi-subgroup
-GEMM-shaped coverage, and low-overhead subgroup-level summaries. Atomics and
-fences remain important later memory-model work, but Jakub's current corpus
-points to waits/barriers and LDS access windows as the first path to value.
+explicit acceptance signal for this project, and it is more than a planning
+corpus. It compares two concrete approaches: an LLVM RFC/KCSAN-style sampled
+watchpoint sanitizer and the HRX/Loom AMDGPU TSAN design. Jakub then
+reimplemented both approaches as a self-contained HIP prototype in
+`rdna4_matmul/rdna4_matmul.hip` and benchmarked them on real RDNA4 GEMM-shaped
+kernels. The updated project bias is clear: study Loom as the primary design
+source, use Jakub's HIP implementation as the executable prototype, and keep
+the RFC path as an important comparison point rather than the leading design.
+
+Overhead is now a first-class correctness-of-the-project concern. Real GEMM
+kernels are already tuned to use most of the available VGPR space. Extra
+instrumentation VGPRs can cause spills, and those spills become global-memory
+traffic that dominates the measured slowdown. hip-moi should therefore judge
+candidate designs not only by logical coverage, but also by hot-path global
+memory operations, VGPR pressure, scratch/private memory, code size, and whether
+the design survives production-shaped kernels rather than only toy LDS tests.
 
 ## Current status
 
@@ -98,15 +106,23 @@ foundation:
   `storage_ref` and `static_context_storage` remain available for users who
   deliberately provide their own storage.
 * Jakub's `/home/benoit/workspace/sanitizer-strategy` repository has been
-  studied for scoping and prioritization. The strongest signal for hip-moi is
-  the `rdna4_matmul/` harness: gfx1201 wave32 WMMA kernels using packed
-  data-tiled A/B/C fragments, all eight wavefronts of a 256-thread workgroup,
-  K-grouped LDS publication, no-pipeline/pipelined/double-buffered schedules,
-  deterministic missing-barrier negative variants, and exact small-integer
-  host-reference correctness checks. The strategy documents also make clear
-  that missing waits belong first to a final-ISA/static verifier, while
-  atomics/fences are later happens-before work rather than the immediate
-  dynamic LDS MVP.
+  studied for scoping and prioritization twice: first as an acceptance corpus,
+  and then as a concrete RFC-vs-Loom strategy prototype. The strongest signal
+  is now the combination of the authoritative HRX/Loom implementation and
+  Jakub's `rdna4_matmul/` HIP reimplementation. Loom's relevant LDS strategy is
+  compact per-workgroup shadow memory: one 64-bit shadow entry per LDS granule
+  by default, plus a workgroup epoch header, with access kind, local workitem
+  id, epoch, dispatch generation, and site id packed into the entry. Each
+  observed access updates one shadow slot and checks the previous value for a
+  same-epoch cross-thread conflict. Jakub's benchmarks make clear that this
+  design direction should be judged by production GEMM spill/VGPR behavior, not
+  only by isolated LDS helper-call cost.
+* The RFC/KCSAN-style path is still important context but is no longer the
+  default design target for hip-moi. In Jakub's harness it maps the sampled
+  watchpoint idea onto LDS ranges; it can be cheaper in an isolated LDS
+  microbenchmark, but in production GEMM rows it can lose badly because table
+  probes and additional live state push already register-heavy kernels into
+  spills/private memory.
 * `tests/reference/rdna4_jakub_matmul_reference.hip` now starts the Jakub corpus
   bridge. It is gfx12-gated and reference-only: FP16 packed/data-tiled A/B/C,
   production 16x8 WMMA-tile workgroup shape, 256 threads, eight wavefronts,
@@ -326,15 +342,19 @@ The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: instrument selected variants from the Jakub RDNA4
-reference bridge. Start with `subgroup_level_context`, because that is the
-clearest bridge to the LDSSan/assembly-oriented direction. The first target is
-the safe pipelined packed FP16 production shape with exact output and zero
-diagnostics. Then add missing load/compute and missing compute/load reuse
-barrier variants that assert deterministic diagnostics. In parallel, tighten
-the documented scope boundary around unsupported raw accesses, atomics/fences,
-and missing-wait hazards, so unsupported cases are explicit coverage limits
-rather than silent promises.
+Next implementation slice: prototype a Loom-style shadow-memory path in
+hip-moi before adding more Jakub instrumented variants on top of the current
+append-log detector. The current detector remains valuable as an exact
+debug/test scaffold, but Jakub's data says the serious performance-oriented
+track should learn from Loom directly: compact per-workgroup shadow storage,
+LDS-granule indexing from an explicit or derivable LDS byte offset, epoch
+increments at barriers, one hot-path shadow update per instrumented access, and
+cold diagnostics/report counting. Once that path exists, instrument selected
+Jakub RDNA4 packed FP16 variants with it: safe pipelined production shape first,
+then missing load/compute and missing compute/load reuse barriers. In parallel,
+tighten the documented scope boundary around unsupported raw accesses,
+atomics/fences, and missing-wait hazards, so unsupported cases are explicit
+coverage limits rather than silent promises.
 
 ## Foundations
 
@@ -418,19 +438,79 @@ research questions, but they are not the assembly-oriented MVP center of mass.
 
 ## External strategy alignment
 
-Jakub's `sanitizer-strategy` repository should be treated as a product and
-acceptance signal. The recurring theme across the strategy notes is not "build
-one perfect sanitizer"; it is "build a portfolio of scoped tools that make
-clear claims and catch the real failures that matter to ROCm kernel authors,
-libraries, compilers, and agent-generated code."
+Jakub's `sanitizer-strategy` repository should be treated as both a product
+signal and a technical design signal. The recurring theme across the strategy
+notes is not "build one perfect sanitizer"; it is "build a portfolio of scoped
+tools that make clear claims and catch the real failures that matter to ROCm
+kernel authors, libraries, compilers, and agent-generated code." The new
+understanding is that Jakub has already prototyped the most relevant design
+tradeoffs in HIP.
 
-For hip-moi, the strongest near-term alignment points are:
+There are two concrete approaches to track:
 
-* Keep the primary dynamic tool focused on ordinary LDS/shared-memory accesses
-  and barrier epochs in real GEMM-like kernels.
+* RFC/KCSAN-style sampled watchpoints. The LLVM RFC proposes probabilistic GPU
+  race detection inspired by KCSAN. Jakub adapts the idea to LDS ranges in his
+  HIP harness. This path has a natural low-memory story and no false positives
+  at the stated granularity, but it is sampled: rare races may require many
+  runs or may be missed. Jakub's production GEMM measurements also show a
+  practical risk that table probes and extra live state create spills/private
+  memory even when the isolated LDS-helper microbenchmark looks competitive.
+* HRX/Loom-style shadow memory. Loom inserts `sanitizer.race.access` and
+  `sanitizer.race.sync` observations, proves that the observed memory is
+  workgroup/LDS memory, and lowers those observations on AMDGPU to compact
+  per-workgroup shadow storage. The HIP prototype mirrors the key ABI facts:
+  one 64-bit shadow entry per 4-byte LDS granule by default, a per-workgroup
+  epoch header, access kind/local workitem id/epoch/generation/site id packed
+  into the entry, and a same-epoch conflict predicate on the previous shadow
+  value. This is now the primary design to study and prototype in hip-moi.
+
+Important Loom details to preserve:
+
+* The authoritative implementation is the HRX/Loom lowering, not only the HIP
+  prototype. The HIP prototype is valuable because it makes the design runnable
+  and benchmarkable in exactly the kind of kernels hip-moi cares about.
+* Loom observes source/IR memory events, but the lowered hot path is close to
+  hardware: compute an LDS-relative byte offset, map it to a shadow slot, pack a
+  compact current entry, perform a global-memory shadow update, decode the prior
+  entry, and branch to a cold report path only on conflict.
+* Barrier observations advance the per-workgroup epoch. Jakub's HIP wrapper
+  does this as real `__syncthreads()`, one workgroup-leader epoch increment,
+  then another `__syncthreads()`. HRX lowers a workgroup race-sync observation
+  to a leader-only global atomic add and a barrier.
+* The compact shadow entry stores only one previous access per granule. This is
+  a deliberate performance tradeoff, not a full per-epoch access history. It is
+  deterministic rather than sampled, but hip-moi must state coverage carefully
+  if it adopts this path.
+* The user/API shape probably needs LDS-relative byte offsets or a wrapper that
+  can derive them. Jakub's helpers take `(ptr, runtime, byte_offset, site_id)`;
+  a pointer-only `ctx.lds_load(&lds[i])` API is not obviously enough for a
+  Loom-style shadow index without additional base/offset information.
+
+Performance lessons from Jakub's benchmarks:
+
+* Full Loom is not intrinsically cheaper than RFC per isolated LDS helper call.
+  The isolated LDS microbenchmark shows RFC-style probing can be faster than
+  full Loom.
+* Production GEMM reverses that local conclusion. RFC can push already
+  register-heavy kernels over a spill/code-size cliff, while Loom's compact
+  shadow path remains more viable on those rows.
+* VGPR pressure, static scratch/private memory, and code size must become
+  routine acceptance metrics. `ctest` correctness is necessary but insufficient
+  for this project.
+* Same-wave bitset/sample checks are useful DBI/assembly-level complements, but
+  they are a separate hazard class from the cross-subgroup missing-barrier LDS
+  races that currently drive hip-moi.
+
+For hip-moi, the near-term alignment points are:
+
+* Keep the dynamic HIP-language tool focused on ordinary LDS/shared-memory
+  accesses and barrier epochs in real GEMM-like kernels.
+* Move the next serious implementation track toward a Loom-style shadow-memory
+  path, while keeping the current append-log detector as an exact scaffold and
+  regression oracle.
 * Prefer deterministic diagnostics for the supported subset. If a faster mode
-  can miss bugs, say so explicitly and treat it as a sampled or approximate
-  signal, not as the exact contract.
+  can miss bugs because it is sampled or because it keeps only compact
+  last-access shadow state, say so explicitly.
 * Make unsupported cases loud in docs and APIs where possible. Raw LDS accesses
   outside `ctx.lds_load`/`ctx.lds_store`, raw atomics/fences, and final-ISA
   wait hazards are outside hip-moi's current source-level observation boundary.
@@ -441,12 +521,8 @@ For hip-moi, the strongest near-term alignment points are:
   semantically important, but Jakub's current GEMM corpus suggests that the
   first useful dynamic LDS tool can reject or route them rather than implement a
   full atomic/fence protocol immediately.
-* Keep subgroup-level mode central. The LDSSan-style sketch in the strategy
-  notes summarizes accesses by workgroup, barrier epoch, subgroup, access site,
-  active mask, access kind, width, and LDS address window. That is very close
-  to hip-moi's subgroup-level/coalescing direction.
 
-Jakub's `rdna4_matmul/` harness is the immediate corpus to integrate. It
+Jakub's `rdna4_matmul/` harness remains the immediate corpus to integrate. It
 contains a self-contained gfx1201 wave32 WMMA testbed with:
 
 * packed WMMA data-tiled A, B, and C layout;
@@ -461,27 +537,24 @@ contains a self-contained gfx1201 wave32 WMMA testbed with:
 * exact small-integer host-reference correctness checks and sampled large-shape
   checks;
 * micro tests for LDS granularity, byte/cross-dword overlaps, same-wave write
-  collisions, probabilistic watchpoints, and hot-site sampling.
+  collisions, probabilistic watchpoints, sampled Loom, and hot-site sampling.
 
-Do not copy all of that machinery wholesale. The integration path should be:
+Integration path:
 
-1. Add a reference-only hip-moi corpus slice that borrows the kernel shapes and
-   host-reference checking, not Jakub's inline TSAN policy implementation.
-2. Start with FP16 packed/data-tiled A/B/C and the production-shaped 16x8
-   pipelined schedule, because it is the clearest real-world bridge and already
-   matches hip-moi's tutorial direction.
-3. Add no-pipeline and double-buffered reference variants once the first
-   production-shaped reference passes.
-4. Add deterministic missing-barrier references that compile but are either not
-   launched or are launched only when wrapped by hip-moi instrumentation that
-   can diagnose them without relying on numeric output.
-5. Instrument selected variants with `subgroup_level_context` first, then with
-   `thread_level_context` only where the HIP-language per-thread contract adds
-   useful information.
-6. Keep Jakub's probabilistic, sampled, and same-wave policies as comparison
-   targets for future design. Same-wave checks matter for the future
-   assembly/DBI path, but they should not distract the immediate hip-moi MVP
-   from cross-subgroup LDS/barrier behavior.
+1. Keep the reference-only hip-moi corpus slice that borrows kernel shapes and
+   host-reference checking without needing any hip-moi instrumentation. This is
+   already started for safe FP16 no-pipeline, pipelined, and double-buffered
+   variants.
+2. Add a Loom-style hip-moi implementation path inspired closely by HRX/Loom
+   and Jakub's `tsan::LoomPolicy`.
+3. Use the Jakub reference bridge as the first serious testbed for that path:
+   safe packed FP16 production shape first, then deterministic missing
+   load/compute and missing compute/load reuse barrier variants.
+4. Preserve RFC/probabilistic and sampled Loom as comparison targets. They are
+   useful for understanding the design space, but hip-moi should not optimize
+   around them before it has a credible Loom baseline.
+5. Revisit same-wave bitset/sample checks after the Loom-style path is in place,
+   especially for the future assembly/DBI effort.
 
 ## MVP
 
@@ -929,6 +1002,38 @@ threads within one subgroup. The current implementation still records each
 instrumented access call. That is intentional for now because it keeps the API
 close to ordinary HIP code: users instrument the LDS accesses they actually
 wrote.
+
+New Loom-style implementation track:
+
+* Treat the current append-log detector as an exact debug scaffold and test
+  oracle, not necessarily as the production-oriented endpoint.
+* Add a separate Loom-style shadow-memory path, likely starting under
+  `subgroup-level` because cross-subgroup missing-barrier races are the main
+  RDNA4 GEMM target.
+* Shadow storage should be sized from workgroup count, modeled LDS byte extent,
+  and granule size: one workgroup header plus one 64-bit shadow entry per LDS
+  granule. The default granule should match Loom/Jakub first: 4 bytes.
+* The hot access path should avoid append-log counters and epoch-close scans:
+  compute the LDS-relative byte offset, compute the shadow entry address, load
+  or exchange/CAS the prior 64-bit shadow value, pack and publish the current
+  value, and check the prior value in registers for a same-epoch conflict.
+* The compact shadow entry should initially mirror Loom's fields where practical:
+  access kind, local thread id, epoch, dispatch/generation id, and site id. That
+  makes Jakub's HIP prototype and HRX's ABI easy to cross-check.
+* The API must answer how a helper obtains the LDS-relative byte offset. Jakub's
+  prototype passes `byte_offset` explicitly to each helper. hip-moi should
+  consider either an explicit offset overload or a small shared-buffer/span
+  wrapper that can derive offsets, instead of assuming a raw LDS pointer value is
+  enough.
+* Synchronization should mirror the Loom epoch model first: a modeled
+  workgroup barrier advances the workgroup epoch in shadow storage. More
+  precise subgroup-local epochs remain a later widening step.
+* This path should make coverage claims carefully. A one-entry-per-granule
+  shadow can overwrite earlier same-epoch accesses; it is deterministic and
+  low-state, but it is not equivalent to a complete per-epoch access log.
+* First reporting can be a report counter plus enough payload for tests. The
+  cold path can grow toward HRX-style current/prior site ids, memory-space
+  offset, shadow value, workgroup id, and local thread id.
 
 Automatic coalescing is currently subgroup-level only. A possible later
 thread-level optimization would need a fresh design, not a mechanical mirror of
@@ -1543,8 +1648,11 @@ Incremental instrumented test growth:
       workgroup, eight wavefronts, KGroup=2, and the pipelined schedule. Done.
     * Keep exact small-integer input generation and host-reference output
       checks. Done.
-    * Do not copy Jakub's inline Loom/probabilistic/same-wave policy layer into
-      hip-moi. Done.
+    * Keep the first reference bridge independent from Jakub's inline
+      Loom/probabilistic/same-wave policy layer. Done. This was a
+      reference-corpus choice, not a future implementation constraint:
+      Jakub's Loom policy is now a design template for hip-moi's next serious
+      detector path.
 41. Broaden the Jakub reference bridge. Partly done.
     * Add no-pipeline and double-buffered FP16 variants. Done.
     * Add deterministic missing-barrier variants as reference shapes. Done as
@@ -1554,12 +1662,15 @@ Incremental instrumented test growth:
     * Add FP8 only after FP16 integration is stable, because FP16 already gives
       the core WMMA/LDS/barrier shape with simpler value reasoning.
 42. Instrument selected Jakub-corpus variants.
-    * Start with the subgroup-level mode, because this is the clearest bridge to
-      the LDSSan/assembly-oriented direction.
+    * Start with a Loom-style subgroup-level path rather than adding these rows
+      on top of the current append-log detector if that can be done without too
+      much delay. The point of the Jakub rows is to validate the production
+      detector direction, not only another exact debug detector.
     * Instrument one safe pipelined packed FP16 variant and assert exact output
       plus zero diagnostics.
     * Instrument one missing load/compute barrier variant and one missing reuse
-      barrier variant and assert deterministic diagnostics.
+      barrier variant and assert deterministic diagnostics under the chosen
+      supported contract.
     * Add thread-level mirrors only where they teach something beyond the
       subgroup-level contract.
 43. Add an unsupported-boundary pass.
@@ -1569,6 +1680,41 @@ Incremental instrumented test growth:
       implementing a full atomic/fence happens-before model.
     * Keep missing waits documented as a final-ISA/static-verifier problem, not
       as a promise of HIP source-level instrumentation.
+44. Deep-read Loom and Jakub's HIP prototype under the updated strategy. Done.
+    * HRX/Loom adds `sanitizer.race.access` and `sanitizer.race.sync`
+      observations, inserts them only for workgroup memory, and lowers them to
+      AMDGPU shadow-memory operations.
+    * Jakub's HIP `tsan::LoomPolicy` mirrors the relevant shadow-entry ABI and
+      benchmark behavior in a self-contained form.
+    * RFC/KCSAN-style sampling remains useful comparison material but is not the
+      primary hip-moi implementation target.
+45. Prototype a Loom-style hip-moi context/path.
+    * Allocate per-workgroup shadow memory rather than append logs for the hot
+      path.
+    * Use 4-byte LDS granules first.
+    * Pack access kind, local thread id, epoch, generation, and site id into a
+      64-bit shadow entry.
+    * Advance the workgroup epoch at `ctx.syncthreads()`.
+    * Record at least a report count and enough diagnostic payload to test safe
+      and racy Jakub-derived kernels.
+46. Resolve the LDS byte-offset API.
+    * Add an explicit byte-offset overload, a shared-buffer/span wrapper, or
+      another API that gives the Loom-style path a reliable LDS-relative offset.
+    * Keep the ordinary `ctx.lds_load(&lds[i])` / `ctx.lds_store(&lds[i], v)`
+      shape usable for the existing exact detector while the Loom path is being
+      introduced.
+47. Add codegen/performance acceptance checks for production-shaped rows.
+    * For selected gfx1201 builds, record static VGPR/SGPR/spill/private-memory
+      metadata and code size, following Jakub's use of `-save-temps=obj` and
+      `llvm-readelf --notes`.
+    * Treat a correctness-passing implementation that causes large spills in
+      Jakub-shaped kernels as not yet successful.
+48. Reassess subgroup-level coalescing after the Loom baseline.
+    * The existing coalescing work remains useful, but it should not drive the
+      next implementation step unless it measurably reduces Loom-style hot-path
+      cost without increasing VGPR pressure.
+    * Same-wave bitset/sample checks should be considered as future
+      assembly/DBI complements, not as prerequisites for the Loom baseline.
 
 Layer 1: toy deterministic kernels.
 
@@ -1715,7 +1861,10 @@ library teaches us the right subgroup abstractions.
       full-buffer fallback. Done.
     * Further hot-path compression can come later, after the remaining
       epoch-close costs are small enough to make coalescing a credible
-      optimization for broad kernels.
+      optimization for broad kernels. Under the new Loom-centered strategy,
+      additional coalescing work should wait until it is clear whether it
+      reduces the Loom-style hot path without increasing VGPR pressure or
+      spills.
 
 11. Make host-owned context storage usable without per-buffer tuning. First
     slice done.
@@ -1729,6 +1878,16 @@ library teaches us the right subgroup abstractions.
       `metadata_full` when possible, diagnostic buffers may truncate stored
       records while preserving counts, and coalescing overflow should fall back
       to exact logging.
+
+12. Add a Loom-style shadow-memory detector path.
+    * Use HRX/Loom and Jakub's HIP `tsan::LoomPolicy` as the design sources.
+    * Keep the current append-log detector available as an exact scaffold and
+      regression oracle.
+    * Make per-workgroup shadow storage, LDS-relative byte offsets, compact
+      64-bit shadow entries, and epoch increments at barriers the first design
+      questions.
+    * Evaluate the result against production-shaped Jakub kernels and static
+      codegen metadata, not only against toy correctness tests.
 
 ## Plan beyond the MVP
 
@@ -1805,8 +1964,9 @@ Build the narrow mode before pursuing more esoteric synchronization semantics.
 Broaden the corpus before broadening the memory model too much.
 
 * Treat `/home/benoit/workspace/sanitizer-strategy/rdna4_matmul` as the first
-  acceptance corpus. Integrate it reference-first, then instrument selected
-  variants.
+  acceptance corpus and as Jakub's executable RFC-vs-Loom prototype. Integrate
+  it reference-first, then instrument selected variants with the Loom-style path
+  once that path exists.
 * Extract more LDS tiling patterns from
   `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` after the Jakub bridge
   is underway.
@@ -1819,6 +1979,9 @@ Broaden the corpus before broadening the memory model too much.
   wavefronts, 256 threads, KGroup=2, and exact host-reference checks.
 * Add deterministic missing-barrier variants modeled after Jakub's missing
   load/compute barrier and missing compute/load reuse barrier rows.
+* Track static VGPR, SGPR, scratch/private-memory, and code-size effects for
+  production-shaped rows. A detector that passes correctness tests but spills
+  badly in these kernels has not met the project goal.
 * For each useful real-kernel idiom, decide whether it belongs in
   `thread-level` mode, `subgroup-level` mode, or both.
 * Keep atomics out of these tests until the atomic model exists.
