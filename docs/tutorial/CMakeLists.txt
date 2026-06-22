@@ -69,33 +69,33 @@ endforeach()
 
 hip_moi_add_tutorial(hip_moi_tutorial_001_passing_syncthreads
                      001_passing_syncthreads.hip)
-hip_moi_add_tutorial(hip_moi_tutorial_002_failing_same_epoch_race
-                     002_failing_same_epoch_race.hip)
+hip_moi_add_tutorial(hip_moi_tutorial_002_failing_cross_subgroup_race
+                     002_failing_cross_subgroup_race.hip)
 hip_moi_add_tutorial(hip_moi_tutorial_003_destructor_fallback
                      003_destructor_fallback.hip)
-hip_moi_add_tutorial(hip_moi_tutorial_005_subgroup_level_cross_subgroup_race
-                     005_subgroup_level_cross_subgroup_race.hip)
-hip_moi_add_tutorial(hip_moi_tutorial_006_subgroup_level_coalescing
-                     006_subgroup_level_coalescing.hip)
+hip_moi_add_tutorial(hip_moi_tutorial_005_context_cross_subgroup_race
+                     005_context_cross_subgroup_race.hip)
+hip_moi_add_tutorial(hip_moi_tutorial_006_context_coalescing
+                     006_context_coalescing.hip)
 
 hip_moi_add_passing_tutorial_test(HipMoiTutorial.001PassingSyncthreads
                                   hip_moi_tutorial_001_passing_syncthreads)
-hip_moi_add_failing_tutorial_test(HipMoiTutorial.002FailingSameEpochRace
-                                  hip_moi_tutorial_002_failing_same_epoch_race
+hip_moi_add_failing_tutorial_test(HipMoiTutorial.002FailingCrossSubgroupRace
+                                  hip_moi_tutorial_002_failing_cross_subgroup_race
                                   "kind=access_conflict"
                                   "HIP_MOI_CHECK failed")
 hip_moi_add_failing_tutorial_test(HipMoiTutorial.003DestructorFallback
                                   hip_moi_tutorial_003_destructor_fallback
                                   "kind=access_conflict"
                                   "unconsumed diagnostics")
-hip_moi_add_failing_tutorial_test(HipMoiTutorial.005SubgroupLevelCrossSubgroupRace
-                                  hip_moi_tutorial_005_subgroup_level_cross_subgroup_race
+hip_moi_add_failing_tutorial_test(HipMoiTutorial.005ContextCrossSubgroupRace
+                                  hip_moi_tutorial_005_context_cross_subgroup_race
                                   "kind=access_conflict"
                                   "first_subgroup="
                                   "second_subgroup="
                                   "HIP_MOI_CHECK failed")
-hip_moi_add_passing_tutorial_test(HipMoiTutorial.006SubgroupLevelCoalescing
-                                  hip_moi_tutorial_006_subgroup_level_coalescing)
+hip_moi_add_passing_tutorial_test(HipMoiTutorial.006ContextCoalescing
+                                  hip_moi_tutorial_006_context_coalescing)
 
 if(_hip_moi_build_rdna4_tutorials)
   hip_moi_add_tutorial(hip_moi_tutorial_004_rdna4_wmma_data_tiled_matmul

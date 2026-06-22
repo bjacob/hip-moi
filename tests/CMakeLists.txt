@@ -87,40 +87,10 @@ if(_hip_moi_build_rdna4_tests)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_safe_mvp_test
                   instrumented/001_single_subgroup_safe_mvp_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_race_mvp_test
-                  instrumented/002_single_subgroup_race_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_host_context_test
                   instrumented/003_host_context_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_basic_conflict_predicate_test
-                  instrumented/004_single_subgroup_basic_conflict_predicate_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_epoch_boundary_test
-                  instrumented/005_single_subgroup_epoch_boundary_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_all_thread_array_test
-                  instrumented/006_single_subgroup_all_thread_array_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_metadata_capacity_test
-                  instrumented/007_single_subgroup_metadata_capacity_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_loop_epoch_test
-                  instrumented/008_single_subgroup_loop_epoch_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_tiled_lds_test
-                  instrumented/009_single_subgroup_tiled_lds_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_matmul_like_test
-                  instrumented/010_single_subgroup_matmul_like_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_epoch_log_lifetime_test
-                  instrumented/011_single_subgroup_epoch_log_lifetime_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_matmul_pipeline_test
-                  instrumented/012_single_subgroup_matmul_pipeline_test.hip)
-if(_hip_moi_build_rdna4_tests)
-  hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_rdna4_wmma_row_major_test
-                    instrumented/013_single_subgroup_rdna4_wmma_row_major_test.hip)
-  hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_rdna4_wmma_data_tiled_test
-                    instrumented/014_single_subgroup_rdna4_wmma_data_tiled_test.hip)
-endif()
-hip_moi_add_gtest(hip_moi_instrumented_thread_level_subgroup_test
-                  instrumented/015_thread_level_subgroup_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_bootstrap_test
-                  instrumented/016_subgroup_level_bootstrap_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_multisubgroup_test
-                  instrumented/017_subgroup_level_multisubgroup_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_context_multisubgroup_test
+                  instrumented/017_context_multisubgroup_test.hip)
 if(_hip_moi_build_rdna4_tests)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_multisubgroup_wmma_data_tiled_test
                     instrumented/018_rdna4_multisubgroup_wmma_data_tiled_test.hip)
@@ -129,9 +99,9 @@ if(_hip_moi_build_rdna4_tests)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_site_id_test
                   instrumented/020_site_id_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_coalescing_test
-                  instrumented/022_subgroup_level_coalescing_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_subgroup_level_coalesced_conflict_test
-                  instrumented/023_subgroup_level_coalesced_conflict_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_context_coalescing_test
+                  instrumented/022_context_coalescing_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_context_coalesced_conflict_test
+                  instrumented/023_context_coalesced_conflict_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_hard_synchronization_negative_test
                   instrumented/024_hard_synchronization_negative_test.hip)

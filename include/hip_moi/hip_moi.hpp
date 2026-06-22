@@ -9,8 +9,7 @@
 #define HIP_MOI_HIP_MOI_HPP
 
 #include "hip_moi/common.hpp"
+#include "hip_moi/context.hpp"
 #include "hip_moi/host_context.hpp"
-#include "hip_moi/subgroup_level_context.hpp"
-#include "hip_moi/thread_level_context.hpp"
 
 #endif // HIP_MOI_HIP_MOI_HPP

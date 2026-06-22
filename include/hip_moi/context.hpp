@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// hip_moi/subgroup_level_context.hpp
+// hip_moi/context.hpp
 //
-// Subgroup-level HIP memory-ordering instrumentation context.
-#ifndef HIP_MOI_SUBGROUP_LEVEL_CONTEXT_HPP
-#define HIP_MOI_SUBGROUP_LEVEL_CONTEXT_HPP
+// Subgroup-scoped HIP memory-ordering instrumentation context.
+#ifndef HIP_MOI_CONTEXT_HPP
+#define HIP_MOI_CONTEXT_HPP
 
 #include "hip_moi/common.hpp"
 
@@ -13,7 +13,7 @@
 
 namespace hip_moi
 {
-    class subgroup_level_context
+    class context
     {
     public:
         struct config
@@ -99,26 +99,26 @@ namespace hip_moi
             using access_record_type = access_record;
             using diagnostic_type    = diagnostic;
 
-            access_record*           access_records;
-            int                      access_record_capacity;
-            diagnostic*              diagnostics;
-            int                      diagnostic_capacity;
-            subgroup_state*          subgroup_states;
-            int                      subgroup_capacity;
-            int*                     access_count;
-            int*                     epoch_access_count;
-            int*                     diagnostic_count;
-            coalesced_access_record* coalesced_access_records         = nullptr;
-            int                      coalesced_access_record_capacity = 0;
-            int*                     coalesced_access_count           = nullptr;
+            access_record*            access_records;
+            int                       access_record_capacity;
+            diagnostic*               diagnostics;
+            int                       diagnostic_capacity;
+            subgroup_state*           subgroup_states;
+            int                       subgroup_capacity;
+            int*                      access_count;
+            int*                      epoch_access_count;
+            int*                      diagnostic_count;
+            coalesced_access_record*  coalesced_access_records          = nullptr;
+            int                       coalesced_access_record_capacity  = 0;
+            int*                      coalesced_access_count            = nullptr;
             coalescing_access_record* coalescing_access_records         = nullptr;
             int                       coalescing_access_record_capacity = 0;
             int*                      coalescing_access_count           = nullptr;
             int*                      epoch_coalescing_access_count     = nullptr;
             int*                      coalescing_fallback_count         = nullptr;
-            coalescing_group_record* coalescing_group_records         = nullptr;
-            int                      coalescing_group_record_capacity = 0;
-            int*                     coalescing_group_count           = nullptr;
+            coalescing_group_record*  coalescing_group_records          = nullptr;
+            int                       coalescing_group_record_capacity  = 0;
+            int*                      coalescing_group_count            = nullptr;
             int*                      simulated_barrier_arrival_count   = nullptr;
         };
 
@@ -130,20 +130,20 @@ namespace hip_moi
                   int CoalescingGroupCapacity  = CoalescingAccessCapacity>
         struct static_context_storage
         {
-            access_record           access_records[AccessCapacity];
-            diagnostic              diagnostics[DiagnosticCapacity];
-            subgroup_state          subgroup_states[SubgroupCapacity];
-            coalesced_access_record coalesced_access_records[CoalescedAccessCapacity];
+            access_record            access_records[AccessCapacity];
+            diagnostic               diagnostics[DiagnosticCapacity];
+            subgroup_state           subgroup_states[SubgroupCapacity];
+            coalesced_access_record  coalesced_access_records[CoalescedAccessCapacity];
             coalescing_access_record coalescing_access_records[CoalescingAccessCapacity];
-            coalescing_group_record coalescing_group_records[CoalescingGroupCapacity];
-            int                     access_count;
-            int                     epoch_access_count;
-            int                     diagnostic_count;
-            int                     coalesced_access_count;
+            coalescing_group_record  coalescing_group_records[CoalescingGroupCapacity];
+            int                      access_count;
+            int                      epoch_access_count;
+            int                      diagnostic_count;
+            int                      coalesced_access_count;
             int                      coalescing_access_count;
             int                      epoch_coalescing_access_count;
             int                      coalescing_fallback_count;
-            int                     coalescing_group_count;
+            int                      coalescing_group_count;
             int                      simulated_barrier_arrival_count;
 
             __device__ storage_ref ref()
@@ -174,7 +174,7 @@ namespace hip_moi
             }
         };
 
-        __device__ subgroup_level_context(storage_ref storage, config cfg)
+        __device__ context(storage_ref storage, config cfg)
             : storage_(storage)
             , cfg_(cfg)
         {
@@ -260,7 +260,7 @@ namespace hip_moi
         __device__ T lds_load(const T* ptr, site_id site = no_site_id)
         {
             static_assert(std::is_trivially_copyable<T>::value,
-                          "hip_moi::subgroup_level_context::lds_load requires a trivially "
+                          "hip_moi::context::lds_load requires a trivially "
                           "copyable type");
             record_access(ptr, sizeof(T), access_kind::load, site);
             return *ptr;
@@ -270,7 +270,7 @@ namespace hip_moi
         __device__ void lds_store(T* ptr, T value, site_id site = no_site_id)
         {
             static_assert(std::is_trivially_copyable<T>::value,
-                          "hip_moi::subgroup_level_context::lds_store requires a trivially "
+                          "hip_moi::context::lds_store requires a trivially "
                           "copyable type");
             record_access(ptr, sizeof(T), access_kind::store, site);
             *ptr = value;
@@ -446,7 +446,7 @@ namespace hip_moi
         __device__ void
             record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
         {
-            access_record record = make_access_record(ptr, byte_count, kind, site);
+            access_record record           = make_access_record(ptr, byte_count, kind, site);
             bool          wants_coalescing = site.allows_coalescing();
             if(wants_coalescing && record_coalescing_access(record))
             {
@@ -836,12 +836,12 @@ namespace hip_moi
                                                       int                             scan_limit,
                                                       coalesced_access_record*        result) const
         {
-            uint32_t                min_lane           = 0;
-            uint32_t                max_lane           = 0;
-            int                     count              = 0;
-            uint64_t                lane_mask          = 0;
-            uint64_t                repeated_lane_mask = 0;
-            bool                    found              = false;
+            uint32_t                 min_lane           = 0;
+            uint32_t                 max_lane           = 0;
+            int                      count              = 0;
+            uint64_t                 lane_mask          = 0;
+            uint64_t                 repeated_lane_mask = 0;
+            bool                     found              = false;
             coalescing_access_record first_lane_record{};
             coalescing_access_record last_lane_record{};
 
@@ -1611,4 +1611,4 @@ namespace hip_moi
     };
 } // namespace hip_moi
 
-#endif // HIP_MOI_SUBGROUP_LEVEL_CONTEXT_HPP
+#endif // HIP_MOI_CONTEXT_HPP

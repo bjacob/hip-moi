@@ -369,11 +369,7 @@ namespace hip_moi::test
         int                      subgroup_capacity_                = 0;
     };
 
-    using thread_level_device_context_storage
-        = device_context_storage_for<hip_moi::thread_level_context>;
-    using device_context_storage = thread_level_device_context_storage;
-    using subgroup_level_device_context_storage
-        = device_context_storage_for<hip_moi::subgroup_level_context>;
+    using device_context_storage = device_context_storage_for<hip_moi::context>;
 
     template <typename Storage>
     void expect_metadata_counts(const Storage& storage,

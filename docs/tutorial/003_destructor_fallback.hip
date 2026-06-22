@@ -14,7 +14,9 @@
 
 namespace
 {
-    constexpr int kThreadCount = 8;
+    constexpr int kThreadCount        = 64;
+    constexpr int kThreadsPerSubgroup = 32;
+    constexpr int kSubgroupCount      = 2;
 
     void check_hip(hipError_t status, const char* expression)
     {
@@ -31,11 +33,11 @@ namespace
     {
         hip_moi::host_context_options options;
         options.storage_bytes     = 64 * 1024;
-        options.subgroup_capacity = 1;
+        options.subgroup_capacity = kSubgroupCount;
         return options;
     }
 
-    [[maybe_unused]] __global__ void plain_same_epoch_race_kernel(int* out)
+    [[maybe_unused]] __global__ void plain_cross_subgroup_race_kernel(int* out)
     {
         __shared__ int value;
 
@@ -43,22 +45,22 @@ namespace
         {
             value = 123;
         }
-        if(threadIdx.x == 1)
+        if(threadIdx.x == kThreadsPerSubgroup)
         {
             out[0] = value;
         }
     }
 
-    __global__ void same_epoch_race_kernel(int* out, hip_moi::thread_level_context::storage_ref storage)
+    __global__ void cross_subgroup_race_kernel(int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::thread_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
-            /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
-            /*subgroup_count=*/1,
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*subgroup_count=*/kSubgroupCount,
         };
-        hip_moi::thread_level_context ctx(storage, cfg);
+        hip_moi::context ctx(storage, cfg);
 
         ctx.init_workgroup();
 
@@ -66,10 +68,11 @@ namespace
         {
             ctx.lds_store(&value, 123);
         }
-        if(threadIdx.x == 1)
+        if(threadIdx.x == kThreadsPerSubgroup)
         {
             out[0] = ctx.lds_load(&value);
         }
+        ctx.finish();
     }
 } // namespace
 
@@ -85,7 +88,7 @@ int main()
     {
         hip_moi::host_context moi(small_context_options());
 
-        hipLaunchKernelGGL(same_epoch_race_kernel,
+        hipLaunchKernelGGL(cross_subgroup_race_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,

@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/017_subgroup_level_multisubgroup_test.hip
+// tests/instrumented/017_context_multisubgroup_test.hip
 //
-// Richer multi-subgroup tests for subgroup-level instrumentation mode.
+// Richer multi-subgroup tests for context instrumentation.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -29,19 +29,19 @@ namespace
     {
         int                      access_count;
         int                      diagnostic_count;
-        hip_moi::subgroup_level_context::diagnostic    diagnostics[kDiagnosticCapacity];
-        hip_moi::subgroup_level_context::access_record access_records[kAccessCapacity];
+        hip_moi::context::diagnostic    diagnostics[kDiagnosticCapacity];
+        hip_moi::context::access_record access_records[kAccessCapacity];
     };
 
-    __device__ hip_moi::subgroup_level_context make_context(
-        hip_moi::subgroup_level_context::storage_ref storage)
+    __device__ hip_moi::context make_context(
+        hip_moi::context::storage_ref storage)
     {
-        hip_moi::subgroup_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::subgroup_level_context(storage, cfg);
+        return hip_moi::context(storage, cfg);
     }
 
     __device__ int matmul_a_value(int m, int k)
@@ -55,11 +55,11 @@ namespace
     }
 
     __global__ void independent_subgroup_array_slots_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kSubgroupCount];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t subgroup = ctx.subgroup_id();
@@ -79,11 +79,11 @@ namespace
     }
 
     __global__ void cross_subgroup_array_overlap_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int values[2];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -106,11 +106,11 @@ namespace
     }
 
     __global__ void cross_subgroup_array_separated_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int values[2];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -136,11 +136,11 @@ namespace
     }
 
     __global__ void looped_cross_subgroup_conflict_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         for(int iteration = 0; iteration < kLoopCount; ++iteration)
@@ -158,11 +158,11 @@ namespace
     }
 
     __global__ void tiled_independent_rows_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int tile[kSubgroupCount][kTileCols];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t subgroup = ctx.subgroup_id();
@@ -183,11 +183,11 @@ namespace
     }
 
     __global__ void tiled_cross_subgroup_row_collision_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int row[kTileCols];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t subgroup = ctx.subgroup_id();
@@ -204,12 +204,12 @@ namespace
     }
 
     __global__ void matmul_shape_cooperative_tile_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int a_tile[kMatmulM][kMatmulK];
         __shared__ int b_tile[kMatmulK][kMatmulN];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t subgroup = ctx.subgroup_id();
@@ -244,12 +244,12 @@ namespace
     }
 
     __global__ void matmul_shape_missing_barrier_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int a_tile[kMatmulM][kMatmulK];
         __shared__ int b_tile[kMatmulK][kMatmulN];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         uint32_t subgroup = ctx.subgroup_id();
@@ -279,7 +279,7 @@ namespace
         ctx.finish();
     }
 
-    void copy_observed_metadata(const hip_moi::test::subgroup_level_device_context_storage& storage,
+    void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,
                                 observed_metadata* observed)
     {
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
@@ -306,7 +306,7 @@ namespace
                                                               : kDiagnosticCapacity;
     }
 
-    bool diagnostic_matches_subgroups(const hip_moi::subgroup_level_context::diagnostic& diagnostic,
+    bool diagnostic_matches_subgroups(const hip_moi::context::diagnostic& diagnostic,
                                       uint32_t first_subgroup,
                                       uint32_t second_subgroup)
     {
@@ -332,7 +332,7 @@ namespace
         int  stored_count            = stored_diagnostic_count(observed);
         for(int i = 0; i < stored_count; ++i)
         {
-            const hip_moi::subgroup_level_context::diagnostic& diagnostic =
+            const hip_moi::context::diagnostic& diagnostic =
                 observed.diagnostics[i];
             found_expected_conflict |=
                 diagnostic.kind == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
@@ -352,7 +352,7 @@ namespace
         int  stored_count            = stored_diagnostic_count(observed);
         for(int i = 0; i < stored_count; ++i)
         {
-            const hip_moi::subgroup_level_context::diagnostic& diagnostic =
+            const hip_moi::context::diagnostic& diagnostic =
                 observed.diagnostics[i];
             found_expected_conflict |=
                 diagnostic.kind == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
@@ -362,7 +362,7 @@ namespace
         EXPECT_TRUE(found_expected_conflict);
     }
 
-    void allocate_storage(hip_moi::test::subgroup_level_device_context_storage* storage)
+    void allocate_storage(hip_moi::test::device_context_storage* storage)
     {
         ASSERT_NO_FATAL_FAILURE(storage->allocate(
             /*access_capacity=*/kAccessCapacity,
@@ -380,9 +380,9 @@ namespace
         return acc;
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, IndependentArraySlotsDoNotReport)
+    TEST(HipMoiContextMultiSubgroup, IndependentArraySlotsDoNotReport)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         int* device_output = nullptr;
@@ -414,9 +414,9 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, CrossSubgroupArrayOverlapReports)
+    TEST(HipMoiContextMultiSubgroup, CrossSubgroupArrayOverlapReports)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         hipLaunchKernelGGL(cross_subgroup_array_overlap_kernel,
@@ -435,9 +435,9 @@ namespace
         expect_conflict_between_subgroups(observed, /*first_subgroup=*/2, /*second_subgroup=*/3);
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, CrossSubgroupArraySyncthreadsSeparationDoesNotReport)
+    TEST(HipMoiContextMultiSubgroup, CrossSubgroupArraySyncthreadsSeparationDoesNotReport)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         int* device_output = nullptr;
@@ -467,9 +467,9 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, LoopedCrossSubgroupConflictReportsEachEpoch)
+    TEST(HipMoiContextMultiSubgroup, LoopedCrossSubgroupConflictReportsEachEpoch)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         hipLaunchKernelGGL(looped_cross_subgroup_conflict_kernel,
@@ -491,9 +491,9 @@ namespace
         }
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, TiledIndependentRowsDoNotReport)
+    TEST(HipMoiContextMultiSubgroup, TiledIndependentRowsDoNotReport)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         constexpr int kOutputCount = kSubgroupCount * kTileCols;
@@ -530,9 +530,9 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, TiledCrossSubgroupRowCollisionReports)
+    TEST(HipMoiContextMultiSubgroup, TiledCrossSubgroupRowCollisionReports)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         hipLaunchKernelGGL(tiled_cross_subgroup_row_collision_kernel,
@@ -550,9 +550,9 @@ namespace
         expect_conflict_between_subgroups(observed, /*first_subgroup=*/0, /*second_subgroup=*/1);
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, MatmulShapeCooperativeTileDoesNotReport)
+    TEST(HipMoiContextMultiSubgroup, MatmulShapeCooperativeTileDoesNotReport)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         constexpr int kOutputCount = kMatmulM * kMatmulN;
@@ -591,9 +591,9 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiSubgroupLevelMultiSubgroup, MatmulShapeMissingBarrierReportsCrossSubgroupConsumers)
+    TEST(HipMoiContextMultiSubgroup, MatmulShapeMissingBarrierReportsCrossSubgroupConsumers)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         allocate_storage(&storage);
 
         hipLaunchKernelGGL(matmul_shape_missing_barrier_kernel,

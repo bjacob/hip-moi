@@ -28,84 +28,35 @@ namespace
     hip_moi::host_context_options small_host_context_options()
     {
         hip_moi::host_context_options options;
-        options.storage_bytes           = 64 * 1024;
-        options.access_record_capacity  = kAccessCapacity;
-        options.diagnostic_capacity     = kDiagnosticCapacity;
-        options.subgroup_capacity       = kSubgroupCount;
+        options.storage_bytes          = 64 * 1024;
+        options.access_record_capacity = kAccessCapacity;
+        options.diagnostic_capacity    = kDiagnosticCapacity;
+        options.subgroup_capacity      = kSubgroupCount;
         return options;
     }
 
-    template <typename Context>
     struct observed_metadata
     {
-        using diagnostic_type = typename Context::diagnostic;
-
-        int             access_count;
-        int             diagnostic_count;
-        diagnostic_type diagnostics[kDiagnosticCapacity];
+        int                          access_count;
+        int                          diagnostic_count;
+        hip_moi::context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    using observed_thread_level_metadata   = observed_metadata<hip_moi::thread_level_context>;
-    using observed_subgroup_level_metadata = observed_metadata<hip_moi::subgroup_level_context>;
-
-    __device__ hip_moi::thread_level_context
-               make_thread_level_context(hip_moi::thread_level_context::storage_ref storage)
+    __device__ hip_moi::context make_context(hip_moi::context::storage_ref storage)
     {
-        hip_moi::thread_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::thread_level_context(storage, cfg);
+        return hip_moi::context(storage, cfg);
     }
 
-    __device__ hip_moi::subgroup_level_context
-               make_subgroup_level_context(hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        hip_moi::subgroup_level_context::config cfg{
-            /*thread_count=*/static_cast<int>(blockDim.x),
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
-            /*subgroup_count=*/kSubgroupCount,
-        };
-        return hip_moi::subgroup_level_context(storage, cfg);
-    }
-
-    __global__ void thread_level_simulated_barrier_safe_kernel(
-        hip_moi::thread_level_context::storage_ref storage)
+    __global__ void simulated_barrier_safe_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
-        ctx.init_workgroup();
-
-        if(ctx.thread_id() == 0)
-        {
-            ctx.lds_store(&value, 17);
-        }
-
-        ctx.simulate_syncthreads(/*participates=*/true, kSimulatedBarrierSite);
-
-        if(ctx.thread_id() == 1)
-        {
-            (void)ctx.lds_load(&value);
-        }
-    }
-
-    __global__ void thread_level_simulated_barrier_missing_participant_kernel(
-        hip_moi::thread_level_context::storage_ref storage)
-    {
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
-        ctx.init_workgroup();
-
-        ctx.simulate_syncthreads(/*participates=*/ctx.thread_id() != 0, kSimulatedBarrierSite);
-    }
-
-    __global__ void subgroup_level_simulated_barrier_safe_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -122,18 +73,18 @@ namespace
         ctx.finish();
     }
 
-    __global__ void subgroup_level_simulated_barrier_missing_participant_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+    __global__ void
+        simulated_barrier_missing_participant_kernel(hip_moi::context::storage_ref storage)
     {
-        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         ctx.simulate_syncthreads(/*participates=*/ctx.thread_id() != 0, kSimulatedBarrierSite);
         ctx.finish();
     }
 
-    template <typename Storage, typename Observed>
-    void copy_observed_metadata(const Storage& storage, Observed* observed)
+    template <typename Storage>
+    void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
                                           storage.access_count_device(),
@@ -149,8 +100,10 @@ namespace
                                           hipMemcpyDeviceToHost));
     }
 
-    template <typename Kernel, typename Storage, typename Observed>
-    void run_case(Kernel kernel, Storage* storage, Observed* observed)
+    template <typename Kernel>
+    void run_case(Kernel kernel,
+                  hip_moi::test::device_context_storage* storage,
+                  observed_metadata*                     observed)
     {
         ASSERT_NO_FATAL_FAILURE(storage->allocate(
             /*access_capacity=*/kAccessCapacity,
@@ -164,8 +117,7 @@ namespace
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(*storage, observed));
     }
 
-    template <typename Diagnostic>
-    void expect_barrier_divergence_diagnostic(const Diagnostic& diagnostic)
+    void expect_barrier_divergence_diagnostic(const hip_moi::context::diagnostic& diagnostic)
     {
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::barrier_divergence));
@@ -181,34 +133,33 @@ namespace
         EXPECT_NE(text.find(needle), std::string::npos) << "missing stderr text: " << needle;
     }
 
-    TEST(HipMoiHardSynchronizationNegative, ThreadLevelAllParticipantsSimulationAdvancesEpoch)
+    TEST(HipMoiHardSynchronizationNegative, AllParticipantsSimulationAdvancesEpoch)
     {
-        hip_moi::test::thread_level_device_context_storage storage;
-        observed_thread_level_metadata                     observed = {};
-        ASSERT_NO_FATAL_FAILURE(
-            run_case(thread_level_simulated_barrier_safe_kernel, &storage, &observed));
+        hip_moi::test::device_context_storage storage;
+        observed_metadata                     observed = {};
+        ASSERT_NO_FATAL_FAILURE(run_case(simulated_barrier_safe_kernel, &storage, &observed));
 
         EXPECT_EQ(observed.access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiHardSynchronizationNegative, ThreadLevelMissingParticipantReportsDiagnostic)
+    TEST(HipMoiHardSynchronizationNegative, MissingParticipantReportsDiagnostic)
     {
-        hip_moi::test::thread_level_device_context_storage storage;
-        observed_thread_level_metadata                     observed = {};
-        ASSERT_NO_FATAL_FAILURE(run_case(
-            thread_level_simulated_barrier_missing_participant_kernel, &storage, &observed));
+        hip_moi::test::device_context_storage storage;
+        observed_metadata                     observed = {};
+        ASSERT_NO_FATAL_FAILURE(
+            run_case(simulated_barrier_missing_participant_kernel, &storage, &observed));
 
         EXPECT_EQ(observed.access_count, 0);
         ASSERT_EQ(observed.diagnostic_count, 1);
         expect_barrier_divergence_diagnostic(observed.diagnostics[0]);
     }
 
-    TEST(HipMoiHardSynchronizationNegative, ThreadLevelHostReportNamesBarrierDivergence)
+    TEST(HipMoiHardSynchronizationNegative, HostReportNamesBarrierDivergence)
     {
         hip_moi::host_context moi(small_host_context_options());
 
-        hipLaunchKernelGGL(thread_level_simulated_barrier_missing_participant_kernel,
+        hipLaunchKernelGGL(simulated_barrier_missing_participant_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -224,28 +175,5 @@ namespace
         expect_contains(stderr_output, "expected_threads=64");
         expect_contains(stderr_output, "observed_threads=63");
         expect_contains(stderr_output, "site_id=0x2401");
-    }
-
-    TEST(HipMoiHardSynchronizationNegative, SubgroupLevelAllParticipantsSimulationAdvancesEpoch)
-    {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        observed_subgroup_level_metadata                     observed = {};
-        ASSERT_NO_FATAL_FAILURE(
-            run_case(subgroup_level_simulated_barrier_safe_kernel, &storage, &observed));
-
-        EXPECT_EQ(observed.access_count, 2);
-        EXPECT_EQ(observed.diagnostic_count, 0);
-    }
-
-    TEST(HipMoiHardSynchronizationNegative, SubgroupLevelMissingParticipantReportsDiagnostic)
-    {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        observed_subgroup_level_metadata                     observed = {};
-        ASSERT_NO_FATAL_FAILURE(run_case(
-            subgroup_level_simulated_barrier_missing_participant_kernel, &storage, &observed));
-
-        EXPECT_EQ(observed.access_count, 0);
-        ASSERT_EQ(observed.diagnostic_count, 1);
-        expect_barrier_divergence_diagnostic(observed.diagnostics[0]);
     }
 } // namespace

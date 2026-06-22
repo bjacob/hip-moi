@@ -7,8 +7,7 @@
 #ifndef HIP_MOI_HOST_CONTEXT_HPP
 #define HIP_MOI_HOST_CONTEXT_HPP
 
-#include "hip_moi/subgroup_level_context.hpp"
-#include "hip_moi/thread_level_context.hpp"
+#include "hip_moi/context.hpp"
 
 #include <climits>
 #include <cstddef>
@@ -44,70 +43,19 @@ namespace hip_moi
 
     namespace detail
     {
-        struct thread_level_host_context_traits
+        struct host_context_traits
         {
-            using device_context = thread_level_context;
+            using device_context = context;
 
             static const char* name()
             {
                 return "host_context";
             }
 
-            static void report_diagnostic(std::FILE*                              stream,
-                                          int                                     index,
-                                          const thread_level_context::diagnostic& diagnostic_record,
-                                          const char*                             kind_name)
-            {
-                if(static_cast<diagnostic_kind>(diagnostic_record.kind)
-                   == diagnostic_kind::barrier_divergence)
-                {
-                    std::fprintf(stream,
-                                 "hip-moi diagnostic %d: kind=%s epoch=%u "
-                                 "expected_threads=%u observed_threads=%u "
-                                 "site_id=0x%llx\n",
-                                 index,
-                                 kind_name,
-                                 diagnostic_record.epoch,
-                                 diagnostic_record.expected_thread_count,
-                                 diagnostic_record.observed_thread_count,
-                                 static_cast<unsigned long long>(diagnostic_record.first_site_id));
-                    return;
-                }
-
-                std::fprintf(stream,
-                             "hip-moi diagnostic %d: kind=%s epoch=%u "
-                             "first_thread=%u second_thread=%u "
-                             "first_addr=0x%llx second_addr=0x%llx "
-                             "first_size=%u second_size=%u "
-                             "first_site_id=0x%llx second_site_id=0x%llx\n",
-                             index,
-                             kind_name,
-                             diagnostic_record.epoch,
-                             diagnostic_record.first_thread_id,
-                             diagnostic_record.second_thread_id,
-                             static_cast<unsigned long long>(diagnostic_record.first_addr),
-                             static_cast<unsigned long long>(diagnostic_record.second_addr),
-                             diagnostic_record.first_size,
-                             diagnostic_record.second_size,
-                             static_cast<unsigned long long>(diagnostic_record.first_site_id),
-                             static_cast<unsigned long long>(diagnostic_record.second_site_id));
-            }
-        };
-
-        struct subgroup_level_host_context_traits
-        {
-            using device_context = subgroup_level_context;
-
-            static const char* name()
-            {
-                return "subgroup_level_host_context";
-            }
-
-            static void
-                report_diagnostic(std::FILE*                                stream,
-                                  int                                       index,
-                                  const subgroup_level_context::diagnostic& diagnostic_record,
-                                  const char*                               kind_name)
+            static void report_diagnostic(std::FILE*                 stream,
+                                          int                        index,
+                                          const context::diagnostic& diagnostic_record,
+                                          const char*                kind_name)
             {
                 if(static_cast<diagnostic_kind>(diagnostic_record.kind)
                    == diagnostic_kind::barrier_divergence)
@@ -1009,11 +957,7 @@ namespace hip_moi
         };
     } // namespace detail
 
-    using thread_level_host_context
-        = detail::host_context_impl<detail::thread_level_host_context_traits>;
-    using subgroup_level_host_context
-        = detail::host_context_impl<detail::subgroup_level_host_context_traits>;
-    using host_context = thread_level_host_context;
+    using host_context = detail::host_context_impl<detail::host_context_traits>;
 
     template <typename HostContext>
     inline void check_or_abort(HostContext& context, const char* file, int line)

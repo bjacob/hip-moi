@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// docs/tutorial/006_subgroup_level_coalescing.hip
+// docs/tutorial/006_context_coalescing.hip
 //
-// A passing subgroup-level hip-moi program with site ids and coalescing storage.
+// A passing context hip-moi program with site ids and coalescing storage.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
@@ -49,16 +49,16 @@ namespace
     }
 
     __global__ void subgroup_tile_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
-        hip_moi::subgroup_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        hip_moi::subgroup_level_context ctx(storage, cfg);
+        hip_moi::context ctx(storage, cfg);
 
         ctx.init_workgroup();
 
@@ -74,7 +74,7 @@ namespace
 
 int main()
 {
-    hip_moi::subgroup_level_host_context moi(coalescing_context_options());
+    hip_moi::host_context moi(coalescing_context_options());
 
     int* device_output = nullptr;
     check_hip(hipMalloc(&device_output, kThreadCount * sizeof(int)), "hipMalloc");
@@ -104,6 +104,6 @@ int main()
         }
     }
 
-    std::printf("hip-moi tutorial 006: subgroup-level coalescing example passed\n");
+    std::printf("hip-moi tutorial 006: context coalescing example passed\n");
     return EXIT_SUCCESS;
 }

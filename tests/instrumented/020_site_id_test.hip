@@ -30,88 +30,51 @@ namespace
     static_assert(kCompileTimeSiteA.value() != 0);
     static_assert(kCompileTimeSiteB.value() != 0);
 
-    template <typename Context>
     struct observed_metadata
     {
-        using diagnostic_type = typename Context::diagnostic;
-
         int                             access_count;
         int                             diagnostic_count;
-        typename Context::access_record access_records[kAccessCapacity];
-        diagnostic_type                 diagnostics[kDiagnosticCapacity];
+        hip_moi::context::access_record access_records[kAccessCapacity];
+        hip_moi::context::diagnostic    diagnostics[kDiagnosticCapacity];
     };
 
-    using observed_thread_level_metadata   = observed_metadata<hip_moi::thread_level_context>;
-    using observed_subgroup_level_metadata = observed_metadata<hip_moi::subgroup_level_context>;
-
-    __device__ hip_moi::thread_level_context
-               make_thread_level_context(hip_moi::thread_level_context::storage_ref storage)
+    __device__ hip_moi::context make_context(hip_moi::context::storage_ref storage)
     {
-        hip_moi::thread_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::thread_level_context(storage, cfg);
+        return hip_moi::context(storage, cfg);
     }
 
-    __device__ hip_moi::subgroup_level_context
-               make_subgroup_level_context(hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        hip_moi::subgroup_level_context::config cfg{
-            /*thread_count=*/static_cast<int>(blockDim.x),
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
-            /*subgroup_count=*/kSubgroupCount,
-        };
-        return hip_moi::subgroup_level_context(storage, cfg);
-    }
-
-    __global__ void
-        thread_level_record_site_ids_kernel(hip_moi::thread_level_context::storage_ref storage)
+    __global__ void record_site_ids_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[3];
 
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
         {
             ctx.lds_store(&values[0], 10, HIP_MOI_SITE_ID());
         }
-        if(ctx.thread_id() == 1)
+        if(ctx.thread_id() == kThreadsPerSubgroup)
         {
             ctx.lds_store(&values[1], 20, HIP_MOI_SITE_ID());
         }
-        if(ctx.thread_id() == 2)
+        if(ctx.thread_id() == kThreadsPerSubgroup + 1)
         {
             ctx.lds_store(&values[2], 30);
         }
+        ctx.finish();
     }
 
-    __global__ void
-        thread_level_conflict_site_ids_kernel(hip_moi::thread_level_context::storage_ref storage)
+    __global__ void conflict_site_ids_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
-        ctx.init_workgroup();
-
-        if(ctx.thread_id() == 0)
-        {
-            ctx.lds_store(&value, 10, HIP_MOI_SITE_ID());
-        }
-        if(ctx.thread_id() == 1)
-        {
-            (void)ctx.lds_load(&value, HIP_MOI_SITE_ID());
-        }
-    }
-
-    __global__ void subgroup_level_conflict_site_ids_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        __shared__ int value;
-
-        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() == 0)
@@ -125,8 +88,8 @@ namespace
         ctx.finish();
     }
 
-    template <typename Storage, typename Observed>
-    void copy_observed_metadata(const Storage& storage, Observed* observed)
+    template <typename Storage>
+    void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
                                           storage.access_count_device(),
@@ -146,8 +109,7 @@ namespace
                                           hipMemcpyDeviceToHost));
     }
 
-    template <typename Observed>
-    int valid_access_count_with_site_id(const Observed& observed, uint64_t site_id)
+    int valid_access_count_with_site_id(const observed_metadata& observed, uint64_t site_id)
     {
         int count = 0;
         for(int i = 0; i < kAccessCapacity; ++i)
@@ -160,8 +122,7 @@ namespace
         return count;
     }
 
-    template <typename Observed>
-    void expect_some_diagnostic_with_nonzero_site_ids(const Observed& observed)
+    void expect_some_diagnostic_with_nonzero_site_ids(const observed_metadata& observed)
     {
         int stored_count = observed.diagnostic_count;
         if(stored_count > kDiagnosticCapacity)
@@ -172,7 +133,7 @@ namespace
         bool found = false;
         for(int i = 0; i < stored_count; ++i)
         {
-            const typename Observed::diagnostic_type& diagnostic = observed.diagnostics[i];
+            const hip_moi::context::diagnostic& diagnostic = observed.diagnostics[i];
             found |= diagnostic.kind
                          == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
                      && diagnostic.first_site_id != 0 && diagnostic.second_site_id != 0
@@ -193,20 +154,20 @@ namespace
         EXPECT_FALSE(hip_moi::no_site_id.allows_coalescing());
     }
 
-    TEST(HipMoiSiteId, ThreadLevelAccessRecordsCarryExplicitAndDefaultSiteIds)
+    TEST(HipMoiSiteId, AccessRecordsCarryExplicitAndDefaultSiteIds)
     {
-        hip_moi::test::thread_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount));
 
         hipLaunchKernelGGL(
-            thread_level_record_site_ids_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
+            record_site_ids_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
-        observed_thread_level_metadata observed = {};
+        observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
         EXPECT_EQ(observed.access_count, 3);
@@ -225,15 +186,15 @@ namespace
         EXPECT_EQ(nonzero_site_records, 2);
     }
 
-    TEST(HipMoiSiteId, ThreadLevelDiagnosticsCarrySiteIds)
+    TEST(HipMoiSiteId, DiagnosticsCarrySiteIds)
     {
-        hip_moi::test::thread_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate(
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount));
 
-        hipLaunchKernelGGL(thread_level_conflict_site_ids_kernel,
+        hipLaunchKernelGGL(conflict_site_ids_kernel,
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -242,42 +203,13 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
-        observed_thread_level_metadata observed = {};
+        observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
         EXPECT_EQ(observed.access_count, 2);
         ASSERT_GT(observed.diagnostic_count, 0);
 
-        const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[0];
-        EXPECT_EQ(diagnostic.kind,
-                  static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
-        expect_some_diagnostic_with_nonzero_site_ids(observed);
-    }
-
-    TEST(HipMoiSiteId, SubgroupLevelDiagnosticsCarrySiteIds)
-    {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/kAccessCapacity,
-            /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/kSubgroupCount));
-
-        hipLaunchKernelGGL(subgroup_level_conflict_site_ids_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        observed_subgroup_level_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        EXPECT_EQ(observed.access_count, 2);
-        ASSERT_GT(observed.diagnostic_count, 0);
-
-        const hip_moi::subgroup_level_context::diagnostic& diagnostic = observed.diagnostics[0];
+        const hip_moi::context::diagnostic& diagnostic = observed.diagnostics[0];
         EXPECT_EQ(diagnostic.kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
         expect_some_diagnostic_with_nonzero_site_ids(observed);

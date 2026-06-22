@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// docs/tutorial/005_subgroup_level_cross_subgroup_race.hip
+// docs/tutorial/005_context_cross_subgroup_race.hip
 //
-// A failing subgroup-level hip-moi program: two subgroups access the same LDS
+// A failing context hip-moi program: two subgroups access the same LDS
 // object in one epoch, and one access is a write.
 #include "hip_moi/hip_moi.hpp"
 
@@ -52,16 +52,16 @@ namespace
     }
 
     __global__ void cross_subgroup_race_kernel(
-        int* out, hip_moi::subgroup_level_context::storage_ref storage)
+        int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
-        hip_moi::subgroup_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        hip_moi::subgroup_level_context ctx(storage, cfg);
+        hip_moi::context ctx(storage, cfg);
 
         ctx.init_workgroup();
 
@@ -79,7 +79,7 @@ namespace
 
 int main()
 {
-    hip_moi::subgroup_level_host_context moi(small_context_options());
+    hip_moi::host_context moi(small_context_options());
 
     int* device_output = nullptr;
     check_hip(hipMalloc(&device_output, sizeof(int)), "hipMalloc");

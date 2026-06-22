@@ -40,9 +40,8 @@ namespace
         Diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    using thread_observed_metadata = observed_metadata<hip_moi::thread_level_context::diagnostic>;
     using subgroup_observed_metadata
-        = observed_metadata<hip_moi::subgroup_level_context::diagnostic>;
+        = observed_metadata<hip_moi::context::diagnostic>;
 
     __host__ __device__ int rdna4_wmma_f16_k(int lane, int idx)
     {
@@ -103,26 +102,15 @@ namespace
         reinterpret_cast<f32x8_t*>(global_fragments)[fragment_index] = fragment;
     }
 
-    __device__ hip_moi::thread_level_context
-               make_thread_level_context(hip_moi::thread_level_context::storage_ref storage)
+    __device__ hip_moi::context
+               make_context(hip_moi::context::storage_ref storage)
     {
-        hip_moi::thread_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::thread_level_context(storage, cfg);
-    }
-
-    __device__ hip_moi::subgroup_level_context
-               make_subgroup_level_context(hip_moi::subgroup_level_context::storage_ref storage)
-    {
-        hip_moi::subgroup_level_context::config cfg{
-            /*thread_count=*/static_cast<int>(blockDim.x),
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
-            /*subgroup_count=*/kSubgroupCount,
-        };
-        return hip_moi::subgroup_level_context(storage, cfg);
+        return hip_moi::context(storage, cfg);
     }
 
     template <typename Context>
@@ -237,41 +225,22 @@ namespace
         }
     }
 
-    __global__ void
-        safe_double_buffered_thread_level_kernel(const _Float16* a_global,
-                                                 const _Float16* b_global,
-                                                 float*          out,
-                                                 hip_moi::thread_level_context::storage_ref storage)
-    {
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
-        run_safe_double_buffered_kernel_body(ctx, a_global, b_global, out);
-    }
-
-    __global__ void safe_double_buffered_subgroup_level_kernel(
+    __global__ void safe_double_buffered_context_kernel(
         const _Float16*                              a_global,
         const _Float16*                              b_global,
         float*                                       out,
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
-        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         run_safe_double_buffered_kernel_body(ctx, a_global, b_global, out);
     }
 
     __global__ void
-        missing_barrier_thread_level_kernel(const _Float16*                            a_global,
-                                            const _Float16*                            b_global,
-                                            hip_moi::thread_level_context::storage_ref storage)
-    {
-        hip_moi::thread_level_context ctx = make_thread_level_context(storage);
-        run_cross_subgroup_missing_barrier_body(ctx, a_global, b_global);
-    }
-
-    __global__ void
-        missing_barrier_subgroup_level_kernel(const _Float16*                              a_global,
+        missing_barrier_context_kernel(const _Float16*                              a_global,
                                               const _Float16*                              b_global,
-                                              hip_moi::subgroup_level_context::storage_ref storage)
+                                              hip_moi::context::storage_ref storage)
     {
-        hip_moi::subgroup_level_context ctx = make_subgroup_level_context(storage);
+        hip_moi::context ctx = make_context(storage);
         run_cross_subgroup_missing_barrier_body(ctx, a_global, b_global);
         ctx.finish();
     }
@@ -341,7 +310,7 @@ namespace
         return diagnostic_count < kDiagnosticCapacity ? diagnostic_count : kDiagnosticCapacity;
     }
 
-    void expect_thread_level_cross_subgroup_conflict(const thread_observed_metadata& observed)
+    void expect_context_cross_subgroup_conflict(const subgroup_observed_metadata& observed)
     {
         EXPECT_EQ(observed.access_count, kExpectedRaceAccessCount);
         ASSERT_GT(observed.diagnostic_count, 0);
@@ -349,30 +318,7 @@ namespace
         bool found_expected_conflict = false;
         for(int i = 0; i < stored_diagnostic_count(observed.diagnostic_count); ++i)
         {
-            const hip_moi::thread_level_context::diagnostic& diagnostic = observed.diagnostics[i];
-            bool has_subgroup0_thread = diagnostic.first_thread_id < kThreadsPerSubgroup
-                                        || diagnostic.second_thread_id < kThreadsPerSubgroup;
-            bool has_subgroup1_thread = diagnostic.first_thread_id >= kThreadsPerSubgroup
-                                        || diagnostic.second_thread_id >= kThreadsPerSubgroup;
-            found_expected_conflict
-                |= diagnostic.kind
-                       == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
-                   && diagnostic.epoch == 0 && diagnostic.first_size == sizeof(f16x8_t)
-                   && diagnostic.second_size == sizeof(f16x8_t) && has_subgroup0_thread
-                   && has_subgroup1_thread;
-        }
-        EXPECT_TRUE(found_expected_conflict);
-    }
-
-    void expect_subgroup_level_cross_subgroup_conflict(const subgroup_observed_metadata& observed)
-    {
-        EXPECT_EQ(observed.access_count, kExpectedRaceAccessCount);
-        ASSERT_GT(observed.diagnostic_count, 0);
-
-        bool found_expected_conflict = false;
-        for(int i = 0; i < stored_diagnostic_count(observed.diagnostic_count); ++i)
-        {
-            const hip_moi::subgroup_level_context::diagnostic& diagnostic = observed.diagnostics[i];
+            const hip_moi::context::diagnostic& diagnostic = observed.diagnostics[i];
             bool                                               matches_subgroups
                 = (diagnostic.first_subgroup_id == 0 && diagnostic.second_subgroup_id == 1)
                   || (diagnostic.first_subgroup_id == 1 && diagnostic.second_subgroup_id == 0);
@@ -457,35 +403,19 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_b));
     }
 
-    TEST(HipMoiRdna4WmmaMultiSubgroup, ThreadLevelDoubleBufferedDoesNotReport)
+    TEST(HipMoiRdna4WmmaMultiSubgroup, ContextDoubleBufferedDoesNotReport)
     {
-        hip_moi::test::thread_level_device_context_storage storage;
-        run_safe_case(safe_double_buffered_thread_level_kernel, &storage);
+        hip_moi::test::device_context_storage storage;
+        run_safe_case(safe_double_buffered_context_kernel, &storage);
     }
 
-    TEST(HipMoiRdna4WmmaMultiSubgroup, SubgroupLevelDoubleBufferedDoesNotReport)
+    TEST(HipMoiRdna4WmmaMultiSubgroup, ContextCrossSubgroupMissingBarrierReports)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        run_safe_case(safe_double_buffered_subgroup_level_kernel, &storage);
-    }
-
-    TEST(HipMoiRdna4WmmaMultiSubgroup, ThreadLevelCrossSubgroupMissingBarrierReports)
-    {
-        hip_moi::test::thread_level_device_context_storage storage;
-        run_missing_barrier_case(missing_barrier_thread_level_kernel, &storage);
-
-        thread_observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-        expect_thread_level_cross_subgroup_conflict(observed);
-    }
-
-    TEST(HipMoiRdna4WmmaMultiSubgroup, SubgroupLevelCrossSubgroupMissingBarrierReports)
-    {
-        hip_moi::test::subgroup_level_device_context_storage storage;
-        run_missing_barrier_case(missing_barrier_subgroup_level_kernel, &storage);
+        hip_moi::test::device_context_storage storage;
+        run_missing_barrier_case(missing_barrier_context_kernel, &storage);
 
         subgroup_observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-        expect_subgroup_level_cross_subgroup_conflict(observed);
+        expect_context_cross_subgroup_conflict(observed);
     }
 } // namespace

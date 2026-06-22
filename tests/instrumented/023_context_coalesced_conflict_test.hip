@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/023_subgroup_level_coalesced_conflict_test.hip
+// tests/instrumented/023_context_coalesced_conflict_test.hip
 //
-// Tests for subgroup-level conflict diagnostics produced from coalesced
+// Tests for context conflict diagnostics produced from coalesced
 // access summaries.
 #include "test_support.hpp"
 
@@ -48,26 +48,26 @@ namespace
         int                                         coalescing_fallback_count;
         int                                         coalesced_access_count;
         int                                         diagnostic_count;
-        hip_moi::subgroup_level_context::diagnostic diagnostics[kDiagnosticCapacity];
+        hip_moi::context::diagnostic diagnostics[kDiagnosticCapacity];
     };
 
-    __device__ hip_moi::subgroup_level_context
-               make_context(hip_moi::subgroup_level_context::storage_ref storage)
+    __device__ hip_moi::context
+               make_context(hip_moi::context::storage_ref storage)
     {
-        hip_moi::subgroup_level_context::config cfg{
+        hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
             /*subgroup_count=*/kSubgroupCount,
         };
-        return hip_moi::subgroup_level_context(storage, cfg);
+        return hip_moi::context(storage, cfg);
     }
 
     __global__ void
-        contiguous_summary_conflict_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+        contiguous_summary_conflict_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -82,11 +82,11 @@ namespace
         ctx.syncthreads();
     }
 
-    __global__ void disjoint_summary_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+    __global__ void disjoint_summary_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadCount];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane     = static_cast<int>(ctx.lane_in_subgroup());
@@ -102,11 +102,11 @@ namespace
         ctx.syncthreads();
     }
 
-    __global__ void fixed_stride_gap_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+    __global__ void fixed_stride_gap_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[2 * kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -122,11 +122,11 @@ namespace
     }
 
     __global__ void
-        fixed_stride_summary_conflict_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+        fixed_stride_summary_conflict_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[2 * kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -141,11 +141,11 @@ namespace
         ctx.syncthreads();
     }
 
-    __global__ void coalesced_read_read_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+    __global__ void coalesced_read_read_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -167,11 +167,11 @@ namespace
     }
 
     __global__ void
-        coalesced_summary_vs_exact_kernel(hip_moi::subgroup_level_context::storage_ref storage)
+        coalesced_summary_vs_exact_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -187,11 +187,11 @@ namespace
     }
 
     __global__ void irregular_coalescing_access_conflict_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadsPerSubgroup + 1];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane  = static_cast<int>(ctx.lane_in_subgroup());
@@ -208,11 +208,11 @@ namespace
     }
 
     __global__ void repeated_lane_summary_conflict_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int values[2 * kThreadsPerSubgroup];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         int lane = static_cast<int>(ctx.lane_in_subgroup());
@@ -229,11 +229,11 @@ namespace
     }
 
     __global__ void irregular_read_read_kernel(
-        hip_moi::subgroup_level_context::storage_ref storage)
+        hip_moi::context::storage_ref storage)
     {
         __shared__ int values[kThreadsPerSubgroup + 1];
 
-        hip_moi::subgroup_level_context ctx = make_context(storage);
+        hip_moi::context ctx = make_context(storage);
         ctx.init_workgroup();
 
         if(ctx.thread_id() <= kThreadsPerSubgroup)
@@ -255,7 +255,7 @@ namespace
         ctx.syncthreads();
     }
 
-    void copy_observed_metadata(const hip_moi::test::subgroup_level_device_context_storage& storage,
+    void copy_observed_metadata(const hip_moi::test::device_context_storage& storage,
                                 observed_metadata* observed)
     {
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
@@ -289,7 +289,7 @@ namespace
                   observed_metadata* observed,
                   int                coalescing_access_capacity = kCoalescingAccessCapacity)
     {
-        hip_moi::test::subgroup_level_device_context_storage storage;
+        hip_moi::test::device_context_storage storage;
         storage.allocate(
             /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
@@ -309,7 +309,7 @@ namespace
                                                                : kDiagnosticCapacity;
     }
 
-    bool diagnostic_matches_subgroups(const hip_moi::subgroup_level_context::diagnostic& diagnostic,
+    bool diagnostic_matches_subgroups(const hip_moi::context::diagnostic& diagnostic,
                                       uint32_t first_subgroup,
                                       uint32_t second_subgroup)
     {
@@ -320,7 +320,7 @@ namespace
     }
 
     bool diagnostic_matches_sites_and_sizes(
-        const hip_moi::subgroup_level_context::diagnostic& diagnostic,
+        const hip_moi::context::diagnostic& diagnostic,
         hip_moi::site_id                                   first_site,
         hip_moi::site_id                                   second_site,
         uint32_t                                           first_size,
@@ -346,7 +346,7 @@ namespace
         int stored_count = stored_diagnostic_count(observed);
         for(int i = 0; i < stored_count; ++i)
         {
-            const hip_moi::subgroup_level_context::diagnostic& diagnostic = observed.diagnostics[i];
+            const hip_moi::context::diagnostic& diagnostic = observed.diagnostics[i];
             if(diagnostic.kind == static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict)
                && diagnostic.epoch == 0u
                && diagnostic_matches_subgroups(diagnostic,
@@ -361,7 +361,7 @@ namespace
         return false;
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, ContiguousSummariesReportConflict)
+    TEST(HipMoiContextCoalescedConflict, ContiguousSummariesReportConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(contiguous_summary_conflict_kernel, &observed));
@@ -374,7 +374,7 @@ namespace
             observed, kContiguousStoreSite, kContiguousLoadSite, kContiguousSpan, kContiguousSpan));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, DisjointSummariesDoNotReport)
+    TEST(HipMoiContextCoalescedConflict, DisjointSummariesDoNotReport)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(disjoint_summary_kernel, &observed));
@@ -386,7 +386,7 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, FixedStrideGapsDoNotReport)
+    TEST(HipMoiContextCoalescedConflict, FixedStrideGapsDoNotReport)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(fixed_stride_gap_kernel, &observed));
@@ -398,7 +398,7 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, FixedStrideSummariesReportConflict)
+    TEST(HipMoiContextCoalescedConflict, FixedStrideSummariesReportConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(fixed_stride_summary_conflict_kernel, &observed));
@@ -411,7 +411,7 @@ namespace
             observed, kStrideEvenStoreSite, kStrideEvenLoadSite, kStrideSpan, kStrideSpan));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, CoalescedReadReadDoesNotReport)
+    TEST(HipMoiContextCoalescedConflict, CoalescedReadReadDoesNotReport)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(coalesced_read_read_kernel, &observed));
@@ -423,7 +423,7 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, SummaryVsExactReportsConflict)
+    TEST(HipMoiContextCoalescedConflict, SummaryVsExactReportsConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(coalesced_summary_vs_exact_kernel, &observed));
@@ -436,7 +436,7 @@ namespace
             observed, kSummaryExactStoreSite, hip_moi::no_site_id, kContiguousSpan, sizeof(int)));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, IrregularCoalescingAccessesReportConflict)
+    TEST(HipMoiContextCoalescedConflict, IrregularCoalescingAccessesReportConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(irregular_coalescing_access_conflict_kernel, &observed));
@@ -449,7 +449,7 @@ namespace
             observed, kIrregularStoreSite, kIrregularLoadSite, sizeof(int), sizeof(int)));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, NoCoalescingStorageFallsBackAndReportsConflict)
+    TEST(HipMoiContextCoalescedConflict, NoCoalescingStorageFallsBackAndReportsConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(contiguous_summary_conflict_kernel,
@@ -464,7 +464,7 @@ namespace
             observed, kContiguousStoreSite, kContiguousLoadSite, sizeof(int), sizeof(int)));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, RepeatedLaneSummaryConflictReportsConflict)
+    TEST(HipMoiContextCoalescedConflict, RepeatedLaneSummaryConflictReportsConflict)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(repeated_lane_summary_conflict_kernel, &observed));
@@ -477,7 +477,7 @@ namespace
             observed, kRepeatedStoreSite, kContiguousLoadSite, sizeof(int), kContiguousSpan));
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, IrregularCoalescingReadReadDoesNotReport)
+    TEST(HipMoiContextCoalescedConflict, IrregularCoalescingReadReadDoesNotReport)
     {
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(irregular_read_read_kernel, &observed));
@@ -489,7 +489,7 @@ namespace
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
-    TEST(HipMoiSubgroupLevelCoalescedConflict, CoalescingAccessOverflowFallsBackToExactRecords)
+    TEST(HipMoiContextCoalescedConflict, CoalescingAccessOverflowFallsBackToExactRecords)
     {
         constexpr int kTinyCoalescingAccessCapacity = 8;
 

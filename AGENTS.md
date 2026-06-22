@@ -25,7 +25,7 @@ the call site, add C/C++ named-argument comments when they improve readability,
 for example:
 
 ```c++
-hip_moi::thread_level_context::config cfg{
+hip_moi::context::config cfg{
     /*thread_count=*/static_cast<int>(blockDim.x),
     /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
     /*subgroup_count=*/1,
