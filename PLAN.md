@@ -107,6 +107,13 @@ foundation:
   that missing waits belong first to a final-ISA/static verifier, while
   atomics/fences are later happens-before work rather than the immediate
   dynamic LDS MVP.
+* `tests/reference/rdna4_jakub_matmul_reference.hip` now starts the Jakub corpus
+  bridge. It is gfx12-gated and reference-only: FP16 packed/data-tiled A/B/C,
+  production 16x8 WMMA-tile workgroup shape, 256 threads, eight wavefronts,
+  KGroup=2, `K=128`, exact small-integer host-reference checks, and safe
+  no-pipeline, pipelined, and double-buffered schedules. Jakub-style
+  missing-barrier variants are present as compile-only shapes, not launched
+  uninstrumented as correctness tests.
 * `tests/reference/mvp_reference_kernels.hip` contains the uninstrumented
   reference corpus. It is a parameterized GTest suite exposing one CTest entry
   per launched safe reference kernel.
@@ -319,13 +326,15 @@ The reference corpus is a map of desired coverage, not an obligation to
 instrument everything immediately. The instrumented suite should grow only when
 the library actually supports the corresponding behavior.
 
-Next implementation slice: integrate Jakub's RDNA4 matmul corpus into hip-moi's
-own corpus. Do this in two phases: first add reference-only gfx12-gated cases
-that preserve the real kernel shapes and host-reference correctness checks;
-then instrument selected safe and missing-barrier variants with hip-moi. In
-parallel, tighten the documented scope boundary around unsupported raw
-accesses, atomics/fences, and missing-wait hazards, so unsupported cases are
-explicit coverage limits rather than silent promises.
+Next implementation slice: instrument selected variants from the Jakub RDNA4
+reference bridge. Start with `subgroup_level_context`, because that is the
+clearest bridge to the LDSSan/assembly-oriented direction. The first target is
+the safe pipelined packed FP16 production shape with exact output and zero
+diagnostics. Then add missing load/compute and missing compute/load reuse
+barrier variants that assert deterministic diagnostics. In parallel, tighten
+the documented scope boundary around unsupported raw accesses, atomics/fences,
+and missing-wait hazards, so unsupported cases are explicit coverage limits
+rather than silent promises.
 
 ## Foundations
 
@@ -1357,7 +1366,8 @@ tests/reference/
 `sanitizer-strategy/rdna4_matmul`: a gfx12-gated reference-only test that
 borrows the production-shaped packed FP16 WMMA kernel structure and
 host-reference correctness checks, but does not copy Jakub's inline TSAN policy
-machinery.
+machinery. Done for safe no-pipeline, pipelined, and double-buffered FP16
+variants plus compile-only missing-barrier shapes.
 
 Tutorial examples live under `docs/tutorial/`. They are not a coverage corpus;
 they are executable documentation for the user-facing workflow. The README may
@@ -1526,18 +1536,21 @@ Incremental instrumented test growth:
     target ordinary LDS/shared-memory accesses, barrier epochs, multi-subgroup
     GEMM-shaped kernels, explicit unsupported-case boundaries, and reference
     integration from `rdna4_matmul/`.
-40. Add the first Jakub-corpus reference bridge.
+40. Add the first Jakub-corpus reference bridge. Done.
     * Create a gfx12-gated reference-only test derived from
-      `sanitizer-strategy/rdna4_matmul`.
+      `sanitizer-strategy/rdna4_matmul`. Done.
     * Start with FP16, packed/data-tiled A/B/C, production 16x8 WMMA-tile
-      workgroup, eight wavefronts, KGroup=2, and the pipelined schedule.
+      workgroup, eight wavefronts, KGroup=2, and the pipelined schedule. Done.
     * Keep exact small-integer input generation and host-reference output
-      checks.
+      checks. Done.
     * Do not copy Jakub's inline Loom/probabilistic/same-wave policy layer into
-      hip-moi.
-41. Broaden the Jakub reference bridge.
-    * Add no-pipeline and double-buffered FP16 variants.
-    * Add deterministic missing-barrier variants as reference shapes.
+      hip-moi. Done.
+41. Broaden the Jakub reference bridge. Partly done.
+    * Add no-pipeline and double-buffered FP16 variants. Done.
+    * Add deterministic missing-barrier variants as reference shapes. Done as
+      compile-only shapes for missing load/compute, conditional missing
+      load/compute, missing compute/load reuse, and conditional missing
+      compute/load reuse.
     * Add FP8 only after FP16 integration is stable, because FP16 already gives
       the core WMMA/LDS/barrier shape with simpler value reasoning.
 42. Instrument selected Jakub-corpus variants.

@@ -81,6 +81,10 @@ endforeach()
 
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
+if(_hip_moi_build_rdna4_tests)
+  hip_moi_add_gtest(hip_moi_reference_rdna4_jakub_matmul
+                    reference/rdna4_jakub_matmul_reference.hip)
+endif()
 hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_safe_mvp_test
                   instrumented/001_single_subgroup_safe_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_race_mvp_test
