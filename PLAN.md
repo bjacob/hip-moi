@@ -417,11 +417,14 @@ back to a static site and LDS location:
 
 ## Benchmark Integration
 
-The top-level `benchmarks/` directory now vendors the focused RDNA4 benchmark
-families extracted from Jakub's
-`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`. Jakub's repository remains
-the upstream reference for the broader experimental harness, but day-to-day
-hip-moi performance work should run from this repository.
+The top-level `benchmarks/` directory now carries the focused RDNA4 performance
+benchmarks used for day-to-day hip-moi work. The matmul benchmarks are extracted
+from Jakub's `sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; Jakub's
+repository remains the upstream reference for the broader experimental harness.
+The attention benchmark is hip-moi-native and grown from the instrumented
+attention correctness tests. The benchmark README is organized by explicit
+benchmark names: RDNA4 WMMA matmul wave-scaling, RDNA4 WMMA matmul production
+16x8, and RDNA4 WMMA attention block.
 
 The small `w2_2x4_benchmark.hip` family compares:
 
