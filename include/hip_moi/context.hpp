@@ -120,6 +120,12 @@ namespace hip_moi
             int                       coalescing_group_record_capacity  = 0;
             int*                      coalescing_group_count            = nullptr;
             int*                      simulated_barrier_arrival_count   = nullptr;
+            uint64_t*                 shadow_epoch                      = nullptr;
+            uint64_t*                 exact_shadow_entries              = nullptr;
+            int                       exact_shadow_entry_capacity       = 0;
+            uint64_t*                 sampled_watchpoints               = nullptr;
+            int                       sampled_watchpoint_capacity       = 0;
+            uint64_t                  generation                        = 0;
         };
 
         template <int AccessCapacity,

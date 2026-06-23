@@ -119,3 +119,56 @@ fp16_wmma_tiled_w8_16x8_noop                                  0.003 ms      0.33
 fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.537 ms  iters=17400  warmup= 100.205 ms  warmup_iters=17376
 fp16_wmma_tiled_w8_16x8_hip_moi_coalescing                  623.629 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 623.629 ms  iters=1  warmup= 635.914 ms  warmup_iters=1
 ```
+
+## 2026-06-23 after Loom backend storage layout
+
+hip-moi commit measured: this commit (`Add Loom backend storage layout`)
+sanitizer-strategy benchmark commit: `8e3d1e3`
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=32 N=64 K=16 waves=2 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w2_2x4_noop                                   0.003 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.007 ms  iters=34712  warmup= 100.026 ms  warmup_iters=34452
+fp16_wmma_tiled_w2_2x4_sampled_loom_tsan                      0.005 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.313 ms  iters=20989  warmup= 100.064 ms  warmup_iters=20875
+fp16_wmma_tiled_w2_2x4_hip_moi_coalescing                     6.118 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 104.006 ms  iters=17  warmup= 102.010 ms  warmup_iters=17
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=64 N=256 K=16 waves=4 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w4_4x16_noop                                  0.003 ms      0.17 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.068 ms  iters=31787  warmup= 100.089 ms  warmup_iters=31815
+fp16_wmma_tiled_w4_4x16_sampled_loom_tsan                     0.006 ms      0.09 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.070 ms  iters=16924  warmup= 100.001 ms  warmup_iters=16892
+fp16_wmma_tiled_w4_4x16_hip_moi_coalescing                  125.161 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 125.161 ms  iters=1  warmup= 123.810 ms  warmup_iters=1
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=256 N=128 K=16 waves=8 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w8_16x8_noop                                  0.003 ms      0.34 TFLOP/s    0.2% of 191 TFLOP/s  total= 100.006 ms  iters=31981  warmup= 100.025 ms  warmup_iters=30763
+fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.069 ms  iters=17449  warmup= 100.066 ms  warmup_iters=17432
+fp16_wmma_tiled_w8_16x8_hip_moi_coalescing                  634.801 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 634.801 ms  iters=1  warmup= 636.625 ms  warmup_iters=1
+```

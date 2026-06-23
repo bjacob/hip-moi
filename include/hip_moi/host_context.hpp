@@ -30,6 +30,8 @@ namespace hip_moi
         int coalesced_access_record_capacity  = -1;
         int coalescing_access_record_capacity = -1;
         int coalescing_group_record_capacity  = -1;
+        int exact_shadow_entry_capacity       = -1;
+        int sampled_watchpoint_capacity       = -1;
         int diagnostic_capacity               = -1;
 
         // Number of subgroups represented in this context.
@@ -105,8 +107,8 @@ namespace hip_moi
                 typename optional_coalescing_access_record<device_context>::type;
             using coalescing_group_record =
                 typename optional_coalescing_group_record<device_context>::type;
-            using diagnostic     = typename device_context::diagnostic;
-            using storage_ref    = typename device_context::storage_ref;
+            using diagnostic  = typename device_context::diagnostic;
+            using storage_ref = typename device_context::storage_ref;
 
             static constexpr bool has_coalesced_access_records
                 = optional_coalesced_access_record<device_context>::available;
@@ -179,6 +181,12 @@ namespace hip_moi
                         coalescing_group_count_,
                     };
                     ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    ref.shadow_epoch                    = shadow_epoch_;
+                    ref.exact_shadow_entries            = exact_shadow_entries_;
+                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
+                    ref.sampled_watchpoints             = sampled_watchpoints_;
+                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
+                    ref.generation                      = generation_;
                     return ref;
                 }
                 else if constexpr(has_coalesced_access_records)
@@ -198,6 +206,12 @@ namespace hip_moi
                         coalesced_access_count_,
                     };
                     ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    ref.shadow_epoch                    = shadow_epoch_;
+                    ref.exact_shadow_entries            = exact_shadow_entries_;
+                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
+                    ref.sampled_watchpoints             = sampled_watchpoints_;
+                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
+                    ref.generation                      = generation_;
                     return ref;
                 }
                 else
@@ -214,6 +228,12 @@ namespace hip_moi
                         diagnostic_count_,
                     };
                     ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
+                    ref.shadow_epoch                    = shadow_epoch_;
+                    ref.exact_shadow_entries            = exact_shadow_entries_;
+                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
+                    ref.sampled_watchpoints             = sampled_watchpoints_;
+                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
+                    ref.generation                      = generation_;
                     return ref;
                 }
             }
@@ -315,6 +335,16 @@ namespace hip_moi
             int coalescing_group_record_capacity() const
             {
                 return coalescing_group_record_capacity_;
+            }
+
+            int exact_shadow_entry_capacity() const
+            {
+                return exact_shadow_entry_capacity_;
+            }
+
+            int sampled_watchpoint_capacity() const
+            {
+                return sampled_watchpoint_capacity_;
             }
 
             int diagnostic_capacity() const
@@ -467,18 +497,23 @@ namespace hip_moi
                    || options_.coalesced_access_record_capacity < -1
                    || options_.coalescing_access_record_capacity < -1
                    || options_.coalescing_group_record_capacity < -1
-                   || options_.diagnostic_capacity < -1 || options_.subgroup_capacity <= 0)
+                   || options_.exact_shadow_entry_capacity < -1
+                   || options_.sampled_watchpoint_capacity < -1 || options_.diagnostic_capacity < -1
+                   || options_.subgroup_capacity <= 0)
                 {
                     std::fprintf(stderr,
                                  "hip-moi: %s storage options are invalid "
                                  "(bytes=%llu access=%d coalesced_access=%d "
-                                 "coalescing_access=%d group=%d diagnostics=%d subgroups=%d)\n",
+                                 "coalescing_access=%d group=%d exact_shadow=%d "
+                                 "sampled_watchpoints=%d diagnostics=%d subgroups=%d)\n",
                                  Traits::name(),
                                  static_cast<unsigned long long>(options_.storage_bytes),
                                  options_.access_record_capacity,
                                  options_.coalesced_access_record_capacity,
                                  options_.coalescing_access_record_capacity,
                                  options_.coalescing_group_record_capacity,
+                                 options_.exact_shadow_entry_capacity,
+                                 options_.sampled_watchpoint_capacity,
                                  options_.diagnostic_capacity,
                                  options_.subgroup_capacity);
                     std::fflush(stderr);
@@ -546,6 +581,9 @@ namespace hip_moi
                 append_slice_size<diagnostic>(&offset, diagnostic_capacity_);
                 append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
                 append_slice_size<int>(&offset, 4);
+                append_slice_size<uint64_t>(&offset, 1);
+                append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
+                append_slice_size<uint64_t>(&offset, sampled_watchpoint_capacity_);
                 return offset;
             }
 
@@ -594,6 +632,11 @@ namespace hip_moi
                 assign_slice<int>(device_storage_, 1, &offset, &epoch_access_count_);
                 assign_slice<int>(device_storage_, 1, &offset, &diagnostic_count_);
                 assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
+                assign_slice<uint64_t>(device_storage_, 1, &offset, &shadow_epoch_);
+                assign_slice<uint64_t>(
+                    device_storage_, exact_shadow_entry_capacity_, &offset, &exact_shadow_entries_);
+                assign_slice<uint64_t>(
+                    device_storage_, sampled_watchpoint_capacity_, &offset, &sampled_watchpoints_);
                 layout_bytes_ = offset;
             }
 
@@ -633,6 +676,18 @@ namespace hip_moi
                         return true;
                     }
                 }
+                if(is_auto_capacity(options_.sampled_watchpoint_capacity)
+                   && sampled_watchpoint_capacity_ > 0)
+                {
+                    --sampled_watchpoint_capacity_;
+                    return true;
+                }
+                if(is_auto_capacity(options_.exact_shadow_entry_capacity)
+                   && exact_shadow_entry_capacity_ > 0)
+                {
+                    --exact_shadow_entry_capacity_;
+                    return true;
+                }
                 if(is_auto_capacity(options_.access_record_capacity) && access_record_capacity_ > 1)
                 {
                     --access_record_capacity_;
@@ -652,6 +707,14 @@ namespace hip_moi
                 access_record_capacity_ = is_auto_capacity(options_.access_record_capacity)
                                               ? 0
                                               : options_.access_record_capacity;
+                exact_shadow_entry_capacity_
+                    = is_auto_capacity(options_.exact_shadow_entry_capacity)
+                          ? 0
+                          : options_.exact_shadow_entry_capacity;
+                sampled_watchpoint_capacity_
+                    = is_auto_capacity(options_.sampled_watchpoint_capacity)
+                          ? 0
+                          : options_.sampled_watchpoint_capacity;
 
                 if constexpr(has_coalesced_access_records)
                 {
@@ -708,6 +771,14 @@ namespace hip_moi
                         total_weight += 1;
                     }
                 }
+                if(is_auto_capacity(options_.exact_shadow_entry_capacity))
+                {
+                    total_weight += 2;
+                }
+                if(is_auto_capacity(options_.sampled_watchpoint_capacity))
+                {
+                    total_weight += 1;
+                }
 
                 if(total_weight > 0)
                 {
@@ -748,6 +819,20 @@ namespace hip_moi
                                 "coalescing_group");
                         }
                     }
+                    if(is_auto_capacity(options_.exact_shadow_entry_capacity))
+                    {
+                        exact_shadow_entry_capacity_ = capacity_from_bytes(
+                            remaining_bytes * 2 / static_cast<std::size_t>(total_weight),
+                            sizeof(uint64_t),
+                            "exact_shadow");
+                    }
+                    if(is_auto_capacity(options_.sampled_watchpoint_capacity))
+                    {
+                        sampled_watchpoint_capacity_ = capacity_from_bytes(
+                            remaining_bytes / static_cast<std::size_t>(total_weight),
+                            sizeof(uint64_t),
+                            "sampled_watchpoint");
+                    }
                 }
 
                 while(layout_byte_count() > storage_bytes_ && shrink_one_auto_capacity())
@@ -779,7 +864,8 @@ namespace hip_moi
                              "hip-moi: %s storage_bytes=%llu is too small; "
                              "layout requires at least %llu bytes "
                              "(access=%d coalesced_access=%d coalescing_access=%d "
-                             "coalescing_group=%d diagnostics=%d subgroups=%d)\n",
+                             "coalescing_group=%d exact_shadow=%d sampled_watchpoints=%d "
+                             "diagnostics=%d subgroups=%d)\n",
                              Traits::name(),
                              static_cast<unsigned long long>(storage_bytes_),
                              static_cast<unsigned long long>(required_bytes),
@@ -787,6 +873,8 @@ namespace hip_moi
                              coalesced_access_record_capacity_,
                              coalescing_access_record_capacity_,
                              coalescing_group_record_capacity_,
+                             exact_shadow_entry_capacity_,
+                             sampled_watchpoint_capacity_,
                              diagnostic_capacity_,
                              subgroup_capacity_);
                 std::fflush(stderr);
@@ -877,6 +965,15 @@ namespace hip_moi
                                     0,
                                     sizeof(int),
                                     "simulated_barrier_arrival_count");
+                hip_memset_or_abort(shadow_epoch_, 0, sizeof(uint64_t), "shadow_epoch");
+                hip_memset_or_abort(exact_shadow_entries_,
+                                    0,
+                                    exact_shadow_entry_capacity_ * sizeof(uint64_t),
+                                    "exact_shadow_entries");
+                hip_memset_or_abort(sampled_watchpoints_,
+                                    0,
+                                    sampled_watchpoint_capacity_ * sizeof(uint64_t),
+                                    "sampled_watchpoints");
             }
 
             static void
@@ -907,53 +1004,62 @@ namespace hip_moi
                     (void)hipFree(device_storage_);
                     device_storage_ = nullptr;
                 }
-                access_records_                = nullptr;
-                diagnostics_                   = nullptr;
-                coalesced_access_records_      = nullptr;
-                coalescing_access_records_     = nullptr;
-                coalescing_group_records_      = nullptr;
-                subgroup_states_               = nullptr;
-                access_count_                  = nullptr;
-                epoch_access_count_            = nullptr;
-                diagnostic_count_              = nullptr;
+                access_records_                  = nullptr;
+                diagnostics_                     = nullptr;
+                coalesced_access_records_        = nullptr;
+                coalescing_access_records_       = nullptr;
+                coalescing_group_records_        = nullptr;
+                subgroup_states_                 = nullptr;
+                access_count_                    = nullptr;
+                epoch_access_count_              = nullptr;
+                diagnostic_count_                = nullptr;
                 simulated_barrier_arrival_count_ = nullptr;
-                coalesced_access_count_        = nullptr;
-                coalescing_access_count_       = nullptr;
-                epoch_coalescing_access_count_ = nullptr;
-                coalescing_fallback_count_     = nullptr;
-                coalescing_group_count_        = nullptr;
+                coalesced_access_count_          = nullptr;
+                coalescing_access_count_         = nullptr;
+                epoch_coalescing_access_count_   = nullptr;
+                coalescing_fallback_count_       = nullptr;
+                coalescing_group_count_          = nullptr;
+                shadow_epoch_                    = nullptr;
+                exact_shadow_entries_            = nullptr;
+                sampled_watchpoints_             = nullptr;
             }
 
-            host_context_options options_;
-            bool                 diagnostics_consumed_  = true;
-            bool                 destructor_reports_    = true;
-            bool                 destructor_aborts_     = true;
-            std::FILE*           diagnostic_stream_     = stderr;
-            int                  last_diagnostic_count_ = 0;
+            host_context_options      options_;
+            bool                      diagnostics_consumed_              = true;
+            bool                      destructor_reports_                = true;
+            bool                      destructor_aborts_                 = true;
+            std::FILE*                diagnostic_stream_                 = stderr;
+            int                       last_diagnostic_count_             = 0;
             std::size_t               storage_bytes_                     = 0;
             std::size_t               layout_bytes_                      = 0;
             int                       access_record_capacity_            = 0;
             int                       coalesced_access_record_capacity_  = 0;
             int                       coalescing_access_record_capacity_ = 0;
             int                       coalescing_group_record_capacity_  = 0;
+            int                       exact_shadow_entry_capacity_       = 0;
+            int                       sampled_watchpoint_capacity_       = 0;
             int                       diagnostic_capacity_               = 0;
             int                       subgroup_capacity_                 = 0;
+            uint64_t                  generation_                        = 1;
             unsigned char*            device_storage_                    = nullptr;
-            access_record*       access_records_        = nullptr;
-            coalesced_access_record* coalesced_access_records_ = nullptr;
-            coalescing_access_record* coalescing_access_records_     = nullptr;
-            coalescing_group_record* coalescing_group_records_     = nullptr;
-            diagnostic*          diagnostics_           = nullptr;
-            subgroup_state*      subgroup_states_       = nullptr;
-            int*                 access_count_          = nullptr;
-            int*                 epoch_access_count_    = nullptr;
-            int*                 diagnostic_count_      = nullptr;
+            access_record*            access_records_                    = nullptr;
+            coalesced_access_record*  coalesced_access_records_          = nullptr;
+            coalescing_access_record* coalescing_access_records_         = nullptr;
+            coalescing_group_record*  coalescing_group_records_          = nullptr;
+            diagnostic*               diagnostics_                       = nullptr;
+            subgroup_state*           subgroup_states_                   = nullptr;
+            int*                      access_count_                      = nullptr;
+            int*                      epoch_access_count_                = nullptr;
+            int*                      diagnostic_count_                  = nullptr;
             int*                      simulated_barrier_arrival_count_   = nullptr;
-            int*                     coalesced_access_count_   = nullptr;
-            int*                      coalescing_access_count_       = nullptr;
-            int*                      epoch_coalescing_access_count_ = nullptr;
-            int*                      coalescing_fallback_count_     = nullptr;
-            int*                     coalescing_group_count_       = nullptr;
+            int*                      coalesced_access_count_            = nullptr;
+            int*                      coalescing_access_count_           = nullptr;
+            int*                      epoch_coalescing_access_count_     = nullptr;
+            int*                      coalescing_fallback_count_         = nullptr;
+            int*                      coalescing_group_count_            = nullptr;
+            uint64_t*                 shadow_epoch_                      = nullptr;
+            uint64_t*                 exact_shadow_entries_              = nullptr;
+            uint64_t*                 sampled_watchpoints_               = nullptr;
         };
     } // namespace detail
 

@@ -403,6 +403,10 @@ No benchmark win is expected from this session.
 
 ### Session 2: Storage Layout for Loom Backend
 
+Status: implemented. `host_context` now allocates shadow epoch storage, exact
+shadow entries, sampled watchpoints, and a generation value inside the existing
+byte-budget layout while leaving the record/log/scan backend active.
+
 Teach `host_context` to allocate a shadow/watchpoint backend layout from
 `storage_bytes`.
 

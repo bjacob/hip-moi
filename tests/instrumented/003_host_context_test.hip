@@ -211,6 +211,16 @@ namespace
         EXPECT_GT(moi.coalesced_access_record_capacity(), 0);
         EXPECT_GT(moi.coalescing_access_record_capacity(), 0);
         EXPECT_GT(moi.coalescing_group_record_capacity(), 0);
+        EXPECT_GT(moi.exact_shadow_entry_capacity(), 0);
+        EXPECT_GT(moi.sampled_watchpoint_capacity(), 0);
+
+        hip_moi::context::storage_ref ref = moi.device_ref();
+        EXPECT_NE(ref.shadow_epoch, nullptr);
+        EXPECT_NE(ref.exact_shadow_entries, nullptr);
+        EXPECT_EQ(ref.exact_shadow_entry_capacity, moi.exact_shadow_entry_capacity());
+        EXPECT_NE(ref.sampled_watchpoints, nullptr);
+        EXPECT_EQ(ref.sampled_watchpoint_capacity, moi.sampled_watchpoint_capacity());
+        EXPECT_NE(ref.generation, 0u);
     }
 
     TEST(HipMoiHostContext, ExplicitCapacityOverridesAreHonored)
@@ -221,6 +231,8 @@ namespace
         options.coalesced_access_record_capacity  = 7;
         options.coalescing_access_record_capacity = 11;
         options.coalescing_group_record_capacity  = 13;
+        options.exact_shadow_entry_capacity       = 23;
+        options.sampled_watchpoint_capacity       = 29;
         options.diagnostic_capacity               = 5;
         options.subgroup_capacity                 = kSubgroupCount;
 
@@ -230,6 +242,8 @@ namespace
         EXPECT_EQ(moi.coalesced_access_record_capacity(), 7);
         EXPECT_EQ(moi.coalescing_access_record_capacity(), 11);
         EXPECT_EQ(moi.coalescing_group_record_capacity(), 13);
+        EXPECT_EQ(moi.exact_shadow_entry_capacity(), 23);
+        EXPECT_EQ(moi.sampled_watchpoint_capacity(), 29);
         EXPECT_EQ(moi.diagnostic_capacity(), 5);
         EXPECT_EQ(moi.subgroup_capacity(), kSubgroupCount);
         EXPECT_LE(moi.layout_bytes(), moi.storage_bytes());
@@ -243,6 +257,8 @@ namespace
         EXPECT_EQ(moi.coalesced_access_record_capacity(), 0);
         EXPECT_EQ(moi.coalescing_access_record_capacity(), 0);
         EXPECT_EQ(moi.coalescing_group_record_capacity(), 0);
+        EXPECT_GT(moi.exact_shadow_entry_capacity(), 0);
+        EXPECT_GT(moi.sampled_watchpoint_capacity(), 0);
 
         int* device_output = nullptr;
         HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
