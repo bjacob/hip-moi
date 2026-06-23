@@ -1107,7 +1107,8 @@ int main() {
   bool use_static_hip_moi_sampled =
       uses_default_static_hip_moi_sampled_policy(sampled_knobs);
   if (use_static_hip_moi_sampled) {
-    std::printf("hip-moi sampled policy: static default publish-only\n");
+    std::printf("hip-moi sampled_watchpoint_context policy: static default "
+                "publish-only\n");
   }
   std::string prefix = "fp16_wmma_tiled_w" + std::to_string(kWaves) + "_" +
                        std::to_string(kMTiles) + "x" + std::to_string(kNTiles);
@@ -1121,13 +1122,14 @@ int main() {
   run_one<tsan::HipMoiExactShadowPolicy>(
       (prefix + "_hip_moi_exact_shadow").c_str(), Mode::HipMoiExactShadow, a, b,
       c, min_ms, warmup_ms);
+  run_one<tsan::HipMoiSampledWatchpointPolicy>(
+      (prefix + "_hip_moi_context_sampled_watchpoint" + sampled_mode_suffix)
+          .c_str(),
+      Mode::HipMoiSampledWatchpoint, a, b, c, min_ms, warmup_ms);
   if (use_static_hip_moi_sampled) {
     run_one<tsan::HipMoiSampledWatchpointStaticPublishOnlyPolicy>(
-        (prefix + "_hip_moi_sampled_watchpoint" + sampled_mode_suffix).c_str(),
-        Mode::HipMoiSampledWatchpoint, a, b, c, min_ms, warmup_ms);
-  } else {
-    run_one<tsan::HipMoiSampledWatchpointPolicy>(
-        (prefix + "_hip_moi_sampled_watchpoint" + sampled_mode_suffix).c_str(),
+        (prefix + "_hip_moi_sampled_watchpoint_context" + sampled_mode_suffix)
+            .c_str(),
         Mode::HipMoiSampledWatchpoint, a, b, c, min_ms, warmup_ms);
   }
 

@@ -405,7 +405,10 @@ The small `w2_2x4_benchmark.hip` family compares:
 * noop,
 * sampled Loom,
 * hip-moi exact shadow through explicit LDS-offset APIs,
-* hip-moi sampled watchpoints through explicit LDS-offset APIs.
+* hip-moi sampled watchpoints through the general `context`,
+* hip-moi sampled watchpoints through the narrower
+  `sampled_watchpoint_context` fast view when the default publish-only sampled
+  knobs make that comparison valid.
 
 The production `prod_16x8_benchmark.hip` extraction is now the main
 optimization target. It keeps Jakub's real fp16 production 16x8 row shape:
@@ -415,12 +418,17 @@ current Loom-parity loop:
 
 * noop,
 * sampled Loom publish-only,
-* hip-moi sampled watchpoints publish-only.
+* hip-moi sampled watchpoints publish-only through the general `context`,
+* hip-moi sampled watchpoints publish-only through
+  `sampled_watchpoint_context`.
 
 Both extracted benchmarks now construct the hip-moi device context once near
 kernel entry and pass it through the instrumented access helpers. That better
 matches the intended source-instrumentation shape than rebuilding a context
-inside every instrumented access wrapper.
+inside every instrumented access wrapper. The default sampled publish-only
+rows additionally construct the narrow `sampled_watchpoint_context` view so the
+benchmark can measure the cost of the fast path separately from the full
+diagnostic-capable context.
 
 The sampled rows now share one fair knob set:
 
@@ -456,9 +464,10 @@ performance-sensitive code changed. The current focused baseline at
 `BENCH_M=BENCH_N=BENCH_K=4096` is roughly:
 
 ```text
-noop                  1.16 ms
-sampled Loom          8.59 ms
-hip-moi sampled       3.44 ms
+noop                                      1.16 ms
+sampled Loom                              8.64 ms
+hip-moi context sampled                  26.1 ms
+hip-moi sampled_watchpoint_context        3.43 ms
 ```
 
 The old append-only `BENCHMARK_LOG.md` has been removed. It was useful while we
@@ -467,11 +476,14 @@ keep the vendored benchmark sources current, summarize important benchmark
 state in this plan, and include fresh benchmark numbers in commit messages or
 review notes when performance-sensitive code changes.
 
-The current hip-moi rows exercise the explicit-offset exact-shadow and
-sampled-watchpoint paths. Under the fair publish-only production default,
-sampled hip-moi is now substantially faster than the sampled-Loom row on the
-vendored 16x8 benchmark. Dense sampling, reporting-on rows, and future workload
-families are still expected to expose overhead that the current matmul does not.
+The current hip-moi rows exercise the explicit-offset exact-shadow path, the
+general `context` sampled-watchpoint path, and the narrow
+`sampled_watchpoint_context` sampled fast path. Under the fair publish-only
+production default, the narrow sampled view is now substantially faster than
+the sampled-Loom row on the vendored 16x8 benchmark, while the general
+`context` row remains much slower. Dense sampling, reporting-on rows, and
+future workload families are still expected to expose overhead that the current
+matmul does not.
 
 Historical codegen audits after backend specialization on the extracted 2-wave
 benchmark showed the main pressure points:
