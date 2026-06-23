@@ -339,6 +339,10 @@ The current go-to shapes are:
 Use the 2-wave shape for fast intra-session iteration. Run all three before a
 session-ending commit when performance-sensitive code has changed.
 
+Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
+commit. For doc-only commits, either append a fresh run or explicitly note that
+the commit is performance-equivalent to the previous logged entry.
+
 The current hip-moi row is orders of magnitude slower than sampled Loom because
 it still uses the record/log/scan path. The near-term benchmark goal is to make
 the hip-moi row exercise the new Loom-like backend and exit the multi-millisecond
