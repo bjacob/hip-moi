@@ -416,7 +416,7 @@ performance-sensitive code changed. The current focused baseline at
 ```text
 noop                  1.16 ms
 sampled Loom          8.59 ms
-hip-moi sampled       3.81 ms
+hip-moi sampled       3.44 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -712,9 +712,12 @@ Production sampled roadmap:
    generated code.
    The sampled view then stopped reloading the epoch from global memory at each
    sampled access. Each thread now keeps a local epoch copy and increments it
-   after the instrumented barrier while thread 0 still updates the global epoch
-   word. That moved the focused production row again to roughly `3.81 ms` and
-   reduced static sampled code size to `0x0a204`.
+   after the instrumented barrier. The first version kept a thread-0 global
+   epoch update for Loom-shape compatibility and moved the focused production
+   row to roughly `3.81 ms`. The current publish-only fast path drops the global
+   epoch update entirely, because represented watchpoints carry the local epoch
+   value and reporting is out of scope for this view. That moved the row to
+   roughly `3.44 ms`, with 68 private bytes and 16 VGPR spills.
 4. Specialize hot-path constants that are fixed in the production row:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,

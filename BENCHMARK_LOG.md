@@ -1215,3 +1215,68 @@ hip-moi static sampled    8272            19             19           89        
 Takeaway: local epoch tracking is a larger win than the prior fence removal.
 It avoids a global epoch load on every sampled access while preserving the
 global epoch word for the Loom-shaped barrier protocol.
+
+## 2026-06-23 after local-only sampled epoch tracking
+
+hip-moi commit measured: this commit (`Use local-only epoch in sampled fast path`)
+sanitizer-strategy benchmark commit: `f1ee1fe`
+
+This pass keeps the per-thread local epoch from the previous entry but removes
+the global epoch atomic update from `sampled_watchpoint_context`. For the
+publish-only sampled fast path, represented watchpoints carry the local epoch
+value and no reporting path consumes the global epoch word. The full
+`hip_moi::context` still owns the general reporting/diagnostic sampled path.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.17 TFLOP/s   61.9% of 191 TFLOP/s  total= 101.190 ms  iters=87  warmup= 101.170 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.63 ms     15.93 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.546 ms  iters=12  warmup= 103.925 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      3.47 ms     39.65 TFLOP/s   20.8% of 191 TFLOP/s  total= 100.532 ms  iters=29  warmup= 100.409 ms  warmup_iters=29
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.22 TFLOP/s   61.9% of 191 TFLOP/s  total= 102.310 ms  iters=88  warmup= 101.035 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.64 ms     15.90 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.715 ms  iters=12  warmup= 104.080 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      3.44 ms     39.95 TFLOP/s   20.9% of 191 TFLOP/s  total= 103.215 ms  iters=30  warmup= 104.159 ms  warmup_iters=30
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                 68     42    256           16   0x0a944
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  flat_atomic  global_atomic  delay s_nop
+sampled Loom             12462            75             72            0             88          82
+hip-moi static sampled    8531            16             16           82              0          83
+```
+
+Takeaway: publish-only sampled hip-moi no longer needs a global epoch header in
+the hot view. Removing it improves latency and restores the lower private-memory
+profile from slot specialization. This should remain scoped to the
+`sampled_watchpoint_context` publish-only path unless we design an equivalent
+local-epoch story for reporting diagnostics.

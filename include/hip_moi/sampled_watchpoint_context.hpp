@@ -40,20 +40,12 @@ namespace hip_moi
         __device__ void init_workgroup()
         {
             epoch_ = 0;
-            if(thread_id() == 0)
-            {
-                if(storage_.workgroup_epoch)
-                {
-                    (void)atomicExch(storage_.workgroup_epoch, 0u);
-                }
-            }
             __syncthreads();
         }
 
         __device__ void syncthreads()
         {
             __syncthreads();
-            advance_epoch();
             ++epoch_;
             __syncthreads();
         }
@@ -110,19 +102,6 @@ namespace hip_moi
             return static_cast<uint32_t>(
                 blockIdx.x
                 + gridDim.x * (blockIdx.y + gridDim.y * static_cast<uint32_t>(blockIdx.z)));
-        }
-
-        __device__ void advance_epoch() const
-        {
-            if(thread_id() == 0)
-            {
-                if(storage_.workgroup_epoch)
-                {
-                    // Loom-shaped fast path: one atomic epoch update between
-                    // workgroup barriers, with no separate device-wide fence.
-                    (void)atomicAdd(storage_.workgroup_epoch, 1u);
-                }
-            }
         }
 
         __device__ uint32_t current_epoch() const
