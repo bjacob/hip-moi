@@ -731,9 +731,11 @@ Production sampled roadmap:
    `0x0aff4`. Remaining low-risk specialization work is mostly access-size
    templating and any still-visible generic range loops.
    A naive access-size template experiment should not be repeated in the same
-   form: it simplified the source range loop but regressed the production row
-   back to roughly 1024 private bytes and 751 VGPR spills. Future range
-   specialization needs to be validated against generated code immediately.
+   form. A corrected recheck after the local-only epoch work measured roughly
+   `3.96 ms` versus the current `3.46 ms`: it shrank code size to `0x8834`, but
+   increased private memory from 68 to 152 bytes, VGPR spills from 16 to 49, and
+   scratch loads/stores from 16/16 to 31/32. Future range specialization needs
+   to be validated against generated code immediately.
 5. Isolate cold diagnostics and storage validation. Publish-only mode should not
    inline reporting, metadata-full diagnostics, or slow validation branches into
    every instrumented access. If those paths are still required for safety,

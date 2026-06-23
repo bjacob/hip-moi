@@ -1280,3 +1280,48 @@ the hot view. Removing it improves latency and restores the lower private-memory
 profile from slot specialization. This should remain scoped to the
 `sampled_watchpoint_context` publish-only path unless we design an equivalent
 local-epoch story for reporting diagnostics.
+
+## 2026-06-23 access-size template recheck
+
+No commit was made for this experiment. A temporary access-size template patch
+was rechecked after the local-only epoch work because an earlier audit had
+accidentally read a stale `.hipv4` sidecar file instead of extracting codegen
+from the rebuilt executable.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.53 TFLOP/s   62.1% of 191 TFLOP/s  total= 102.041 ms  iters=88  warmup= 101.058 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.61 ms     15.95 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.379 ms  iters=12  warmup= 103.925 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      3.96 ms     34.69 TFLOP/s   18.2% of 191 TFLOP/s  total= 103.006 ms  iters=26  warmup= 103.593 ms  warmup_iters=26
+```
+
+Codegen audit from the rebuilt executable:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+hip-moi static sampled                152     39    256           49   0x08834
+```
+
+Assembly-size and rough instruction-count signals for the hip-moi static row:
+
+```text
+asm lines  scratch_load  scratch_store  flat_atomic  delay s_nop
+7197               31             32           83          83
+```
+
+Takeaway: the corrected result is still a regression, but not the dramatic
+1024-private-byte regression initially inferred from stale sidecar metadata. The
+source-level simplification reduces code size, yet it increases private memory,
+VGPR spills, and scratch traffic enough to slow the benchmark from roughly
+`3.46 ms` to `3.96 ms`.
