@@ -98,9 +98,9 @@ The top-level CMake build enables `CMAKE_EXPORT_COMPILE_COMMANDS` by default so
 clangd and other tooling can use the generated compilation database. The
 generated root `compile_commands.json` is intentionally ignored by git. The
 repo also carries a local `.clangd` that tells system clangd where the TheRock
-ROCm tree lives and forces hip-moi headers to parse as HIP; otherwise clangd can
-infer `-x c++-header` for `.hpp` files even when the including `.hip` files have
-the correct `-x hip` compile command.
+ROCm tree lives and forces project `.hpp` headers to parse as HIP; otherwise
+clangd can infer `-x c++-header` for headers even when the including `.hip`
+files have the correct `-x hip` compile command.
 
 ## Current Detector Contract
 
