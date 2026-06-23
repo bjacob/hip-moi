@@ -48,6 +48,40 @@ namespace hip_moi
         std::FILE* diagnostic_stream = stderr;
     };
 
+    inline host_context_options make_exact_shadow_options()
+    {
+        host_context_options options;
+        options.backend = backend_kind::exact_shadow;
+        return options;
+    }
+
+    inline host_context_options make_sampled_watchpoint_reporting_options()
+    {
+        host_context_options options;
+        options.backend                     = backend_kind::sampled_watchpoint;
+        options.sampled_watchpoint_reports  = true;
+        options.exact_shadow_entry_capacity = 0;
+        options.sampled_watchpoint_capacity = -1;
+        return options;
+    }
+
+    inline host_context_options make_sampled_watchpoint_publish_only_options()
+    {
+        host_context_options options       = make_sampled_watchpoint_reporting_options();
+        options.sampled_watchpoint_reports = false;
+        return options;
+    }
+
+    inline host_context_options make_one_watchpoint_publish_only_options()
+    {
+        host_context_options options           = make_sampled_watchpoint_publish_only_options();
+        options.sampled_watchpoint_capacity    = 1;
+        options.sampled_watchpoint_sample_skip = 32;
+        options.sampled_watchpoint_probe_count = 1;
+        options.sampled_watchpoint_delay_iters = 32;
+        return options;
+    }
+
     class host_context
     {
     public:
@@ -90,7 +124,7 @@ namespace hip_moi
             release();
         }
 
-        storage_ref device_ref()
+        storage_ref launch_ref()
         {
             diagnostics_consumed_ = false;
             uint64_t generation   = next_generation();
@@ -114,9 +148,14 @@ namespace hip_moi
             };
         }
 
+        storage_ref device_ref()
+        {
+            return launch_ref();
+        }
+
         storage_ref ref()
         {
-            return device_ref();
+            return launch_ref();
         }
 
         bool check(std::FILE* stream = stderr)

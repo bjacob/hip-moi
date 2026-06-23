@@ -92,10 +92,9 @@ backend storage, which is useful only for saturation tests; a host context
 rejects zero capacity for the backend it is asked to run.
 
 ```c++
-hip_moi::host_context_options options;
-options.backend = hip_moi::backend_kind::sampled_watchpoint;
+hip_moi::host_context_options options =
+    hip_moi::make_sampled_watchpoint_reporting_options();
 options.sampled_watchpoint_capacity = -1; // fill remaining byte budget
-options.exact_shadow_entry_capacity = 0;  // no exact-shadow table
 ```
 
 Sampled watchpoints also expose policy knobs:
@@ -198,23 +197,21 @@ __global__ void diagnostic_kernel(hip_moi::context::storage_ref storage,
     {
         out[0] = loaded;
     }
-
-    ctx.finish();
 }
 ```
 
 Host setup:
 
 ```c++
-hip_moi::host_context_options options;
-options.backend = hip_moi::backend_kind::sampled_watchpoint;
+hip_moi::host_context_options options =
+    hip_moi::make_sampled_watchpoint_reporting_options();
 options.sampled_watchpoint_sample_skip = 1;
 options.sampled_watchpoint_probe_count = 0;
 options.sampled_watchpoint_delay_iters = 0;
 options.sampled_watchpoint_reports = true;
 
 hip_moi::host_context moi(options);
-diagnostic_kernel<<<dim3(1), dim3(64)>>>(moi.device_ref(), out);
+diagnostic_kernel<<<dim3(1), dim3(64)>>>(moi.launch_ref(), out);
 HIP_MOI_CHECK(moi);
 ```
 
@@ -242,14 +239,7 @@ make_fast_context(hip_moi::context::storage_ref storage)
     hip_moi::sampled_watchpoint_context::config cfg{
         /*threads_per_subgroup=*/32,
     };
-    hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
-        /*workgroup_epoch=*/
-        storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
-        /*sampled_watchpoints=*/storage.sampled_watchpoints,
-        /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
-        /*generation=*/storage.generation,
-    };
-    return hip_moi::sampled_watchpoint_context(fast_storage, cfg);
+    return hip_moi::make_sampled_watchpoint_context(storage, cfg);
 }
 
 __global__ void publish_only_kernel(hip_moi::context::storage_ref storage,
@@ -279,23 +269,20 @@ __global__ void publish_only_kernel(hip_moi::context::storage_ref storage,
 Host setup still uses `hip_moi::host_context` to allocate storage:
 
 ```c++
-hip_moi::host_context_options options;
-options.backend = hip_moi::backend_kind::sampled_watchpoint;
-options.sampled_watchpoint_capacity = -1;
-options.sampled_watchpoint_reports = false;
+hip_moi::host_context_options options =
+    hip_moi::make_sampled_watchpoint_publish_only_options();
 
 hip_moi::host_context moi(options);
-publish_only_kernel<<<dim3(1), dim3(64)>>>(moi.device_ref(), out);
+publish_only_kernel<<<dim3(1), dim3(64)>>>(moi.launch_ref(), out);
 ```
 
 There is intentionally no `HIP_MOI_CHECK(moi)` in this example. The fast view is
 publish-only, so a successful run means "the kernel ran with sampled metadata
 publication enabled," not "the program had no races."
 
-The `workgroup_epoch` field in the fast storage view should be adapted from the
-first subgroup epoch slot when using `host_context` storage. The current
-publish-only fast path tracks the epoch locally in each thread; passing the
-field keeps the adapter aligned with the storage contract.
+The adapter hides the fast storage view. That gives the implementation room to
+keep trimming `sampled_watchpoint_context` without asking users to manually copy
+its internal fields.
 
 ## One Watchpoint Fast Row
 
@@ -310,10 +297,8 @@ using one_watchpoint_policy = hip_moi::sampled_watchpoint_policy<
     /*ReportConflicts=*/false,
     /*StaticWatchpointCapacity=*/1>;
 
-hip_moi::host_context_options options;
-options.backend = hip_moi::backend_kind::sampled_watchpoint;
-options.sampled_watchpoint_capacity = 1;
-options.sampled_watchpoint_reports = false;
+hip_moi::host_context_options options =
+    hip_moi::make_one_watchpoint_publish_only_options();
 ```
 
 Only use `StaticWatchpointCapacity=1` when the storage really has exactly one
@@ -337,7 +322,7 @@ std::vector<hip_moi::context::storage_ref> refs;
 for(int i = 0; i < workgroup_count; ++i)
 {
     auto context = std::make_unique<hip_moi::host_context>(options);
-    refs.push_back(context->device_ref());
+    refs.push_back(context->launch_ref());
     contexts.push_back(std::move(context));
 }
 

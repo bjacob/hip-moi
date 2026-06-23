@@ -48,37 +48,22 @@ namespace
     // reports to match the low-overhead benchmark path.
     hip_moi::host_context_options publish_only_context_options()
     {
-        hip_moi::host_context_options options;
-        options.storage_bytes                       = 64 * 1024;
-        options.subgroup_capacity                   = kSubgroupCount;
-        options.backend                             = hip_moi::backend_kind::sampled_watchpoint;
-        options.sampled_watchpoint_capacity         = 1;
-        options.sampled_watchpoint_sample_skip      = 32;
-        options.sampled_watchpoint_probe_count      = 1;
-        options.sampled_watchpoint_delay_iters      = 32;
-        options.sampled_watchpoint_reports          = false;
+        hip_moi::host_context_options options = hip_moi::make_one_watchpoint_publish_only_options();
+        options.storage_bytes                 = 64 * 1024;
+        options.subgroup_capacity             = kSubgroupCount;
         return options;
     }
 
-    // Convert the general storage_ref produced by host_context into the smaller
-    // storage view required by sampled_watchpoint_context. This avoids carrying
-    // the general diagnostic context through the hot kernel.
+    // Convert the host_context storage view into the narrower fast context.
+    // The helper hides sampled_watchpoint_context::storage_ref details at the
+    // instrumentation call site.
     __device__ hip_moi::sampled_watchpoint_context
         make_fast_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::sampled_watchpoint_context::config cfg{
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
         };
-        // The fast context only needs the epoch word, watchpoint table, table
-        // size, and launch generation. It has no diagnostic buffer.
-        hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
-            /*workgroup_epoch=*/
-            storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
-            /*sampled_watchpoints=*/storage.sampled_watchpoints,
-            /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
-            /*generation=*/storage.generation,
-        };
-        return hip_moi::sampled_watchpoint_context(fast_storage, cfg);
+        return hip_moi::make_sampled_watchpoint_context(storage, cfg);
     }
 
     // Plain HIP version: each thread writes one LDS element, synchronizes, then
@@ -163,7 +148,7 @@ int main()
     // there is no HIP_MOI_CHECK because this fast view does not consume reports.
     hip_moi::host_context moi(publish_only_context_options());
     publish_only_neighbor_kernel<<<dim3(1), dim3(kThreadCount)>>>(
-        device_instrumented_output, moi.device_ref());
+        device_instrumented_output, moi.launch_ref());
     check_hip(hipGetLastError(), "hipGetLastError(publish_only)");
     check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(publish_only)");
 

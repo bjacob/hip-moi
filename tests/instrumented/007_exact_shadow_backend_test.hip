@@ -57,7 +57,6 @@ namespace
             out[0] = ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     __global__ void exact_shadow_race_kernel(hip_moi::context::storage_ref storage)
@@ -77,7 +76,6 @@ namespace
             (void)ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     __global__ void exact_shadow_capacity_kernel(hip_moi::context::storage_ref storage)
@@ -92,7 +90,6 @@ namespace
             ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
                 &values[2], 99, /*lds_byte_offset=*/8, kOverflowSite);
         }
-        ctx.finish();
     }
 
     template <typename Storage>

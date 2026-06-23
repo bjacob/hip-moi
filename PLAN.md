@@ -111,10 +111,10 @@ A diagnostic of interest is:
 * the accesses are in the same synchronization epoch,
 * at least one access is a write.
 
-`ctx.syncthreads()` performs a real workgroup barrier, closes the current epoch,
-checks conflicts for that epoch, and advances subgroup epochs. `ctx.finish()`
-closes the final epoch for kernels that end after instrumented accesses without
-another barrier.
+Instrumented accesses check and update shadow state online. `ctx.syncthreads()`
+performs a real workgroup barrier and advances the epoch; ordinary kernels do
+not need a final flush. `ctx.finish()` remains only as a compatibility alias for
+explicit epoch advancement in tests and experiments.
 
 `ctx.simulate_syncthreads(participates, site)` exists only for tests and hard
 synchronization diagnostics. It lets the suite exercise barrier-divergence
@@ -395,7 +395,7 @@ hip_moi::host_context_options options;
 options.storage_bytes = 16 * 1024 * 1024;
 
 hip_moi::host_context moi(options);
-kernel<<<grid, block>>>(moi.device_ref());
+kernel<<<grid, block>>>(moi.launch_ref());
 HIP_MOI_CHECK(moi);
 ```
 
@@ -791,11 +791,12 @@ Production sampled roadmap:
    use the Loom-shaped sequence: barrier, one workgroup epoch increment by one
    thread, barrier. Keep subgroup-specific epochs out of the hot sampled path
    unless a later benchmark requires them.
-   Status: implemented in the sampled publish-only view as a single
-   `workgroup_epoch` pointer. Existing host allocation is reused by passing
-   `&subgroup_states[0].epoch` to the view, but the hot context no longer
-   carries subgroup-state capacity or loops over subgroup epochs. The focused
-   production `sampled_watchpoint_context` row dropped again from roughly
+   Status: implemented in the sampled publish-only view with a local per-thread
+   epoch and no subgroup-state fields in the hot context. Existing host
+   allocation is adapted through `make_sampled_watchpoint_context()`, but the
+   hot context no longer carries subgroup-state capacity or loops over subgroup
+   epochs. The focused production `sampled_watchpoint_context` row dropped again
+   from roughly
    `7.35 ms` to `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
    A later tightening pass made this path more Loom-shaped by replacing the
    ordinary epoch store/increment plus `__threadfence()` with atomic epoch

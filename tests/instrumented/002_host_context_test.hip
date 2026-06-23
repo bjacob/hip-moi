@@ -67,7 +67,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        ctx.finish();
     }
 
     __global__ void cross_subgroup_race_kernel(int* out, hip_moi::context::storage_ref storage)
@@ -85,7 +84,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        ctx.finish();
     }
 
     void require_hip_success(hipError_t status, const char* expression)
@@ -108,7 +106,7 @@ namespace
                            0,
                            0,
                            device_output,
-                           moi.device_ref());
+                           moi.launch_ref());
     }
 
     void launch_race_kernel(hip_moi::host_context& moi, int* device_output)
@@ -119,7 +117,7 @@ namespace
                            0,
                            0,
                            device_output,
-                           moi.device_ref());
+                           moi.launch_ref());
     }
 
     void launch_race_kernel_or_abort(hip_moi::host_context& moi)
@@ -206,12 +204,39 @@ namespace
         EXPECT_GT(moi.exact_shadow_entry_capacity(), 0);
         EXPECT_EQ(moi.sampled_watchpoint_capacity(), 0);
 
-        hip_moi::context::storage_ref ref = moi.device_ref();
+        hip_moi::context::storage_ref ref = moi.launch_ref();
         EXPECT_NE(ref.exact_shadow_entries, nullptr);
         EXPECT_EQ(ref.exact_shadow_entry_capacity, moi.exact_shadow_entry_capacity());
         EXPECT_EQ(ref.sampled_watchpoints, nullptr);
         EXPECT_EQ(ref.sampled_watchpoint_capacity, moi.sampled_watchpoint_capacity());
         EXPECT_NE(ref.generation, 0u);
+    }
+
+    TEST(HipMoiHostContext, OptionFactoriesNameCommonModes)
+    {
+        hip_moi::host_context_options exact = hip_moi::make_exact_shadow_options();
+        EXPECT_EQ(exact.backend, hip_moi::backend_kind::exact_shadow);
+
+        hip_moi::host_context_options sampled_reporting =
+            hip_moi::make_sampled_watchpoint_reporting_options();
+        EXPECT_EQ(sampled_reporting.backend, hip_moi::backend_kind::sampled_watchpoint);
+        EXPECT_EQ(sampled_reporting.exact_shadow_entry_capacity, 0);
+        EXPECT_EQ(sampled_reporting.sampled_watchpoint_capacity, -1);
+        EXPECT_TRUE(sampled_reporting.sampled_watchpoint_reports);
+
+        hip_moi::host_context_options sampled_publish_only =
+            hip_moi::make_sampled_watchpoint_publish_only_options();
+        EXPECT_EQ(sampled_publish_only.backend, hip_moi::backend_kind::sampled_watchpoint);
+        EXPECT_FALSE(sampled_publish_only.sampled_watchpoint_reports);
+
+        hip_moi::host_context_options one_watchpoint =
+            hip_moi::make_one_watchpoint_publish_only_options();
+        EXPECT_EQ(one_watchpoint.backend, hip_moi::backend_kind::sampled_watchpoint);
+        EXPECT_EQ(one_watchpoint.sampled_watchpoint_capacity, 1);
+        EXPECT_EQ(one_watchpoint.sampled_watchpoint_sample_skip, 32u);
+        EXPECT_EQ(one_watchpoint.sampled_watchpoint_probe_count, 1u);
+        EXPECT_EQ(one_watchpoint.sampled_watchpoint_delay_iters, 32u);
+        EXPECT_FALSE(one_watchpoint.sampled_watchpoint_reports);
     }
 
     TEST(HipMoiHostContext, ExplicitCapacityOverridesAreHonored)

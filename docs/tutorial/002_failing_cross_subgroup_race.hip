@@ -83,9 +83,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        // No ctx.syncthreads() occurred, so finish() closes the final epoch and
-        // lets the host-side check observe the conflict.
-        ctx.finish();
     }
 } // namespace
 
@@ -101,7 +98,7 @@ int main()
               "hipMemcpy(device_output)");
 
     hipLaunchKernelGGL(
-        cross_subgroup_race_kernel, dim3(1), dim3(kThreadCount), 0, 0, device_output, moi.device_ref());
+        cross_subgroup_race_kernel, dim3(1), dim3(kThreadCount), 0, 0, device_output, moi.launch_ref());
     check_hip(hipGetLastError(), "hipGetLastError");
 
     // This call is expected to print the race diagnostic and abort. The CTest

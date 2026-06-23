@@ -67,7 +67,6 @@ namespace
         {
             (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        ctx.finish();
     }
 
     __global__ void
@@ -77,7 +76,6 @@ namespace
         ctx.init_workgroup();
 
         ctx.simulate_syncthreads(/*participates=*/ctx.thread_id() != 0, kSimulatedBarrierSite);
-        ctx.finish();
     }
 
     template <typename Storage>
@@ -155,7 +153,7 @@ namespace
                            dim3(kThreadCount),
                            0,
                            0,
-                           moi.device_ref());
+                           moi.launch_ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
 
         testing::internal::CaptureStderr();

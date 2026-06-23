@@ -71,7 +71,7 @@ hipLaunchKernelGGL(producer_consumer_kernel,
                    0,
                    0,
                    device_output,
-                   moi.device_ref());
+                   moi.launch_ref());
 
 HIP_MOI_CHECK(moi);
 ```
@@ -146,15 +146,10 @@ The host still uses `hip_moi::host_context` to allocate device metadata, but it
 selects sampled-watchpoint storage and one watchpoint entry:
 
 ```c++
-hip_moi::host_context_options options;
+hip_moi::host_context_options options =
+    hip_moi::make_one_watchpoint_publish_only_options();
 options.storage_bytes = 64 * 1024;
 options.subgroup_capacity = 2;
-options.backend = hip_moi::backend_kind::sampled_watchpoint;
-options.sampled_watchpoint_capacity = 1;
-options.sampled_watchpoint_sample_skip = 32;
-options.sampled_watchpoint_probe_count = 1;
-options.sampled_watchpoint_delay_iters = 32;
-options.sampled_watchpoint_reports = false;
 
 hip_moi::host_context moi(options);
 ```
@@ -162,14 +157,11 @@ hip_moi::host_context moi(options);
 Inside the kernel, convert the storage ref into the smaller fast view:
 
 ```c++
-hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
-    /*workgroup_epoch=*/
-    storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
-    /*sampled_watchpoints=*/storage.sampled_watchpoints,
-    /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
-    /*generation=*/storage.generation,
+hip_moi::sampled_watchpoint_context::config cfg{
+    /*threads_per_subgroup=*/32,
 };
-hip_moi::sampled_watchpoint_context ctx(fast_storage, cfg);
+hip_moi::sampled_watchpoint_context ctx =
+    hip_moi::make_sampled_watchpoint_context(storage, cfg);
 ```
 
 Then instrument LDS accesses with the fast API:

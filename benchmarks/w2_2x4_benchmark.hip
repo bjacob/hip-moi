@@ -200,18 +200,13 @@ make_hip_moi_sampled_watchpoint_context(uint32_t generation) {
   hip_moi::sampled_watchpoint_context::config cfg{
       /*threads_per_subgroup=*/kWaveSize,
   };
-  hip_moi::sampled_watchpoint_context::storage_ref storage{};
+  hip_moi::context::storage_ref storage{};
   if (g_hip_moi_context_storages &&
       workgroup_id < g_hip_moi_context_storage_count) {
-    const hip_moi::context::storage_ref *source =
-        &g_hip_moi_context_storages[workgroup_id];
-    storage.workgroup_epoch =
-        source->subgroup_states ? &source->subgroup_states[0].epoch : nullptr;
-    storage.sampled_watchpoints = source->sampled_watchpoints;
-    storage.sampled_watchpoint_capacity = source->sampled_watchpoint_capacity;
+    storage = g_hip_moi_context_storages[workgroup_id];
   }
   storage.generation = generation;
-  return hip_moi::sampled_watchpoint_context(storage, cfg);
+  return hip_moi::make_sampled_watchpoint_context(storage, cfg);
 }
 
 __device__ __forceinline__ f32x8 zero_f32x8() {
@@ -931,7 +926,7 @@ static Allocation make_allocation(Mode mode) {
       auto *context = new hip_moi::host_context(options);
       context->disable_destructor_check();
       allocation.hip_moi_contexts.push_back(context);
-      storage_refs.push_back(context->device_ref());
+      storage_refs.push_back(context->launch_ref());
     }
     HIP_CHECK(hipMalloc(&allocation.hip_moi_context_storage_refs,
                         storage_refs.size() * sizeof(storage_refs[0])));

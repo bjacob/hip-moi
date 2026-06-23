@@ -80,9 +80,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        // Close the final epoch so the unconsumed diagnostic is visible to the
-        // host_context destructor.
-        ctx.finish();
     }
 } // namespace
 
@@ -106,7 +103,7 @@ int main()
                            0,
                            0,
                            device_output,
-                           moi.device_ref());
+                           moi.launch_ref());
         check_hip(hipGetLastError(), "hipGetLastError");
     }
 

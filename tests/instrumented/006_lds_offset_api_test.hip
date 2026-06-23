@@ -54,7 +54,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     __global__ void offset_race_kernel(hip_moi::context::storage_ref storage)
@@ -72,7 +71,6 @@ namespace
         {
             (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     template <typename Storage>

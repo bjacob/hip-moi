@@ -55,13 +55,7 @@ namespace
         hip_moi::sampled_watchpoint_context::config cfg{
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
         };
-        hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
-            storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
-            storage.sampled_watchpoints,
-            storage.sampled_watchpoint_capacity,
-            storage.generation,
-        };
-        return hip_moi::sampled_watchpoint_context(fast_storage, cfg);
+        return hip_moi::make_sampled_watchpoint_context(storage, cfg);
     }
 
     __global__ void sampled_safe_kernel(hip_moi::context::storage_ref storage)
@@ -82,7 +76,6 @@ namespace
             (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     __global__ void sampled_fast_context_smoke_kernel(hip_moi::context::storage_ref storage,
@@ -125,7 +118,6 @@ namespace
             (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
-        ctx.finish();
     }
 
     template <typename Storage>

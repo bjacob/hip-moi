@@ -280,7 +280,7 @@ int main()
                        device_a,
                        device_b,
                        device_moi_c,
-                       moi.device_ref());
+                       moi.launch_ref());
     check_hip(hipGetLastError(), "hipGetLastError(instrumented)");
 
     HIP_MOI_CHECK(moi);

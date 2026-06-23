@@ -81,9 +81,6 @@ namespace
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
-        // There is no barrier, so finish() closes the kernel's final epoch and
-        // makes the conflict visible to the host.
-        ctx.finish();
     }
 } // namespace
 
@@ -104,7 +101,7 @@ int main()
                        0,
                        0,
                        device_output,
-                       moi.device_ref());
+                       moi.launch_ref());
     check_hip(hipGetLastError(), "hipGetLastError");
 
     // The explicit host check reports the diagnostic and aborts. This is the

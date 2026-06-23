@@ -118,7 +118,7 @@ int main()
                        0,
                        0,
                        device_output + 1,
-                       moi.device_ref());
+                       moi.launch_ref());
     check_hip(hipGetLastError(), "hipGetLastError(context)");
 
     // Explicitly consume diagnostics after the kernel. This safe example should

@@ -244,6 +244,9 @@ namespace hip_moi
             __syncthreads();
         }
 
+        // Online backends report conflicts at access time. finish() remains as a
+        // compatibility alias for explicit epoch advancement in tests and
+        // experiments; ordinary kernels do not need a final flush.
         __device__ void finish()
         {
             close_epoch();

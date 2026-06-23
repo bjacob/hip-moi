@@ -58,7 +58,6 @@ namespace
         {
             (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, HIP_MOI_SITE_ID());
         }
-        ctx.finish();
     }
 
     template <typename Storage>

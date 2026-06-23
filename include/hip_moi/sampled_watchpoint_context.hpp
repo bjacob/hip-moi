@@ -8,6 +8,7 @@
 #define HIP_MOI_SAMPLED_WATCHPOINT_CONTEXT_HPP
 
 #include "hip_moi/common.hpp"
+#include "hip_moi/context.hpp"
 #include "hip_moi/shadow.hpp"
 
 #include <type_traits>
@@ -24,10 +25,9 @@ namespace hip_moi
 
         struct storage_ref
         {
-            uint32_t*       workgroup_epoch             = nullptr;
-            uint64_t*       sampled_watchpoints         = nullptr;
-            int             sampled_watchpoint_capacity = 0;
-            uint64_t        generation                  = 0;
+            uint64_t* sampled_watchpoints         = nullptr;
+            int       sampled_watchpoint_capacity = 0;
+            uint64_t  generation                  = 0;
         };
 
         __device__ sampled_watchpoint_context(storage_ref storage, config cfg)
@@ -255,6 +255,23 @@ namespace hip_moi
         // sampled access site in the publish-only fast path.
         uint32_t epoch_;
     };
+
+    __device__ inline sampled_watchpoint_context::storage_ref
+        make_sampled_watchpoint_storage_ref(context::storage_ref storage)
+    {
+        return sampled_watchpoint_context::storage_ref{
+            /*sampled_watchpoints=*/storage.sampled_watchpoints,
+            /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
+            /*generation=*/storage.generation,
+        };
+    }
+
+    __device__ inline sampled_watchpoint_context
+        make_sampled_watchpoint_context(context::storage_ref               storage,
+                                        sampled_watchpoint_context::config cfg)
+    {
+        return sampled_watchpoint_context(make_sampled_watchpoint_storage_ref(storage), cfg);
+    }
 } // namespace hip_moi
 
 #endif // HIP_MOI_SAMPLED_WATCHPOINT_CONTEXT_HPP
