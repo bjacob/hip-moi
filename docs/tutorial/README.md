@@ -9,17 +9,22 @@ This README is the tutorial. The numbered `.hip` files beside it are compiled
 companions: they keep the examples honest, provide CTest coverage, and give
 readers a place to experiment after reading.
 
-hip-moi now exposes one device API:
+hip-moi currently exposes two device-side shapes:
 
 ```c++
 hip_moi::context
+hip_moi::sampled_watchpoint_context
 ```
 
-The context is subgroup-scoped. It reports same-epoch LDS conflicts between
-different subgroups in a workgroup, and intentionally does not try to diagnose
-conflicts wholly inside one subgroup. This matches the project’s current
-benchmarking target: compare hip-moi against Loom-style subgroup-level
-instrumentation and then optimize that path.
+`hip_moi::context` is the general diagnostic context. It is subgroup-scoped:
+it reports same-epoch LDS conflicts between different subgroups in a workgroup,
+and intentionally does not try to diagnose conflicts wholly inside one subgroup.
+
+`hip_moi::sampled_watchpoint_context` is narrower. It is the publish-only fast
+view used by the high-performance sampled-watchpoint benchmark rows. It omits
+diagnostic reporting state, uses a fixed compile-time sampled policy, and is
+for full-workgroup-barrier kernels where the instrumentation already knows each
+LDS byte offset.
 
 Run the tutorial programs through CTest:
 
@@ -113,3 +118,80 @@ The compiled companion is `003_destructor_fallback.hip`.
 shows a plain data-tiled 16x16x16 f16 WMMA kernel, then instruments the LDS
 publication and consumption with `hip_moi::context`. It is gated by the CMake
 RDNA4 architecture check.
+
+## Context Diagnostics Versus Fast Publication
+
+`005_context_cross_subgroup_race.hip` is the diagnostic path in its simplest
+explicit form: two subgroups access the same LDS location in one epoch, and the
+general `hip_moi::context` reports the race through `HIP_MOI_CHECK`.
+
+The high-performance sampled-watchpoint benchmark rows use a different shape.
+They do not use the general context object in the hot kernel. Instead, they
+construct `hip_moi::sampled_watchpoint_context`, pass a compile-time
+publish-only policy, and let selected lanes publish compact watchpoint metadata.
+That is what `006_sampled_watchpoint_context.hip` demonstrates.
+
+The policy fixes the same knobs used in the benchmark default:
+
+```c++
+using publish_only_policy = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/32,
+    /*ProbeCount=*/1,
+    /*DelayIters=*/32,
+    /*ReportConflicts=*/false,
+    /*StaticWatchpointCapacity=*/1>;
+```
+
+The host still uses `hip_moi::host_context` to allocate device metadata, but it
+selects sampled-watchpoint storage and one watchpoint entry:
+
+```c++
+hip_moi::host_context_options options;
+options.storage_bytes = 64 * 1024;
+options.subgroup_capacity = 2;
+options.backend = hip_moi::backend_kind::sampled_watchpoint;
+options.sampled_watchpoint_capacity = 1;
+options.sampled_watchpoint_sample_skip = 32;
+options.sampled_watchpoint_probe_count = 1;
+options.sampled_watchpoint_delay_iters = 32;
+options.sampled_watchpoint_reports = false;
+
+hip_moi::host_context moi(options);
+```
+
+Inside the kernel, convert the storage ref into the smaller fast view:
+
+```c++
+hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
+    /*workgroup_epoch=*/
+    storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
+    /*sampled_watchpoints=*/storage.sampled_watchpoints,
+    /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
+    /*generation=*/storage.generation,
+};
+hip_moi::sampled_watchpoint_context ctx(fast_storage, cfg);
+```
+
+Then instrument LDS accesses with the fast API:
+
+```c++
+ctx.lds_store_at<publish_only_policy>(
+    &values[index],
+    index * 3,
+    /*lds_byte_offset=*/index * sizeof(int),
+    HIP_MOI_SITE_ID());
+
+ctx.syncthreads();
+
+int loaded = ctx.lds_load_at<publish_only_policy>(
+    &values[neighbor],
+    /*lds_byte_offset=*/neighbor * sizeof(int),
+    HIP_MOI_SITE_ID());
+```
+
+There is intentionally no `HIP_MOI_CHECK(moi)` in this fast-view example.
+`sampled_watchpoint_context` is publication-only: it is the path for matching
+the low-overhead Loom-style benchmark behavior, not for consuming user-facing
+diagnostics.
+
+The compiled companion is `006_sampled_watchpoint_context.hip`.

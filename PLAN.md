@@ -164,6 +164,13 @@ context as if they solved finer-grained synchronization.
 benchmark policy setup, and the per-workgroup storage-ref array pattern needed
 for multi-workgroup kernels.
 
+`docs/tutorial/` now includes the same split as an executable tutorial. In
+particular, `006_sampled_watchpoint_context.hip` shows the high-performance
+publish-only recipe used by the benchmarks: sampled backend host allocation,
+one watchpoint entry, static publish-only policy, direct
+`sampled_watchpoint_context` construction, explicit LDS byte offsets, and no
+`HIP_MOI_CHECK` on the fast path.
+
 This split is important for the next scope increases:
 
 * non-negotiable: broaden end-to-end workloads beyond one isolated matmul, with
