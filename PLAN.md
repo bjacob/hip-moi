@@ -158,6 +158,12 @@ represented watchpoints carry the local epoch and no reporting path consumes a
 global epoch word. Those assumptions must not leak back into the general
 context as if they solved finer-grained synchronization.
 
+`docs/context.md` now documents the practical split with examples: general
+`context + sampled_watchpoint` usage for diagnostics, direct
+`sampled_watchpoint_context` usage for publish-only fast rows, one-watchpoint
+benchmark policy setup, and the per-workgroup storage-ref array pattern needed
+for multi-workgroup kernels.
+
 This split is important for the next scope increases:
 
 * non-negotiable: broaden end-to-end workloads beyond one isolated matmul, with

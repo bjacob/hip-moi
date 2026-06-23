@@ -32,6 +32,28 @@ and eventual synchronization models beyond full-workgroup barriers. The sampled
 fast view may use stronger assumptions, such as local-only epoch tracking, as
 long as those assumptions remain explicit and scoped.
 
+## Choosing A Context
+
+Use the general `hip_moi::context` when you want diagnostics:
+
+* exact shadow diagnostics,
+* sampled watchpoint diagnostics in reporting mode,
+* metadata saturation diagnostics,
+* destructor or `HIP_MOI_CHECK` host reporting,
+* future synchronization models beyond full-workgroup barriers.
+
+Use `hip_moi::sampled_watchpoint_context` only for the current narrow fast path:
+
+* sampled watchpoint publication only,
+* fixed compile-time sampled policy,
+* full-workgroup barriers through `ctx.syncthreads()`,
+* source-instrumented kernels where the LDS byte offset is already known,
+* benchmark rows that should resemble Jakub's sampled Loom publish-only path.
+
+The fast view does not report conflicts. It publishes sampled watchpoint
+metadata at selected sites and intentionally omits the cold diagnostic state
+that makes `hip_moi::context` useful as a sanitizer-facing API.
+
 ## Byte Budget
 
 The primary host option is a byte budget:
@@ -126,6 +148,240 @@ sampled policies. It tracks its epoch locally across instrumented
 full-workgroup barriers and does not update a global epoch word. That is a
 benchmark fast-path trade-off, suitable for the current sampled publish-only
 matmul rows, not a model for atomics or finer-grained synchronization.
+
+## General Context Example
+
+This is the shape to use when the host should be able to consume diagnostics:
+
+```c++
+using sampled_reporting_policy = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/1,
+    /*ProbeCount=*/0,
+    /*DelayIters=*/0,
+    /*ReportConflicts=*/true>;
+
+__device__ hip_moi::context
+make_context(hip_moi::context::storage_ref storage)
+{
+    hip_moi::context::config cfg{
+        /*thread_count=*/static_cast<int>(blockDim.x),
+        /*threads_per_subgroup=*/32,
+        /*subgroup_count=*/(static_cast<int>(blockDim.x) + 31) / 32,
+    };
+    return hip_moi::context(storage, cfg);
+}
+
+__global__ void diagnostic_kernel(hip_moi::context::storage_ref storage,
+                                  int* out)
+{
+    __shared__ int values[64];
+
+    hip_moi::context ctx = make_context(storage);
+    ctx.init_workgroup();
+
+    int index = static_cast<int>(threadIdx.x);
+    ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint,
+                     sampled_reporting_policy>(
+        &values[index],
+        index,
+        /*lds_byte_offset=*/index * static_cast<int>(sizeof(int)),
+        HIP_MOI_SITE_ID());
+
+    ctx.syncthreads();
+
+    int loaded = ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
+                                 sampled_reporting_policy>(
+        &values[index],
+        /*lds_byte_offset=*/index * static_cast<int>(sizeof(int)),
+        HIP_MOI_SITE_ID());
+    if(index == 0)
+    {
+        out[0] = loaded;
+    }
+
+    ctx.finish();
+}
+```
+
+Host setup:
+
+```c++
+hip_moi::host_context_options options;
+options.backend = hip_moi::backend_kind::sampled_watchpoint;
+options.sampled_watchpoint_sample_skip = 1;
+options.sampled_watchpoint_probe_count = 0;
+options.sampled_watchpoint_delay_iters = 0;
+options.sampled_watchpoint_reports = true;
+
+hip_moi::host_context moi(options);
+diagnostic_kernel<<<dim3(1), dim3(64)>>>(moi.device_ref(), out);
+HIP_MOI_CHECK(moi);
+```
+
+For a publish-only general-context row, set
+`options.sampled_watchpoint_reports = false` or use a policy with
+`ReportConflicts=false`. That is still not the same as
+`sampled_watchpoint_context`: the full `hip_moi::context` object remains live in
+the kernel.
+
+## Fast View Example
+
+The fast view is constructed from the same host-allocated storage, but it uses a
+smaller device-side view:
+
+```c++
+using publish_only_policy = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/32,
+    /*ProbeCount=*/1,
+    /*DelayIters=*/32,
+    /*ReportConflicts=*/false>;
+
+__device__ hip_moi::sampled_watchpoint_context
+make_fast_context(hip_moi::context::storage_ref storage)
+{
+    hip_moi::sampled_watchpoint_context::config cfg{
+        /*threads_per_subgroup=*/32,
+    };
+    hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
+        /*workgroup_epoch=*/
+        storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
+        /*sampled_watchpoints=*/storage.sampled_watchpoints,
+        /*sampled_watchpoint_capacity=*/storage.sampled_watchpoint_capacity,
+        /*generation=*/storage.generation,
+    };
+    return hip_moi::sampled_watchpoint_context(fast_storage, cfg);
+}
+
+__global__ void publish_only_kernel(hip_moi::context::storage_ref storage,
+                                    int* out)
+{
+    __shared__ int values[64];
+
+    hip_moi::sampled_watchpoint_context ctx = make_fast_context(storage);
+    ctx.init_workgroup();
+
+    int index = static_cast<int>(threadIdx.x);
+    uint32_t offset = static_cast<uint32_t>(index * sizeof(int));
+    ctx.lds_store_at<publish_only_policy>(
+        &values[index], index, /*lds_byte_offset=*/offset, HIP_MOI_SITE_ID());
+
+    ctx.syncthreads();
+
+    int loaded = ctx.lds_load_at<publish_only_policy>(
+        &values[index], /*lds_byte_offset=*/offset, HIP_MOI_SITE_ID());
+    if(index == 0)
+    {
+        out[0] = loaded;
+    }
+}
+```
+
+Host setup still uses `hip_moi::host_context` to allocate storage:
+
+```c++
+hip_moi::host_context_options options;
+options.backend = hip_moi::backend_kind::sampled_watchpoint;
+options.sampled_watchpoint_capacity = -1;
+options.sampled_watchpoint_reports = false;
+
+hip_moi::host_context moi(options);
+publish_only_kernel<<<dim3(1), dim3(64)>>>(moi.device_ref(), out);
+```
+
+There is intentionally no `HIP_MOI_CHECK(moi)` in this example. The fast view is
+publish-only, so a successful run means "the kernel ran with sampled metadata
+publication enabled," not "the program had no races."
+
+The `workgroup_epoch` field in the fast storage view should be adapted from the
+first subgroup epoch slot when using `host_context` storage. The current
+publish-only fast path tracks the epoch locally in each thread; passing the
+field keeps the adapter aligned with the storage contract.
+
+## One Watchpoint Fast Row
+
+For benchmark rows that intentionally match Jakub's one-watchpoint sampled Loom
+configuration, make both the host capacity and the policy explicit:
+
+```c++
+using one_watchpoint_policy = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/32,
+    /*ProbeCount=*/1,
+    /*DelayIters=*/32,
+    /*ReportConflicts=*/false,
+    /*StaticWatchpointCapacity=*/1>;
+
+hip_moi::host_context_options options;
+options.backend = hip_moi::backend_kind::sampled_watchpoint;
+options.sampled_watchpoint_capacity = 1;
+options.sampled_watchpoint_reports = false;
+```
+
+Only use `StaticWatchpointCapacity=1` when the storage really has exactly one
+watchpoint entry. It lets the compiler fold slot selection to zero. If the
+capacity is launch-configurable, leave that final policy argument at its
+default `0`.
+
+## Multi-Workgroup Storage
+
+A `hip_moi::context::storage_ref` is one detector storage view. For a
+multi-workgroup kernel, give each workgroup its own storage view rather than
+having every block share the same watchpoint table.
+
+One simple host pattern is to create one `host_context` per workgroup and copy
+their device refs to a device array:
+
+```c++
+std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
+std::vector<hip_moi::context::storage_ref> refs;
+
+for(int i = 0; i < workgroup_count; ++i)
+{
+    auto context = std::make_unique<hip_moi::host_context>(options);
+    refs.push_back(context->device_ref());
+    contexts.push_back(std::move(context));
+}
+
+hip_moi::context::storage_ref* refs_device = nullptr;
+hipMalloc(&refs_device, refs.size() * sizeof(refs[0]));
+hipMemcpy(refs_device,
+          refs.data(),
+          refs.size() * sizeof(refs[0]),
+          hipMemcpyHostToDevice);
+
+kernel<<<grid, block>>>(refs_device, static_cast<int>(refs.size()), out);
+```
+
+The kernel selects the ref for its workgroup, then constructs either the general
+context or the fast view:
+
+```c++
+__device__ uint32_t flat_workgroup_id()
+{
+    return static_cast<uint32_t>(
+        blockIdx.x
+        + gridDim.x * (blockIdx.y + gridDim.y * static_cast<uint32_t>(blockIdx.z)));
+}
+
+__global__ void kernel(hip_moi::context::storage_ref* refs,
+                       int                            ref_count,
+                       int*                           out)
+{
+    uint32_t workgroup = flat_workgroup_id();
+    if(workgroup >= static_cast<uint32_t>(ref_count))
+    {
+        return;
+    }
+
+    hip_moi::sampled_watchpoint_context ctx = make_fast_context(refs[workgroup]);
+    ctx.init_workgroup();
+    // Instrument LDS accesses with ctx.lds_load_at<policy>() and
+    // ctx.lds_store_at<policy>().
+}
+```
+
+This is intentionally a little verbose. It makes generation, storage ownership,
+and per-workgroup isolation explicit, which is what the benchmark-sensitive
+path currently needs.
 
 ## Inspecting The Layout
 
