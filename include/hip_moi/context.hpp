@@ -738,6 +738,7 @@ namespace hip_moi
 
         __device__ void sampled_delay() const
         {
+#pragma unroll 1
             for(uint32_t i = 0; i < storage_.sampled_watchpoint_delay_iters; ++i)
             {
                 asm volatile("s_nop 0" ::: "memory");
@@ -749,6 +750,7 @@ namespace hip_moi
         {
             if constexpr(SampledPolicy::delay_iters != 0)
             {
+#pragma unroll 1
                 for(uint32_t i = 0; i < SampledPolicy::delay_iters; ++i)
                 {
                     asm volatile("s_nop 0" ::: "memory");

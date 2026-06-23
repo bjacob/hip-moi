@@ -845,3 +845,53 @@ Takeaway: hip-moi's current production gap is primarily a generated-code and
 live-state problem. The next optimizations should shrink the sampled hot path,
 starting with the unrolled delay, a smaller sampled context/view, a Loom-shaped
 full-workgroup epoch path, and cold-path isolation.
+
+## 2026-06-23 after compact sampled delay loop
+
+hip-moi commit measured: this commit (`Keep sampled delay as a compact loop`)
+sanitizer-strategy benchmark commit: `3c6da04`
+
+This pass added `#pragma unroll 1` to the sampled delay loops so the static
+publish-only policy no longer expands `DelayIters=32` into inline `s_nop`
+sequences at every instrumented access site.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.60 TFLOP/s   62.1% of 191 TFLOP/s  total= 103.137 ms  iters=89  warmup= 100.817 ms  warmup_iters=89
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.81 ms     15.60 TFLOP/s    8.2% of 191 TFLOP/s  total= 105.725 ms  iters=12  warmup= 106.875 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      16.9 ms      8.11 TFLOP/s    4.2% of 191 TFLOP/s  total= 101.649 ms  iters=6  warmup= 102.476 ms  warmup_iters=6
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled               1024     48    256          769   0x1c06c
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  delay s_nop
+sampled Loom             11752            75             72          82
+hip-moi static sampled   20007           583            226          82
+```
+
+Takeaway: the delay-loop code-size issue is fixed, but the production gap is
+still dominated by hip-moi live state and scratch traffic. The next target is a
+smaller sampled hot-path view that keeps the full `context` fields out of the
+instrumented access path.

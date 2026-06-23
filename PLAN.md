@@ -666,6 +666,12 @@ Production sampled roadmap:
    values, but lower the delay to a compact counted loop or a small noinline
    helper so the compiler does not replicate 32 `s_nop`s at every access site.
    This should reduce code size and may reduce spills by shortening hot blocks.
+   Status: implemented with `#pragma unroll 1` on the sampled delay loops. On
+   the production extraction this reduced static sampled code size from
+   `0x1d340` to `0x1c06c` and dropped counted `s_nop` occurrences from 2624 to
+   82. It did not reduce private memory or VGPR spills; the static sampled row
+   still uses 1024 private bytes and spills roughly 769 VGPRs. That confirms the
+   next major problem is live state, not merely delay-loop code volume.
 2. Introduce a sampled hot-path device view separate from the full public
    `context`. The public `host_context` / `context` API can remain stable, but
    benchmark-sensitive kernels should be able to carry a tiny sampled view with
