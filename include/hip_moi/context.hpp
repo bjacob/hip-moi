@@ -134,6 +134,16 @@ namespace hip_moi
             return *ptr;
         }
 
+        template <backend_kind Backend, typename T>
+        __device__ T lds_load_at(const T* ptr, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_load_at requires a trivially "
+                          "copyable type");
+            record_access_at<Backend>(ptr, sizeof(T), access_kind::load, lds_byte_offset, site);
+            return *ptr;
+        }
+
         template <typename T>
         __device__ void
             lds_store_at(T* ptr, T value, uint32_t lds_byte_offset, site_id site = no_site_id)
@@ -142,6 +152,17 @@ namespace hip_moi
                           "hip_moi::context::lds_store_at requires a trivially "
                           "copyable type");
             record_access_at(ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
+            *ptr = value;
+        }
+
+        template <backend_kind Backend, typename T>
+        __device__ void
+            lds_store_at(T* ptr, T value, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_store_at requires a trivially "
+                          "copyable type");
+            record_access_at<Backend>(ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
             *ptr = value;
         }
 
@@ -265,6 +286,28 @@ namespace hip_moi
             record_exact_shadow_access(ptr, byte_count, kind, lds_byte_offset, site);
         }
 
+        template <backend_kind Backend>
+        __device__ void record_access_at(const void* ptr,
+                                         uint32_t    byte_count,
+                                         access_kind kind,
+                                         uint32_t    lds_byte_offset,
+                                         site_id     site) const
+        {
+            if(byte_count == 0)
+            {
+                return;
+            }
+
+            if constexpr(Backend == backend_kind::sampled_watchpoint)
+            {
+                record_sampled_watchpoint_access(ptr, byte_count, kind, lds_byte_offset, site);
+            }
+            else
+            {
+                record_exact_shadow_access(ptr, byte_count, kind, lds_byte_offset, site);
+            }
+        }
+
         __device__ void record_exact_shadow_access(const void* ptr,
                                                    uint32_t    byte_count,
                                                    access_kind kind,
@@ -355,10 +398,10 @@ namespace hip_moi
             uint32_t subgroup_threads = cfg_.threads_per_subgroup > 0
                                             ? static_cast<uint32_t>(cfg_.threads_per_subgroup)
                                             : 1u;
-            uint64_t seed             = site.value();
-            seed ^= static_cast<uint64_t>(subgroup_id()) * 0x9e3779b97f4a7c15ull;
-            seed ^= storage_.generation * 0xbf58476d1ce4e5b9ull;
-            return static_cast<uint32_t>(detail::mix64(seed) % subgroup_threads);
+            uint32_t seed             = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
+            seed ^= (subgroup_id() + 1u) * 0xc2b2ae35u;
+            seed ^= static_cast<uint32_t>(storage_.generation) * 0x9e3779b9u;
+            return detail::mix32(seed) & (subgroup_threads - 1u);
         }
 
         __device__ void record_sampled_watchpoint_range(access_kind kind,
@@ -392,10 +435,10 @@ namespace hip_moi
 
         __device__ uint32_t sampled_watchpoint_slot(uint32_t start_cell) const
         {
-            uint64_t seed = static_cast<uint64_t>(start_cell) * 0x94d049bb133111ebull;
-            seed ^= storage_.generation * 0x9e3779b97f4a7c15ull;
-            return static_cast<uint32_t>(
-                detail::mix64(seed) % static_cast<uint64_t>(storage_.sampled_watchpoint_capacity));
+            uint32_t seed = start_cell * 0x94d049bbu;
+            seed ^= static_cast<uint32_t>(storage_.generation) * 0x9e3779b9u;
+            return detail::mix32(seed)
+                   & (static_cast<uint32_t>(storage_.sampled_watchpoint_capacity) - 1u);
         }
 
         __device__ uint64_t atomic_exchange_shadow_entry(uint64_t* address, uint64_t value) const

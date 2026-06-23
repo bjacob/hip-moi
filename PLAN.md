@@ -64,6 +64,19 @@ ctx.lds_store_at(ptr, value, /*lds_byte_offset=*/offset, site);
 ctx.lds_load_at(ptr, /*lds_byte_offset=*/offset, site);
 ```
 
+Benchmark-sensitive code can also select the backend at compile time:
+
+```c++
+ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+    ptr, value, /*lds_byte_offset=*/offset, site);
+ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+    ptr, /*lds_byte_offset=*/offset, site);
+```
+
+That avoids keeping both exact-shadow and sampled-watchpoint paths live in the
+same optimized kernel. The non-templated overloads remain useful as the regular
+API when backend selection comes from `host_context_options`.
+
 This is closer to Jakub's HIP prototype and to what compiler or assembly-level
 instrumentation would naturally know. Pointer-only `lds_load` / `lds_store`
 helpers were deleted because preserving them kept the old backend alive and
@@ -196,6 +209,11 @@ deterministic for a launch and mixed from generation, workgroup id, subgroup id,
 site id, and possibly the access range. Knobs such as watchpoint count, probe
 count, and sample skip should mirror Jakub's benchmark enough that we can make
 meaningful comparisons.
+
+The current sampled selector is intentionally cheap: it uses 32-bit mixing and
+power-of-two masks rather than 64-bit modulo arithmetic. This is part of the
+hot-path contract; sampled capacities should be chosen as powers of two for
+good distribution.
 
 This path deliberately permits false negatives from sampling, limited probes, or
 table overwrites. It must not create false positives for the represented
@@ -342,6 +360,18 @@ sampled-watchpoint paths. The sampled path is not yet competitive with Jakub's
 sampled Loom row; the next benchmark goal is to shrink hot-path helper work,
 VGPR pressure, and selected-lane overhead.
 
+Latest codegen audit on the extracted 2-wave benchmark:
+
+* before backend specialization, hip-moi exact and sampled both compiled to the
+  same 79-VGPR, 37.6-KB-code kernel because runtime backend dispatch kept both
+  implementations live;
+* compile-time backend selection reduced exact shadow to 52 VGPR and 19.5 KB of
+  code;
+* compile-time backend selection plus cheaper sampled selection reduced sampled
+  watchpoints to 57 VGPR and 15.2 KB of code;
+* the generated metadata still reports `uses_flat_scratch=1`, although
+  `ScratchSize` is 0 for the hot kernels.
+
 ## Test Corpus
 
 The active instrumented suite is intentionally smaller after dropping
@@ -479,6 +509,13 @@ fallback accidentally absorbed the work.
 
 ### Session 7: Benchmark-Driven Tightening
 
+Status: in progress. The first tightening pass added compile-time backend
+selection for the explicit-offset access helpers and replaced sampled
+watchpoint lane/slot selection with cheaper 32-bit mixing and masking. On the
+2-wave benchmark, sampled hip-moi moved from roughly 0.010 ms after legacy
+cleanup to roughly 0.007 ms, while sampled Loom remains roughly 0.005 ms. The
+same pass made the 4-wave and 8-wave sampled rows roughly 0.011 ms.
+
 Use the 2/4/8-wave benchmark set to tune:
 
 * watchpoint count,
@@ -491,6 +528,10 @@ Use the 2/4/8-wave benchmark set to tune:
 Inspect generated code when benchmark movement is surprising. The main danger is
 spilling caused by instrumentation VGPR usage; global-memory traffic from spills
 can dominate the actual sanitizer work.
+
+Next likely target: remove repeated benchmark helper overhead around
+`make_hip_moi_context()` and context construction, or add a slimmer sampled
+hot-path wrapper, while preserving the ordinary user-facing `host_context` API.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 

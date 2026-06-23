@@ -85,6 +85,16 @@ namespace hip_moi
             return value;
         }
 
+        __host__ __device__ constexpr uint32_t mix32(uint32_t value)
+        {
+            value ^= value >> 16;
+            value *= 0x7feb352du;
+            value ^= value >> 15;
+            value *= 0x846ca68bu;
+            value ^= value >> 16;
+            return value;
+        }
+
         __host__ __device__ constexpr uint64_t
             make_site_id(const char* file, uint32_t line, uint32_t column, uint32_t counter)
         {

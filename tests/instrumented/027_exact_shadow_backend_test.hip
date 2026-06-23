@@ -48,12 +48,14 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
+                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         ctx.syncthreads();
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
+            out[0] = ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
+                &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
@@ -67,11 +69,13 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
+                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
+            (void)ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
+                &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
@@ -85,7 +89,8 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store_at(&values[2], 99, /*lds_byte_offset=*/8, kOverflowSite);
+            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
+                &values[2], 99, /*lds_byte_offset=*/8, kOverflowSite);
         }
         ctx.finish();
     }

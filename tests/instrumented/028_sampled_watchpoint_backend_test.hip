@@ -47,12 +47,14 @@ namespace
 
         if(ctx.subgroup_id() == 0)
         {
-            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         ctx.syncthreads();
         if(ctx.subgroup_id() == 1)
         {
-            (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
+            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+                &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
@@ -66,11 +68,13 @@ namespace
 
         if(ctx.subgroup_id() == 0)
         {
-            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         if(ctx.subgroup_id() == 1)
         {
-            (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
+            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+                &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
