@@ -51,6 +51,18 @@ removed. `hip_moi::context` is subgroup-scoped. It reports same-epoch LDS
 conflicts between different subgroups in the same workgroup. It intentionally
 does not report conflicts whose participants are wholly inside one subgroup.
 
+There is also a narrower performance view:
+
+```c++
+hip_moi::sampled_watchpoint_context
+```
+
+This is not the general semantic center of hip-moi. It is a sampled
+publish-only fast path for benchmark-sensitive kernels with full-workgroup
+barriers and no in-kernel diagnostic reporting. It exists so we can study
+low-overhead Loom-like instrumentation without forcing the full diagnostic
+`context` object and its cold state into the hottest production kernels.
+
 The legacy record/log/scan design has been removed from the active API and test
 suite. The implementation now has two explicit-offset subgroup-level paths:
 
@@ -129,6 +141,31 @@ The lesson for hip-moi is: stop trying to make per-lane record collection cheap
 enough. The hot path needs online shadow/watchpoint checks, compact metadata,
 minimal global traffic, and low VGPR pressure.
 
+## Scope Guardrails
+
+The fastest current sampled path should remain a specialized mode, not the new
+conceptual center of hip-moi.
+
+The general `hip_moi::context` / `hip_moi::host_context` path remains the home
+for correctness-first diagnostics, storage saturation handling, reporting, and
+future synchronization models. It should stay capable of representing
+synchronization state beyond full-workgroup barriers.
+
+The `hip_moi::sampled_watchpoint_context` path is allowed to be aggressive:
+publish-only, sampled, full-workgroup-barrier-oriented, and benchmark-driven.
+Optimizations such as local-only epoch tracking are acceptable there because
+represented watchpoints carry the local epoch and no reporting path consumes a
+global epoch word. Those assumptions must not leak back into the general
+context as if they solved finer-grained synchronization.
+
+This split is important for the next scope increases:
+
+* non-negotiable: broaden end-to-end workloads beyond one isolated matmul, with
+  an attention block as the likely first candidate;
+* negotiable but important: support workloads with synchronization finer than
+  global `__syncthreads()`, likely involving atomics and release/acquire-style
+  reasoning.
+
 ## Target Architecture
 
 The target device backend is a Loom-like subgroup-level detector.
@@ -149,6 +186,11 @@ The main hot-path operations should be:
 * compare against existing shadow/watchpoint metadata,
 * update the shadow/watchpoint metadata,
 * emit a diagnostic only on conflict.
+
+For the publish-only sampled fast view, the epoch can be a per-thread local
+counter advanced at instrumented full-workgroup barriers. The general diagnostic
+context should retain a real synchronization-state representation that can
+later grow to atomics and non-barrier happens-before edges.
 
 For subgroup-level hip-moi, the encoded owner should be the subgroup id rather
 than the exact thread id. Same-subgroup conflicts remain out of scope.
@@ -352,11 +394,11 @@ back to a static site and LDS location:
 
 ## Benchmark Integration
 
-Jakub's `sanitizer-strategy/rdna4_matmul` benchmark is now the guiding
-performance loop.
-
-The local `hip-moi-benchmark` branch contains extracted benchmark families
-derived from `rdna4_matmul/rdna4_matmul.hip`.
+The top-level `benchmarks/` directory now vendors the focused RDNA4 benchmark
+families extracted from Jakub's
+`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`. Jakub's repository remains
+the upstream reference for the broader experimental harness, but day-to-day
+hip-moi performance work should run from this repository.
 
 The small `w2_2x4_benchmark.hip` family compares:
 
@@ -395,9 +437,9 @@ benchmark prints these effective knobs and names sampled rows as
 The current tiny go-to shapes are:
 
 ```bash
-./rdna4_matmul/build_w2_2x4_benchmark.sh
-./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
-./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+./benchmarks/build_w2_2x4_benchmark.sh
+./benchmarks/build_w2_2x4_benchmark.sh w4_4x16
+./benchmarks/build_w2_2x4_benchmark.sh w8_16x8
 ```
 
 Use the 2-wave shape for fast intra-session iteration and the 2/4/8 set when a
@@ -406,7 +448,7 @@ change specifically targets tiny-shape overhead or wave-count scaling.
 The current production go-to benchmark is:
 
 ```bash
-./rdna4_matmul/build_prod_16x8_benchmark.sh
+./benchmarks/build_prod_16x8_benchmark.sh
 ```
 
 Run the production benchmark before a session-ending commit when
@@ -419,16 +461,17 @@ sampled Loom          8.59 ms
 hip-moi sampled       3.44 ms
 ```
 
-Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
-commit when they are the relevant benchmark set; otherwise append the raw output
-of the production benchmark. For doc-only commits, either append a fresh run or
-explicitly note that the commit is performance-equivalent to the previous
-logged entry.
+The old append-only `BENCHMARK_LOG.md` has been removed. It was useful while we
+were discovering the shape of the benchmark, but the durable workflow is now:
+keep the vendored benchmark sources current, summarize important benchmark
+state in this plan, and include fresh benchmark numbers in commit messages or
+review notes when performance-sensitive code changes.
 
 The current hip-moi rows exercise the explicit-offset exact-shadow and
-sampled-watchpoint paths. Under the fair publish-only default, sampled hip-moi
-is close to sampled Loom on the 2-wave shape and somewhat slower on the 4/8-wave
-shapes. Dense sampling and reporting-on rows expose the remaining overhead.
+sampled-watchpoint paths. Under the fair publish-only production default,
+sampled hip-moi is now substantially faster than the sampled-Loom row on the
+vendored 16x8 benchmark. Dense sampling, reporting-on rows, and future workload
+families are still expected to expose overhead that the current matmul does not.
 
 Historical codegen audits after backend specialization on the extracted 2-wave
 benchmark showed the main pressure points:
@@ -445,9 +488,9 @@ benchmark showed the main pressure points:
 
 After adding fair sampled knobs, a codegen audit before the latest sampled
 reporting-slot fix showed sampled hip-moi at 71 VGPR and 18.5 KB of code on the
-same extracted 2-wave benchmark. Refresh the audit before relying on exact
-VGPR/code-size numbers; `BENCHMARK_LOG.md` is the source of truth for current
-latency numbers.
+same extracted 2-wave benchmark. Refresh audits from the rebuilt benchmark
+executable before relying on exact VGPR/code-size numbers; sidecar code object
+files can be stale after header-only changes.
 
 ## Test Corpus
 
@@ -620,9 +663,9 @@ policy path for non-default sampled knobs, so dense/reporting sweeps remain
 honest.
 
 The main benchmark was then updated with the same static publish-only hip-moi
-sampled row for Jakub's production fp16 16x8 matmul. A new focused
-`prod_16x8_benchmark.hip` extracts that row family and is now the next
-optimization gate. With fair publish-only knobs
+sampled row for Jakub's production fp16 16x8 matmul. The focused
+`benchmarks/prod_16x8_benchmark.hip` extracts that row family and is now the
+main optimization gate. With fair publish-only knobs
 (`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`) and
 `BENCH_M=BENCH_N=BENCH_K=4096`, the focused baseline is roughly `1.17 ms`
 noop, `8.63 ms` sampled Loom, and `17.6 ms` hip-moi sampled watchpoints. That
@@ -741,16 +784,54 @@ Production sampled roadmap:
    every instrumented access. If those paths are still required for safety,
    move them behind cold noinline helpers or an explicitly checked setup phase.
 6. Only after the generated code resembles sampled Loom should we revisit more
-   ambitious regular-pattern or coalescing-style ideas. The present 2x
-   production gap is explained well enough by code shape, private memory, and
-   spills that algorithmic complexity would be premature.
+   ambitious regular-pattern or coalescing-style ideas. Status: the
+   publish-only sampled row is now well below sampled Loom on the vendored
+   production benchmark, so the next decision point is workload breadth rather
+   than more matmul-only heroics.
 
 For each performance-sensitive step, record both latency and generated-code
 metrics. The important codegen gates are private segment size, VGPR spill count,
 SGPR pressure, approximate code size, and whether the hot kernel uses flat
-scratch. The win condition for this phase is sampled hip-moi publish-only below
-sampled Loom publish-only on `prod_16x8_benchmark.hip` with the fair default
-knobs.
+scratch. The win condition for the matmul-only phase was sampled hip-moi
+publish-only below sampled Loom publish-only on `prod_16x8_benchmark.hip` with
+the fair default knobs; that has been achieved.
+
+### Session 8: Broaden End-To-End Workloads
+
+Status: not started.
+
+The next non-negotiable scope increase is an end-to-end workload beyond one
+isolated matmul. The likely first candidate is an attention block. This should
+stress whether hip-moi's current fast path handles realistic phase structure,
+LDS reuse, and multiple cooperating tiled kernels, rather than merely one
+production matmul shape.
+
+The first version should be a benchmark/reference workload before it is a new
+detector feature. Keep the row structure familiar:
+
+* noop baseline,
+* sampled Loom-style comparison when feasible,
+* hip-moi sampled publish-only fast path,
+* optionally the general `context` path for correctness-oriented spot checks.
+
+Avoid introducing attention-specific assumptions into `host_context` or storage
+layout. If the attention benchmark requires new instrumentation shapes, prefer
+explicit helper/API additions over hidden special cases.
+
+### Session 9: Finer-Grained Synchronization
+
+Status: design-only.
+
+Workloads that synchronize through atomics rather than global `__syncthreads()`
+are a separate semantic expansion. This belongs first in the general
+`hip_moi::context` model, not in the sampled publish-only fast view.
+
+The likely direction is to pair atomic instrumentation with synchronization
+state that can express release/acquire-style edges. Fence-only reasoning remains
+insufficient: fences matter when paired with operations, usually atomics, that
+can create inter-thread synchronization. The local-only epoch optimization in
+`sampled_watchpoint_context` should be treated as out of scope for this work
+unless an equivalent proof is designed for the new synchronization model.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 

@@ -36,3 +36,4 @@ enable_testing()
 
 add_subdirectory(tests)
 add_subdirectory(docs/tutorial)
+add_subdirectory(benchmarks)

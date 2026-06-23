@@ -15,6 +15,18 @@ The host-owned path is the default user-facing path. It is intended for kernels
 where LDS is already scarce, so hip-moi metadata should not compete with the
 program's own `__shared__` allocations.
 
+There is also a narrower `hip_moi::sampled_watchpoint_context`. It is a
+publish-only sampled fast view for benchmark-sensitive kernels that use
+full-workgroup barriers. It deliberately does not carry the full diagnostic
+state of `hip_moi::context`. Treat it as a specialized performance mode, not as
+the general semantic model.
+
+The distinction matters for future scope. `hip_moi::context` should remain the
+home for correctness-first diagnostics, storage saturation handling, reporting,
+and eventual synchronization models beyond full-workgroup barriers. The sampled
+fast view may use stronger assumptions, such as local-only epoch tracking, as
+long as those assumptions remain explicit and scoped.
+
 ## Byte Budget
 
 The primary host option is a byte budget:
@@ -103,6 +115,12 @@ sampled hot-path view that the table has exactly one watchpoint entry, so slot
 selection folds to zero instead of running the generic slot-mixing code. That is
 useful for fair publish-only benchmark rows that intentionally match Jakub's
 one-watchpoint sampled Loom configuration.
+
+`hip_moi::sampled_watchpoint_context` currently supports only publish-only
+sampled policies. It tracks its epoch locally across instrumented
+full-workgroup barriers and does not update a global epoch word. That is a
+benchmark fast-path trade-off, suitable for the current sampled publish-only
+matmul rows, not a model for atomics or finer-grained synchronization.
 
 ## Inspecting The Layout
 
