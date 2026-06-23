@@ -10,11 +10,13 @@ They compare the main rows needed for the current Loom-parity work:
 * noop LDS matmul,
 * Jakub's sampled-Loom publish-only instrumentation,
 * hip-moi general `context` with the `sampled_watchpoint` backend,
-* hip-moi sampled-watchpoint instrumentation through the narrower
-  `sampled_watchpoint_context` fast view.
+* hip-moi narrower `sampled_watchpoint_context` fast view.
 
 The compact 2/4/8-wave benchmark family also includes the hip-moi exact-shadow
-row as a correctness/performance reference.
+row as a correctness/performance reference. In both benchmark families,
+`context + sampled_watchpoint` means the full diagnostic-capable
+`hip_moi::context` running its sampled backend, while
+`sampled_watchpoint_context` means the dedicated publish-only fast-view class.
 
 The benchmarks intentionally focus on subgroup-level, full-workgroup-barrier
 LDS instrumentation. They are not the correctness test suite and they do not
@@ -75,12 +77,12 @@ The compact rows are useful for quick iteration and wave-count scaling:
 
 | Shape | noop | sampled Loom | hip-moi exact shadow | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| w2 2x4, M=32 N=64 K=16 | 0.00285 ms | 0.00477 ms | 0.00902 ms | 0.00481 ms | 0.00434 ms |
-| w4 4x16, M=64 N=256 K=16 | 0.00312 ms | 0.00589 ms | 0.0138 ms | 0.00746 ms | 0.00572 ms |
-| w8 16x8, M=256 N=128 K=16 | 0.00323 ms | 0.00578 ms | 0.0129 ms | 0.00781 ms | 0.00633 ms |
+| w2 2x4, M=32 N=64 K=16 | 0.00283 ms | 0.00467 ms | 0.00886 ms | 0.00481 ms | 0.00345 ms |
+| w4 4x16, M=64 N=256 K=16 | 0.00313 ms | 0.00590 ms | 0.0138 ms | 0.00746 ms | 0.00430 ms |
+| w8 16x8, M=256 N=128 K=16 | 0.00325 ms | 0.00578 ms | 0.0129 ms | 0.00774 ms | 0.00462 ms |
 
 The production-shaped row is the current main performance signal:
 
 | Shape | noop | sampled Loom | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.64 ms | 26.1 ms | 3.43 ms |
+| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.63 ms | 26.1 ms | 3.41 ms |

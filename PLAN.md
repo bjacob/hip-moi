@@ -406,9 +406,8 @@ The small `w2_2x4_benchmark.hip` family compares:
 * sampled Loom,
 * hip-moi exact shadow through explicit LDS-offset APIs,
 * hip-moi general `context` with the `sampled_watchpoint` backend,
-* hip-moi sampled watchpoints through the narrower
-  `sampled_watchpoint_context` fast view when the default publish-only sampled
-  knobs make that comparison valid.
+* hip-moi narrower `sampled_watchpoint_context` fast view when the default
+  publish-only sampled knobs make that comparison valid.
 
 The production `prod_16x8_benchmark.hip` extraction is now the main
 optimization target. It keeps Jakub's real fp16 production 16x8 row shape:
@@ -420,8 +419,7 @@ current Loom-parity loop:
 * sampled Loom publish-only,
 * hip-moi publish-only through the general `context` with the
   `sampled_watchpoint` backend,
-* hip-moi sampled watchpoints publish-only through
-  `sampled_watchpoint_context`.
+* hip-moi publish-only through `sampled_watchpoint_context`.
 
 Both extracted benchmarks now construct the hip-moi device context once near
 kernel entry and pass it through the instrumented access helpers. That better
@@ -429,7 +427,10 @@ matches the intended source-instrumentation shape than rebuilding a context
 inside every instrumented access wrapper. The default sampled publish-only
 rows additionally construct the narrow `sampled_watchpoint_context` view so the
 benchmark can measure the cost of the fast path separately from the full
-diagnostic-capable context.
+diagnostic-capable context. The compact 2/4/8-wave extraction and the
+production extraction both use this same row split; the compact benchmark no
+longer labels a static-policy general `context` row as
+`sampled_watchpoint_context`.
 
 The sampled rows now share one fair knob set:
 
@@ -466,9 +467,18 @@ performance-sensitive code changed. The current focused baseline at
 
 ```text
 noop                                      1.16 ms
-sampled Loom                              8.64 ms
+sampled Loom                              8.63 ms
 hip-moi context + sampled_watchpoint     26.1 ms
-hip-moi sampled_watchpoint_context        3.43 ms
+hip-moi sampled_watchpoint_context        3.41 ms
+```
+
+The current corrected compact baselines are:
+
+```text
+shape      noop       sampled Loom  exact shadow  context+sampled  sampled_context
+w2 2x4     0.00283 ms 0.00467 ms    0.00886 ms    0.00481 ms       0.00345 ms
+w4 4x16    0.00313 ms 0.00590 ms    0.0138 ms     0.00746 ms       0.00430 ms
+w8 16x8    0.00325 ms 0.00578 ms    0.0129 ms     0.00774 ms       0.00462 ms
 ```
 
 The old append-only `BENCHMARK_LOG.md` has been removed. It was useful while we
@@ -642,12 +652,13 @@ fallback accidentally absorbed the work.
 
 ### Session 7: Benchmark-Driven Tightening
 
-Status: in progress. The first tightening pass added compile-time backend
-selection for the explicit-offset access helpers and replaced sampled
-watchpoint lane/slot selection with cheaper 32-bit mixing and masking. On the
-2-wave benchmark, sampled hip-moi moved from roughly 0.010 ms after legacy
-cleanup to roughly 0.007 ms, while sampled Loom remains roughly 0.005 ms. The
-same pass made the 4-wave and 8-wave sampled rows roughly 0.011 ms.
+Status: implemented for the matmul-only phase. The first tightening pass added
+compile-time backend selection for the explicit-offset access helpers and
+replaced sampled watchpoint lane/slot selection with cheaper 32-bit mixing and
+masking. On the 2-wave benchmark, sampled hip-moi moved from roughly 0.010 ms
+after legacy cleanup to roughly 0.007 ms, while sampled Loom remains roughly
+0.005 ms. The same pass made the 4-wave and 8-wave sampled rows roughly
+0.011 ms.
 
 The benchmark harness was then changed to create the hip-moi context once per
 kernel and pass it through the helper calls. This reduced sampled hip-moi again
@@ -680,11 +691,11 @@ sampled row for Jakub's production fp16 16x8 matmul. The focused
 `benchmarks/prod_16x8_benchmark.hip` extracts that row family and is now the
 main optimization gate. With fair publish-only knobs
 (`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`) and
-`BENCH_M=BENCH_N=BENCH_K=4096`, the focused baseline is roughly `1.17 ms`
-noop, `8.63 ms` sampled Loom, and `17.6 ms` hip-moi sampled watchpoints. That
-puts hip-moi at about 2x sampled Loom on the production shape, even though the
-tiny 2/4/8-wave benchmark has reached parity. The next performance work should
-therefore be driven by the production extraction.
+`BENCH_M=BENCH_N=BENCH_K=4096`, the initial focused baseline was roughly
+`1.17 ms` noop, `8.63 ms` sampled Loom, and `17.6 ms` hip-moi sampled
+watchpoints. That put hip-moi at about 2x sampled Loom on the production shape,
+even though the tiny 2/4/8-wave benchmark had reached parity. That result is
+what redirected the next performance work to the production extraction.
 
 Use the 2/4/8-wave benchmark set to tune tiny-shape overhead:
 
@@ -740,12 +751,12 @@ Production sampled roadmap:
    state live in the production sampled access path.
    Status: implemented for publish-only sampled policies as
    `sampled_watchpoint_context`. The focused production benchmark now routes the
-   static publish-only hip-moi row through this view. That dropped the hip-moi
-   sampled production row from roughly `16.9 ms` after the delay-loop cleanup to
-   `7.35 ms`, beating sampled Loom's roughly `8.63 ms` on the same run. Codegen
-   improved from 1024 private bytes and 769 VGPR spills to 116 private bytes
-   and 40 VGPR spills. This confirms that the main production gap was the full
-   context's live state, not the sampled watchpoint algorithm.
+   static publish-only hip-moi fast row through this view. That dropped the
+   `sampled_watchpoint_context` production row from roughly `16.9 ms` after the
+   delay-loop cleanup to `7.35 ms`, beating sampled Loom's roughly `8.63 ms` on
+   the same run. Codegen improved from 1024 private bytes and 769 VGPR spills to
+   116 private bytes and 40 VGPR spills. This confirms that the main production
+   gap was the full context's live state, not the sampled watchpoint algorithm.
 3. Add a full-workgroup-barrier sampled epoch path. In the production benchmark,
    every `ctx.syncthreads()` is a full workgroup barrier, and sampled Loom uses
    one per-workgroup epoch header. hip-moi still carries the more general
@@ -757,8 +768,8 @@ Production sampled roadmap:
    `workgroup_epoch` pointer. Existing host allocation is reused by passing
    `&subgroup_states[0].epoch` to the view, but the hot context no longer
    carries subgroup-state capacity or loops over subgroup epochs. The focused
-   production hip-moi sampled row dropped again from roughly `7.35 ms` to
-   `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
+   production `sampled_watchpoint_context` row dropped again from roughly
+   `7.35 ms` to `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
    A later tightening pass made this path more Loom-shaped by replacing the
    ordinary epoch store/increment plus `__threadfence()` with atomic epoch
    updates between workgroup barriers. That improved latency from roughly
@@ -772,8 +783,9 @@ Production sampled roadmap:
    epoch update for Loom-shape compatibility and moved the focused production
    row to roughly `3.81 ms`. The current publish-only fast path drops the global
    epoch update entirely, because represented watchpoints carry the local epoch
-   value and reporting is out of scope for this view. That moved the row to
-   roughly `3.44 ms`, with 68 private bytes and 16 VGPR spills.
+   value and reporting is out of scope for this view. That moved the row to the
+   current roughly `3.41`-`3.44 ms` range, with 68 private bytes and 16 VGPR
+   spills.
 4. Specialize hot-path constants that are fixed in the production row:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,
@@ -781,11 +793,11 @@ Production sampled roadmap:
    Status: partially implemented for one-watchpoint publish-only rows. The
    static sampled policy can now declare `StaticWatchpointCapacity=1`, and the
    sampled hot-path view folds watchpoint slot selection to zero in that case.
-   The focused production hip-moi sampled row moved from roughly `5.27 ms` to
-   `4.57 ms`. Codegen improved from 100 private bytes and 32 VGPR spills to 68
-   private bytes and 16 VGPR spills, and code size dropped from `0x11284` to
-   `0x0aff4`. Remaining low-risk specialization work is mostly access-size
-   templating and any still-visible generic range loops.
+   The focused production `sampled_watchpoint_context` row moved from roughly
+   `5.27 ms` to `4.57 ms`. Codegen improved from 100 private bytes and 32 VGPR
+   spills to 68 private bytes and 16 VGPR spills, and code size dropped from
+   `0x11284` to `0x0aff4`. Remaining low-risk specialization work is mostly
+   access-size templating and any still-visible generic range loops.
    A naive access-size template experiment should not be repeated in the same
    form. A corrected recheck after the local-only epoch work measured roughly
    `3.96 ms` versus the current `3.46 ms`: it shrank code size to `0x8834`, but

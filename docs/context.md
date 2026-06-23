@@ -21,6 +21,11 @@ full-workgroup barriers. It deliberately does not carry the full diagnostic
 state of `hip_moi::context`. Treat it as a specialized performance mode, not as
 the general semantic model.
 
+Benchmark rows named `context + sampled_watchpoint` use the general
+`hip_moi::context` object with its sampled backend selected. Rows named
+`sampled_watchpoint_context` use the narrower class directly. The latter is
+expected to be faster because less state is live in the hot kernel.
+
 The distinction matters for future scope. `hip_moi::context` should remain the
 home for correctness-first diagnostics, storage saturation handling, reporting,
 and eventual synchronization models beyond full-workgroup barriers. The sampled

@@ -17,6 +17,14 @@ path. It exists for benchmark-sensitive kernels that use full-workgroup
 barriers and want a low-overhead Loom-style metadata publication path. It omits
 the cold diagnostic state carried by `hip_moi::context`.
 
+The benchmark row named `context + sampled_watchpoint` is different from
+`sampled_watchpoint_context`. The former keeps the full `hip_moi::context`
+object live and selects its sampled backend. The latter constructs the
+dedicated fast-view class, which carries only the watchpoint table, generation,
+subgroup size, and a local epoch counter. That split is the current way to keep
+apples-to-apples measurements of the general path and the publish-only fast
+path.
+
 This split is intentional. The current fastest RDNA4 matmul path uses local-only
 epoch tracking inside `sampled_watchpoint_context`; represented watchpoints
 carry that local epoch, and no reporting path consumes a global epoch word. That
@@ -29,11 +37,15 @@ The vendored `benchmarks/prod_16x8_benchmark.hip` row compares:
 
 * noop matmul,
 * Jakub-style sampled Loom publish-only instrumentation,
-* hip-moi sampled-watchpoint publish-only instrumentation.
+* hip-moi general `context` with the `sampled_watchpoint` backend,
+* hip-moi `sampled_watchpoint_context` publish-only instrumentation.
 
-At the current `4096^3` production shape, hip-moi sampled publish-only is below
-sampled Loom on this benchmark. The remaining matmul-only work is mostly
-last-mile code-shape and register-pressure work, not the central project risk.
+At the current `4096^3` production shape, the narrow hip-moi
+`sampled_watchpoint_context` row is below sampled Loom on this benchmark, while
+the general `context + sampled_watchpoint` row remains much slower. That is
+expected: the fast row is intentionally publish-only and omits general
+diagnostic state. The remaining near-term project risk is now workload breadth,
+starting with an attention block, rather than more matmul-only heroics.
 
 ## Next Scopes
 

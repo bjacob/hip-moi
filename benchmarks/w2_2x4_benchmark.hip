@@ -178,6 +178,30 @@ make_hip_moi_context(uint32_t generation) {
   return hip_moi::context(storage, cfg);
 }
 
+__device__ __forceinline__ hip_moi::sampled_watchpoint_context
+make_hip_moi_sampled_watchpoint_context(uint32_t generation) {
+  uint64_t workgroup_id = static_cast<uint64_t>(blockIdx.x) +
+                          static_cast<uint64_t>(gridDim.x) *
+                              (static_cast<uint64_t>(blockIdx.y) +
+                               static_cast<uint64_t>(gridDim.y) *
+                                   static_cast<uint64_t>(blockIdx.z));
+  hip_moi::sampled_watchpoint_context::config cfg{
+      /*threads_per_subgroup=*/kWaveSize,
+  };
+  hip_moi::sampled_watchpoint_context::storage_ref storage{};
+  if (g_hip_moi_context_storages &&
+      workgroup_id < g_hip_moi_context_storage_count) {
+    const hip_moi::context::storage_ref *source =
+        &g_hip_moi_context_storages[workgroup_id];
+    storage.workgroup_epoch =
+        source->subgroup_states ? &source->subgroup_states[0].epoch : nullptr;
+    storage.sampled_watchpoints = source->sampled_watchpoints;
+    storage.sampled_watchpoint_capacity = source->sampled_watchpoint_capacity;
+  }
+  storage.generation = generation;
+  return hip_moi::sampled_watchpoint_context(storage, cfg);
+}
+
 __device__ __forceinline__ f32x8 zero_f32x8() {
   f32x8 value;
 #pragma unroll
@@ -226,7 +250,8 @@ struct HipMoiSampledWatchpointStaticPublishOnlyPolicy {
       /*SampleSkip=*/32,
       /*ProbeCount=*/1,
       /*DelayIters=*/32,
-      /*ReportConflicts=*/false>;
+      /*ReportConflicts=*/false,
+      /*StaticWatchpointCapacity=*/1>;
 };
 
 template <typename Policy> struct IsHipMoiPolicy {
@@ -247,14 +272,19 @@ template <> struct HipMoiContextArg<HipMoiSampledWatchpointPolicy> {
 
 template <>
 struct HipMoiContextArg<HipMoiSampledWatchpointStaticPublishOnlyPolicy> {
-  hip_moi::context ctx;
+  hip_moi::sampled_watchpoint_context ctx;
 };
 
 template <typename Policy>
 __device__ __forceinline__ HipMoiContextArg<Policy>
 make_hip_moi_context_arg(uint32_t generation) {
   if constexpr (IsHipMoiPolicy<Policy>::value) {
-    return HipMoiContextArg<Policy>{make_hip_moi_context(generation)};
+    if constexpr (Policy::use_static_sampled_policy) {
+      return HipMoiContextArg<Policy>{
+          make_hip_moi_sampled_watchpoint_context(generation)};
+    } else {
+      return HipMoiContextArg<Policy>{make_hip_moi_context(generation)};
+    }
   } else {
     return {};
   }
@@ -546,8 +576,7 @@ ds_write(T *ptr, const T &value, Runtime runtime, uint32_t byte_offset,
     if constexpr (Policy::kind == PolicyKind::HipMoiSampledWatchpoint) {
       if constexpr (Policy::use_static_sampled_policy) {
         hip_moi_context_arg.ctx
-            .template lds_store_at<hip_moi::backend_kind::sampled_watchpoint,
-                                   typename Policy::sampled_policy>(
+            .template lds_store_at<typename Policy::sampled_policy>(
                 ptr, value, byte_offset,
                 hip_moi::site_id(static_cast<uint64_t>(site_id)));
       } else {
@@ -578,8 +607,7 @@ ds_read(const T *ptr, Runtime runtime, uint32_t byte_offset, uint32_t site_id,
     if constexpr (Policy::kind == PolicyKind::HipMoiSampledWatchpoint) {
       if constexpr (Policy::use_static_sampled_policy) {
         return hip_moi_context_arg.ctx
-            .template lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
-                                  typename Policy::sampled_policy>(
+            .template lds_load_at<typename Policy::sampled_policy>(
                 ptr, byte_offset,
                 hip_moi::site_id(static_cast<uint64_t>(site_id)));
       } else {
