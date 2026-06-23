@@ -50,7 +50,7 @@ BENCH_M=4096 BENCH_N=4096 BENCH_K=4096 ./benchmarks/build_prod_16x8_benchmark.sh
 MIN_MS=500 WARMUP_MS=500 ./benchmarks/build_prod_16x8_benchmark.sh
 SAMPLED_WATCHPOINTS=1 SAMPLED_SKIP=32 SAMPLED_PROBES=1 SAMPLED_DELAY=32 ./benchmarks/build_prod_16x8_benchmark.sh
 SAMPLED_REPORTS=1 ./benchmarks/build_prod_16x8_benchmark.sh
-BENCH_SEQ=2048 ./benchmarks/build_attention_block_benchmark.sh
+BENCH_SEQ=8192 ./benchmarks/build_attention_block_benchmark.sh
 ```
 
 ## CMake
@@ -100,11 +100,13 @@ The production-shaped row is the current main performance signal:
 | w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.65 ms | 25.9 ms | 3.38 ms |
 
 The attention row is the first larger end-to-end workload beyond isolated
-matmul. It uses RDNA4 WMMA for both QK and PV, two subgroups per workgroup, one
-workgroup per 32-query block, and K/V fragment staging through LDS. Its
-reported TFLOP/s is an effective QK+PV matmul-rate proxy; softmax and scalar
-phase work are intentionally not modeled as FLOPs.
+matmul. It defaults to `seq=12288`, which is intentionally larger than the
+production matmul row and lands near 2x the `sampled_watchpoint_context`
+latency measured for `prod_16x8`. It uses RDNA4 WMMA for both QK and PV, two
+subgroups per workgroup, one workgroup per 32-query block, and K/V fragment
+staging through LDS. Its reported TFLOP/s is an effective QK+PV matmul-rate
+proxy; softmax and scalar phase work are intentionally not modeled as FLOPs.
 
 | Shape | noop | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: |
-| seq=1024, head_dim=16, value_dim=16 | 238 µs | 409 µs | 278 µs |
+| seq=12288, head_dim=16, value_dim=16 | 6.87 ms | 7.78 ms | 6.97 ms |

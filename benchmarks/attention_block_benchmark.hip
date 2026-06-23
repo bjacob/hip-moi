@@ -729,7 +729,7 @@ static void print_device()
 
 int main()
 {
-    int    sequence_length = get_int_env("BENCH_SEQ", 1024);
+    int    sequence_length = get_int_env("BENCH_SEQ", 12288);
     double min_ms          = get_double_env("MIN_MS", 100.0);
     double warmup_ms       = get_double_env("WARMUP_MS", min_ms);
     if(sequence_length <= 0 || sequence_length % kQueriesPerBlock != 0
