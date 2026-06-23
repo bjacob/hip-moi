@@ -1088,3 +1088,68 @@ Takeaway: one-watchpoint slot specialization was a real win and pushed the
 publish-only sampled hot path well below sampled Loom on this production
 extraction. Remaining obvious specialization work is access-size templating and
 checking whether the generated code still carries avoidable generic range loops.
+
+## 2026-06-23 after atomic sampled epoch updates
+
+hip-moi commit measured: this commit (`Use atomic epoch updates in sampled fast path`)
+sanitizer-strategy benchmark commit: `f1ee1fe`
+
+This pass changed `sampled_watchpoint_context` to initialize and advance the
+workgroup epoch with atomics between workgroup barriers, instead of an ordinary
+global-memory store/increment followed by `__threadfence()`. This mirrors the
+shape of Jakub's sampled Loom epoch update more closely. The win is runtime
+synchronization cost, not smaller generated code: private memory and spill
+counts get slightly worse.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.43 TFLOP/s   62.0% of 191 TFLOP/s  total= 102.124 ms  iters=88  warmup= 100.998 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.62 ms     15.94 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.459 ms  iters=12  warmup= 104.149 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      4.45 ms     30.92 TFLOP/s   16.2% of 191 TFLOP/s  total= 102.250 ms  iters=23  warmup= 102.439 ms  warmup_iters=23
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.52 TFLOP/s   62.0% of 191 TFLOP/s  total= 102.051 ms  iters=88  warmup= 100.396 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.63 ms     15.92 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.583 ms  iters=12  warmup= 103.821 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      4.42 ms     31.10 TFLOP/s   16.3% of 191 TFLOP/s  total= 101.634 ms  iters=23  warmup= 102.219 ms  warmup_iters=23
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                 88     40    256           25   0x0ac40
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  flat_atomic  global_atomic  delay s_nop
+sampled Loom             12462            75             72            0             88          82
+hip-moi static sampled    8710            19             19           89              0          83
+```
+
+Takeaway: replacing device-wide fences with atomic epoch updates improves the
+production benchmark despite a modest spill increase. Keep this unless a later
+correctness review shows that sampled fast-path epoch ordering requires a
+stronger fence than the Loom-shaped atomic-plus-barriers sequence.

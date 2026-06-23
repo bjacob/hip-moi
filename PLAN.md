@@ -416,7 +416,7 @@ performance-sensitive code changed. The current focused baseline at
 ```text
 noop                  1.16 ms
 sampled Loom          8.59 ms
-hip-moi sampled       4.57 ms
+hip-moi sampled       4.42 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -703,6 +703,13 @@ Production sampled roadmap:
    carries subgroup-state capacity or loops over subgroup epochs. The focused
    production hip-moi sampled row dropped again from roughly `7.35 ms` to
    `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
+   A later tightening pass made this path more Loom-shaped by replacing the
+   ordinary epoch store/increment plus `__threadfence()` with atomic epoch
+   updates between workgroup barriers. That improved latency from roughly
+   `4.57 ms` after slot specialization to `4.42 ms`, even though private memory
+   rose from 68 to 88 bytes and VGPR spills from 16 to 25. The win appears to
+   come from removing device-wide fences from the barrier path, not from smaller
+   generated code.
 4. Specialize hot-path constants that are fixed in the production row:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,
@@ -715,6 +722,10 @@ Production sampled roadmap:
    private bytes and 16 VGPR spills, and code size dropped from `0x11284` to
    `0x0aff4`. Remaining low-risk specialization work is mostly access-size
    templating and any still-visible generic range loops.
+   A naive access-size template experiment should not be repeated in the same
+   form: it simplified the source range loop but regressed the production row
+   back to roughly 1024 private bytes and 751 VGPR spills. Future range
+   specialization needs to be validated against generated code immediately.
 5. Isolate cold diagnostics and storage validation. Publish-only mode should not
    inline reporting, metadata-full diagnostics, or slow validation branches into
    every instrumented access. If those paths are still required for safety,

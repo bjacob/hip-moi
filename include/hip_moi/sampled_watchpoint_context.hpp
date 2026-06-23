@@ -42,9 +42,8 @@ namespace hip_moi
             {
                 if(storage_.workgroup_epoch)
                 {
-                    *storage_.workgroup_epoch = 0;
+                    (void)atomicExch(storage_.workgroup_epoch, 0u);
                 }
-                __threadfence();
             }
             __syncthreads();
         }
@@ -116,9 +115,10 @@ namespace hip_moi
             {
                 if(storage_.workgroup_epoch)
                 {
-                    ++*storage_.workgroup_epoch;
+                    // Loom-shaped fast path: one atomic epoch update between
+                    // workgroup barriers, with no separate device-wide fence.
+                    (void)atomicAdd(storage_.workgroup_epoch, 1u);
                 }
-                __threadfence();
             }
         }
 
