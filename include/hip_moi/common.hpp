@@ -56,6 +56,18 @@ namespace hip_moi
         sampled_watchpoint = 1,
     };
 
+    template <uint32_t SampleSkip      = 1,
+              uint32_t ProbeCount      = 1,
+              uint32_t DelayIters      = 0,
+              bool     ReportConflicts = true>
+    struct sampled_watchpoint_policy
+    {
+        static constexpr uint32_t sample_skip      = SampleSkip;
+        static constexpr uint32_t probe_count      = ProbeCount;
+        static constexpr uint32_t delay_iters      = DelayIters;
+        static constexpr bool     report_conflicts = ReportConflicts;
+    };
+
     struct subgroup_state
     {
         uint32_t epoch;

@@ -77,6 +77,25 @@ prototype. `sampled_watchpoint_reports=false` makes the sampled backend publish
 watchpoints without scanning for conflicts, which is useful for apples-to-apples
 publish-only benchmark rows.
 
+For hot kernels whose sampled policy is intentionally fixed at compile time,
+the access API can take a policy type:
+
+```c++
+using sampled_publish_only = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/32,
+    /*ProbeCount=*/1,
+    /*DelayIters=*/32,
+    /*ReportConflicts=*/false>;
+
+ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, sampled_publish_only>(
+    ptr, value, /*lds_byte_offset=*/offset, site);
+```
+
+This is the low-overhead path for benchmark/source-instrumented code that does
+not need runtime policy tuning. If the policy must vary between launches, keep
+using `host_context_options` and the ordinary `lds_*_at<backend_kind::...>`
+overloads.
+
 ## Inspecting The Layout
 
 Host contexts expose the computed layout:

@@ -152,6 +152,17 @@ namespace hip_moi
             return *ptr;
         }
 
+        template <backend_kind Backend, typename SampledPolicy, typename T>
+        __device__ T lds_load_at(const T* ptr, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_load_at requires a trivially "
+                          "copyable type");
+            record_access_at<Backend, SampledPolicy>(
+                ptr, sizeof(T), access_kind::load, lds_byte_offset, site);
+            return *ptr;
+        }
+
         template <typename T>
         __device__ void
             lds_store_at(T* ptr, T value, uint32_t lds_byte_offset, site_id site = no_site_id)
@@ -171,6 +182,18 @@ namespace hip_moi
                           "hip_moi::context::lds_store_at requires a trivially "
                           "copyable type");
             record_access_at<Backend>(ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
+            *ptr = value;
+        }
+
+        template <backend_kind Backend, typename SampledPolicy, typename T>
+        __device__ void
+            lds_store_at(T* ptr, T value, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_store_at requires a trivially "
+                          "copyable type");
+            record_access_at<Backend, SampledPolicy>(
+                ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
             *ptr = value;
         }
 
@@ -316,6 +339,29 @@ namespace hip_moi
             }
         }
 
+        template <backend_kind Backend, typename SampledPolicy>
+        __device__ void record_access_at(const void* ptr,
+                                         uint32_t    byte_count,
+                                         access_kind kind,
+                                         uint32_t    lds_byte_offset,
+                                         site_id     site) const
+        {
+            if(byte_count == 0)
+            {
+                return;
+            }
+
+            if constexpr(Backend == backend_kind::sampled_watchpoint)
+            {
+                record_sampled_watchpoint_access<SampledPolicy>(
+                    ptr, byte_count, kind, lds_byte_offset, site);
+            }
+            else
+            {
+                record_exact_shadow_access(ptr, byte_count, kind, lds_byte_offset, site);
+            }
+        }
+
         __device__ void record_exact_shadow_access(const void* ptr,
                                                    uint32_t    byte_count,
                                                    access_kind kind,
@@ -402,6 +448,49 @@ namespace hip_moi
             }
         }
 
+        template <typename SampledPolicy>
+        __device__ void record_sampled_watchpoint_access(const void* ptr,
+                                                         uint32_t    byte_count,
+                                                         access_kind kind,
+                                                         uint32_t    lds_byte_offset,
+                                                         site_id     site) const
+        {
+            if(!storage_.sampled_watchpoints || storage_.sampled_watchpoint_capacity <= 0)
+            {
+                emit_shadow_metadata_full(ptr, byte_count, lds_byte_offset, site);
+                return;
+            }
+
+            uint32_t selection_seed = sampled_selection_seed(site);
+            if(!sampled_should_publish<SampledPolicy>(selection_seed))
+            {
+                return;
+            }
+
+            uint64_t last_byte_offset
+                = static_cast<uint64_t>(lds_byte_offset) + static_cast<uint64_t>(byte_count) - 1u;
+            uint32_t start_cell = lds_byte_offset >> detail::sampled_watchpoint::granule_shift;
+            uint64_t end_cell
+                = (last_byte_offset >> detail::sampled_watchpoint::granule_shift) + 1u;
+            if(start_cell > detail::sampled_watchpoint::max_start
+               || end_cell > static_cast<uint64_t>(detail::sampled_watchpoint::max_start) + 1u)
+            {
+                emit_shadow_metadata_full(ptr, byte_count, lds_byte_offset, site);
+                return;
+            }
+
+            while(static_cast<uint64_t>(start_cell) < end_cell)
+            {
+                uint64_t remaining = end_cell - static_cast<uint64_t>(start_cell);
+                uint32_t chunk     = remaining > detail::sampled_watchpoint::max_count
+                                         ? detail::sampled_watchpoint::max_count
+                                         : static_cast<uint32_t>(remaining);
+                record_sampled_watchpoint_range<SampledPolicy>(
+                    kind, start_cell, chunk, lds_byte_offset, byte_count, site, selection_seed);
+                start_cell += chunk;
+            }
+        }
+
         __device__ uint32_t flat_workgroup_id() const
         {
             return static_cast<uint32_t>(
@@ -446,6 +535,31 @@ namespace hip_moi
             return lane_in_subgroup() == selected_lane;
         }
 
+        template <typename SampledPolicy>
+        __device__ bool sampled_should_publish(uint32_t selection_seed) const
+        {
+            uint32_t subgroup_threads = cfg_.threads_per_subgroup > 0
+                                            ? static_cast<uint32_t>(cfg_.threads_per_subgroup)
+                                            : 1u;
+            if constexpr(SampledPolicy::sample_skip > 1)
+            {
+                if constexpr((SampledPolicy::sample_skip & (SampledPolicy::sample_skip - 1u)) == 0)
+                {
+                    if((selection_seed & (SampledPolicy::sample_skip - 1u)) != 0)
+                    {
+                        return false;
+                    }
+                }
+                else if(selection_seed % SampledPolicy::sample_skip != 0)
+                {
+                    return false;
+                }
+            }
+
+            uint32_t selected_lane = map_sampled_index(selection_seed >> 16, subgroup_threads);
+            return lane_in_subgroup() == selected_lane;
+        }
+
         __device__ void record_sampled_watchpoint_range(access_kind kind,
                                                         uint32_t    start_cell,
                                                         uint32_t    cell_count,
@@ -481,6 +595,48 @@ namespace hip_moi
                     current, slot, start_cell, lds_byte_offset, byte_count, site, selection_seed);
             }
             sampled_delay();
+        }
+
+        template <typename SampledPolicy>
+        __device__ void record_sampled_watchpoint_range(access_kind kind,
+                                                        uint32_t    start_cell,
+                                                        uint32_t    cell_count,
+                                                        uint32_t    lds_byte_offset,
+                                                        uint32_t    byte_count,
+                                                        site_id     site,
+                                                        uint32_t    selection_seed) const
+        {
+            uint32_t subgroup = subgroup_id();
+            uint32_t epoch    = detail::current_epoch(storage_, subgroup);
+            uint64_t packed
+                = detail::pack_sampled_watchpoint_entry(detail::shadow_kind_from_access_kind(kind),
+                                                        subgroup,
+                                                        epoch,
+                                                        static_cast<uint32_t>(storage_.generation),
+                                                        start_cell,
+                                                        cell_count);
+            uint32_t slot = sampled_watchpoint_slot(start_cell, epoch);
+            if constexpr(SampledPolicy::report_conflicts)
+            {
+                detail::sampled_watchpoint_entry current
+                    = detail::decode_sampled_watchpoint_entry(packed);
+                uint64_t prior_value
+                    = atomic_exchange_shadow_entry(&storage_.sampled_watchpoints[slot], packed);
+                detail::sampled_watchpoint_entry prior
+                    = detail::decode_sampled_watchpoint_entry(prior_value);
+                if(detail::sampled_watchpoints_conflict(current, prior))
+                {
+                    emit_sampled_watchpoint_conflict(
+                        prior, current, lds_byte_offset, byte_count, site);
+                }
+                scan_sampled_watchpoint_conflicts<SampledPolicy>(
+                    current, slot, start_cell, lds_byte_offset, byte_count, site, selection_seed);
+            }
+            else
+            {
+                (void)atomic_exchange_shadow_entry(&storage_.sampled_watchpoints[slot], packed);
+            }
+            sampled_delay<SampledPolicy>();
         }
 
         __device__ uint32_t map_sampled_index(uint32_t value, uint32_t count) const
@@ -547,11 +703,56 @@ namespace hip_moi
             }
         }
 
+        template <typename SampledPolicy>
+        __device__ void
+            scan_sampled_watchpoint_conflicts(const detail::sampled_watchpoint_entry& current,
+                                              uint32_t                                slot,
+                                              uint32_t                                start_cell,
+                                              uint32_t lds_byte_offset,
+                                              uint32_t byte_count,
+                                              site_id  site,
+                                              uint32_t selection_seed) const
+        {
+            uint32_t capacity = static_cast<uint32_t>(storage_.sampled_watchpoint_capacity);
+            uint32_t probes
+                = SampledPolicy::probe_count == 0 ? capacity : SampledPolicy::probe_count;
+            if(probes > capacity)
+            {
+                probes = capacity;
+            }
+            uint32_t step = sampled_probe_step(selection_seed, start_cell);
+            for(uint32_t probe = 0; probe < probes; ++probe)
+            {
+                uint32_t index = map_sampled_index(slot + probe * step, capacity);
+                uint64_t prior_value
+                    = *reinterpret_cast<volatile uint64_t*>(&storage_.sampled_watchpoints[index]);
+                detail::sampled_watchpoint_entry prior
+                    = detail::decode_sampled_watchpoint_entry(prior_value);
+                if(detail::sampled_watchpoints_conflict(current, prior))
+                {
+                    emit_sampled_watchpoint_conflict(
+                        prior, current, lds_byte_offset, byte_count, site);
+                }
+            }
+        }
+
         __device__ void sampled_delay() const
         {
             for(uint32_t i = 0; i < storage_.sampled_watchpoint_delay_iters; ++i)
             {
                 asm volatile("s_nop 0" ::: "memory");
+            }
+        }
+
+        template <typename SampledPolicy>
+        __device__ void sampled_delay() const
+        {
+            if constexpr(SampledPolicy::delay_iters != 0)
+            {
+                for(uint32_t i = 0; i < SampledPolicy::delay_iters; ++i)
+                {
+                    asm volatile("s_nop 0" ::: "memory");
+                }
             }
         }
 

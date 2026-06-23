@@ -685,3 +685,82 @@ fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only             0.006 ms      0.18
 fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.013 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.013 ms  iters=7767  warmup= 100.065 ms  warmup_iters=7772
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only    0.008 ms      0.13 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.261 ms  iters=12608  warmup= 100.141 ms  warmup_iters=12608
 ```
+
+## 2026-06-23 after static sampled policy
+
+hip-moi commit measured: this commit
+sanitizer-strategy benchmark commit: `e7df089`
+
+This pass added `hip_moi::sampled_watchpoint_policy` and a benchmark dispatch
+that uses the fixed default publish-only policy only when the effective sampled
+knobs are exactly `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
+`reports=off`. Non-default knob runs still use the runtime sampled policy path.
+
+Before/after summary from this session:
+
+```text
+shape     sampled_loom  hip_moi_before  hip_moi_after
+2-wave    0.00475 ms    0.00483 ms      0.00425 ms
+4-wave    0.00590 ms    0.00760 ms      0.00523 ms
+8-wave    0.00582 ms    0.00790 ms      0.00573 ms
+```
+
+A non-default spot check with `SAMPLED_SKIP=1` did not take the static-policy
+path and measured hip-moi sampled publish-only at `0.00893 ms`.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=32 N=64 K=16 waves=2 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w2_2x4_noop                                  0.00288 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.031 ms  iters=34761  warmup= 100.025 ms  warmup_iters=34769
+fp16_wmma_tiled_w2_2x4_sampled_loom_publish_only             0.00477 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.115 ms  iters=20974  warmup= 100.051 ms  warmup_iters=20863
+fp16_wmma_tiled_w2_2x4_hip_moi_exact_shadow                  0.00903 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.821 ms  iters=11162  warmup= 100.063 ms  warmup_iters=11076
+fp16_wmma_tiled_w2_2x4_hip_moi_sampled_watchpoint_publish_only   0.00425 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.216 ms  iters=23592  warmup= 100.010 ms  warmup_iters=23275
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=64 N=256 K=16 waves=4 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w4_4x16_noop                                 0.00312 ms      0.17 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.644 ms  iters=32288  warmup= 100.047 ms  warmup_iters=31979
+fp16_wmma_tiled_w4_4x16_sampled_loom_publish_only            0.00588 ms      0.09 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.429 ms  iters=17078  warmup= 100.603 ms  warmup_iters=17011
+fp16_wmma_tiled_w4_4x16_hip_moi_exact_shadow                  0.0138 ms      0.04 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.104 ms  iters=7267  warmup= 100.086 ms  warmup_iters=7259
+fp16_wmma_tiled_w4_4x16_hip_moi_sampled_watchpoint_publish_only   0.00523 ms      0.10 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.014 ms  iters=19113  warmup= 100.290 ms  warmup_iters=19168
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=256 N=128 K=16 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                 0.00320 ms      0.33 TFLOP/s    0.2% of 191 TFLOP/s  total= 100.150 ms  iters=31308  warmup= 100.039 ms  warmup_iters=31026
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only            0.00578 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.184 ms  iters=17336  warmup= 100.575 ms  warmup_iters=17235
+fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.0129 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.224 ms  iters=7777  warmup= 100.173 ms  warmup_iters=7600
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only   0.00573 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.014 ms  iters=17467  warmup= 100.029 ms  warmup_iters=17426
+```

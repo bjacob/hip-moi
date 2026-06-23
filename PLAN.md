@@ -220,6 +220,14 @@ The sampled selector uses 32-bit mixing and power-of-two masks rather than
 as powers of two for good distribution and for fair comparison with the Loom
 benchmark row.
 
+The sampled access API now has two policy layers. Runtime policy fields in
+`host_context_options` preserve launch-time flexibility. A compile-time
+`sampled_watchpoint_policy<SampleSkip, ProbeCount, DelayIters, ReportConflicts>`
+can instead be supplied as a second template argument to
+`lds_load_at<backend_kind::sampled_watchpoint, Policy>` or
+`lds_store_at<backend_kind::sampled_watchpoint, Policy>`. That lets hot
+publish-only rows erase runtime policy loads and reporting branches.
+
 Selection is site-aware, but conflict rendezvous is range-aware: the watchpoint
 slot is keyed by the watched LDS range, epoch, and generation, not by source
 site or subgroup. Reporting mode publishes first, checks the displaced
@@ -570,6 +578,14 @@ also fixed sampled reporting rendezvous so same-range conflicts meet in the
 same watchpoint slot instead of depending on source-site or subgroup hash
 collisions.
 
+The next pass added a compile-time sampled policy API and changed the extracted
+benchmark to use it only for the default publish-only hip-moi row. With precise
+latency printing, sampled hip-moi moved from `0.00483` to `0.00425` ms on
+2-wave, from `0.00760` to `0.00523` ms on 4-wave, and from `0.00790` to
+`0.00573` ms on 8-wave. The benchmark deliberately falls back to the runtime
+policy path for non-default sampled knobs, so dense/reporting sweeps remain
+honest.
+
 Use the 2/4/8-wave benchmark set to tune:
 
 * watchpoint count,
@@ -583,13 +599,12 @@ Inspect generated code when benchmark movement is surprising. The main danger is
 spilling caused by instrumentation VGPR usage; global-memory traffic from spills
 can dominate the actual sanitizer work.
 
-Next likely target: remove repeated benchmark helper overhead around
-`make_hip_moi_context()` and context construction, or add a slimmer sampled
-hot-path wrapper, while preserving the ordinary user-facing `host_context` API.
-After the benchmark harness change, the likely library-side version of this is
-a smaller sampled hot-path context/view that carries only the fields needed by
-the sampled backend, so caching the context does not keep exact-shadow and
-diagnostic-heavy state live across the whole kernel.
+Next likely target: inspect generated code for the static sampled row before
+adding more API. The remaining gap is now small enough that local changes could
+be noise unless guided by VGPR/code-size evidence. If there is still visible
+library overhead, the likely library-side version is a smaller sampled hot-path
+context/view that carries only the fields needed by the sampled backend, while
+preserving the ordinary user-facing `host_context` API.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 

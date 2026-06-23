@@ -22,6 +22,12 @@ namespace
     constexpr hip_moi::site_id kProducerSite(0x401);
     constexpr hip_moi::site_id kConsumerSite(0x502);
 
+    using TestSampledPolicy = hip_moi::sampled_watchpoint_policy<
+        /*SampleSkip=*/1,
+        /*ProbeCount=*/0,
+        /*DelayIters=*/0,
+        /*ReportConflicts=*/true>;
+
     struct observed_metadata
     {
         int                          diagnostic_count;
@@ -47,13 +53,13 @@ namespace
 
         if(ctx.subgroup_id() == 0)
         {
-            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         ctx.syncthreads();
         if(ctx.subgroup_id() == 1)
         {
-            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
@@ -68,12 +74,12 @@ namespace
 
         if(ctx.subgroup_id() == 0)
         {
-            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         if(ctx.subgroup_id() == 1)
         {
-            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+            (void)ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
