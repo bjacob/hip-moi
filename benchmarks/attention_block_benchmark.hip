@@ -1,0 +1,838 @@
+// Copyright 2026
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// RDNA4 WMMA attention-block benchmark for hip-moi.
+//
+// This grows tests/instrumented/010_rdna4_wmma_attention_block_test.hip into a
+// benchmark-sized workload. Each workgroup computes a 32-query block with two
+// subgroups. K/V fragments are staged through LDS, QK and PV are computed with
+// RDNA4 WMMA, and the benchmark compares noop execution with hip-moi's sampled
+// watchpoint paths.
+
+#include <hip/hip_runtime.h>
+
+#include "hip_moi/hip_moi.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+using half_t = _Float16;
+using f16x8  = half_t __attribute__((ext_vector_type(8)));
+using f32x8  = float __attribute__((ext_vector_type(8)));
+
+static constexpr int kWaveSize           = 32;
+static constexpr int kSubgroupCount      = 2;
+static constexpr int kThreads            = kWaveSize * kSubgroupCount;
+static constexpr int kThreadsPerSubgroup = kWaveSize;
+static constexpr int kQueryTile          = 16;
+static constexpr int kQueriesPerBlock    = kQueryTile * kSubgroupCount;
+static constexpr int kKeyTile            = 16;
+static constexpr int kHeadDim            = 16;
+static constexpr int kValueDim           = 16;
+static constexpr int kFragmentElements   = 8;
+
+static constexpr uint32_t kKSharedByteOffset = 0;
+static constexpr uint32_t kVSharedByteOffset = kWaveSize * static_cast<uint32_t>(sizeof(f16x8));
+
+static constexpr hip_moi::site_id kKStoreSite(0xb01);
+static constexpr hip_moi::site_id kVStoreSite(0xb02);
+static constexpr hip_moi::site_id kKLoadSite(0xb03);
+static constexpr hip_moi::site_id kVLoadSite(0xb04);
+
+#ifndef HIP_MOI_BENCH_STORAGE_BYTES
+#define HIP_MOI_BENCH_STORAGE_BYTES (128 * 1024)
+#endif
+
+using StaticFastPolicy = hip_moi::sampled_watchpoint_policy<
+    /*SampleSkip=*/32,
+    /*ProbeCount=*/1,
+    /*DelayIters=*/32,
+    /*ReportConflicts=*/false,
+    /*StaticWatchpointCapacity=*/1>;
+
+static void hip_check_impl(hipError_t err, const char* expr, const char* file, int line)
+{
+    if(err != hipSuccess)
+    {
+        std::fprintf(
+            stderr, "HIP error %s from `%s` at %s:%d\n", hipGetErrorString(err), expr, file, line);
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+#define HIP_CHECK(expr) hip_check_impl((expr), #expr, __FILE__, __LINE__)
+
+static int get_int_env(const char* name, int default_value)
+{
+    const char* value = std::getenv(name);
+    return value ? std::stoi(value) : default_value;
+}
+
+static int get_int_env_alias(const char* name, const char* legacy_name, int default_value)
+{
+    const char* value = std::getenv(name);
+    if(value)
+    {
+        return std::stoi(value);
+    }
+    if(legacy_name)
+    {
+        value = std::getenv(legacy_name);
+        if(value)
+        {
+            return std::stoi(value);
+        }
+    }
+    return default_value;
+}
+
+static double get_double_env(const char* name, double default_value)
+{
+    const char* value = std::getenv(name);
+    return value ? std::strtod(value, nullptr) : default_value;
+}
+
+struct DisplayLatency
+{
+    double      value;
+    const char* unit;
+};
+
+static DisplayLatency display_latency(double ms)
+{
+    if(ms < 1.0)
+    {
+        return DisplayLatency{/*value=*/ms * 1000.0, /*unit=*/"µs"};
+    }
+    return DisplayLatency{/*value=*/ms, /*unit=*/"ms"};
+}
+
+__host__ __device__ static int rdna4_wmma_f16_k(int lane, int idx)
+{
+    int reg  = idx >> 1;
+    int half = idx & 1;
+    return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
+}
+
+__host__ __device__ static int rdna4_wmma_acc_m(int lane, int elem)
+{
+    return elem + 8 * (lane >> 4);
+}
+
+__host__ __device__ static uint32_t k_fragment_offset(int lane)
+{
+    return kKSharedByteOffset + static_cast<uint32_t>(lane * sizeof(f16x8));
+}
+
+__host__ __device__ static uint32_t v_fragment_offset(int lane)
+{
+    return kVSharedByteOffset + static_cast<uint32_t>(lane * sizeof(f16x8));
+}
+
+__device__ __forceinline__ static f32x8 zero_f32x8()
+{
+    f32x8 value;
+#pragma unroll
+    for(int i = 0; i < kFragmentElements; ++i)
+    {
+        value[i] = 0.0f;
+    }
+    return value;
+}
+
+struct Runtime
+{
+    hip_moi::context::storage_ref* storage_refs;
+    uint64_t                       storage_count;
+    uint32_t                       generation;
+};
+
+__device__ __forceinline__ static uint64_t flat_workgroup_id()
+{
+    return static_cast<uint64_t>(blockIdx.x)
+           + static_cast<uint64_t>(gridDim.x)
+                 * (static_cast<uint64_t>(blockIdx.y)
+                    + static_cast<uint64_t>(gridDim.y) * static_cast<uint64_t>(blockIdx.z));
+}
+
+__device__ __forceinline__ static hip_moi::context::storage_ref workgroup_storage(Runtime runtime)
+{
+    hip_moi::context::storage_ref storage{};
+    uint64_t                      workgroup_id = flat_workgroup_id();
+    if(runtime.storage_refs && workgroup_id < runtime.storage_count)
+    {
+        storage = runtime.storage_refs[workgroup_id];
+    }
+    storage.generation = runtime.generation;
+    return storage;
+}
+
+struct NoopPolicy
+{
+    struct context_type
+    {
+    };
+
+    __device__ static context_type make_context(Runtime)
+    {
+        return {};
+    }
+
+    __device__ static void init_workgroup(context_type&) {}
+
+    __device__ static void syncthreads(context_type&)
+    {
+        __syncthreads();
+    }
+
+    template <typename T>
+    __device__ static void store(context_type&, T* ptr, T value, uint32_t, hip_moi::site_id)
+    {
+        *ptr = value;
+    }
+
+    template <typename T>
+    __device__ static T load(context_type&, const T* ptr, uint32_t, hip_moi::site_id)
+    {
+        return *ptr;
+    }
+};
+
+struct ContextSampledPolicy
+{
+    using context_type = hip_moi::context;
+
+    __device__ static context_type make_context(Runtime runtime)
+    {
+        int thread_count = static_cast<int>(blockDim.x * blockDim.y * blockDim.z);
+        hip_moi::context::config cfg{
+            /*thread_count=*/thread_count,
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*subgroup_count=*/(thread_count + kThreadsPerSubgroup - 1) / kThreadsPerSubgroup,
+        };
+        return hip_moi::context(workgroup_storage(runtime), cfg);
+    }
+
+    __device__ static void init_workgroup(context_type& ctx)
+    {
+        ctx.init_workgroup();
+    }
+
+    __device__ static void syncthreads(context_type& ctx)
+    {
+        ctx.syncthreads();
+    }
+
+    template <typename T>
+    __device__ static void
+        store(context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+    {
+        ctx.template lds_store_at<hip_moi::backend_kind::sampled_watchpoint>(
+            ptr, value, offset, site);
+    }
+
+    template <typename T>
+    __device__ static T
+        load(context_type& ctx, const T* ptr, uint32_t offset, hip_moi::site_id site)
+    {
+        return ctx.template lds_load_at<hip_moi::backend_kind::sampled_watchpoint>(
+            ptr, offset, site);
+    }
+};
+
+struct SampledWatchpointContextPolicy
+{
+    using context_type = hip_moi::sampled_watchpoint_context;
+
+    __device__ static context_type make_context(Runtime runtime)
+    {
+        hip_moi::sampled_watchpoint_context::config cfg{
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+        };
+        return hip_moi::make_sampled_watchpoint_context(workgroup_storage(runtime), cfg);
+    }
+
+    __device__ static void init_workgroup(context_type& ctx)
+    {
+        ctx.init_workgroup();
+    }
+
+    __device__ static void syncthreads(context_type& ctx)
+    {
+        ctx.syncthreads();
+    }
+
+    template <typename T>
+    __device__ static void
+        store(context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+    {
+        ctx.template lds_store_at<StaticFastPolicy>(ptr, value, offset, site);
+    }
+
+    template <typename T>
+    __device__ static T
+        load(context_type& ctx, const T* ptr, uint32_t offset, hip_moi::site_id site)
+    {
+        return ctx.template lds_load_at<StaticFastPolicy>(ptr, offset, site);
+    }
+};
+
+template <typename Policy>
+__global__
+    __launch_bounds__(kThreads) void attention_block_kernel(const f16x8* __restrict__ q_fragments,
+                                                            const f16x8* __restrict__ k_fragments,
+                                                            const f16x8* __restrict__ v_fragments,
+                                                            float* __restrict__ out,
+                                                            int     sequence_length,
+                                                            Runtime runtime)
+{
+    __shared__ f16x8  k_shared[kWaveSize];
+    __shared__ f16x8  v_shared[kWaveSize];
+    __shared__ float  scores[kSubgroupCount][kQueryTile][kKeyTile];
+    __shared__ half_t weights[kSubgroupCount][kQueryTile][kKeyTile];
+    __shared__ float  row_old_scale[kSubgroupCount][kQueryTile];
+    __shared__ float  row_sum[kSubgroupCount][kQueryTile];
+
+    typename Policy::context_type ctx = Policy::make_context(runtime);
+    Policy::init_workgroup(ctx);
+
+    int tid            = static_cast<int>(threadIdx.x);
+    int subgroup       = tid / kWaveSize;
+    int lane           = tid & (kWaveSize - 1);
+    int query_block    = static_cast<int>(blockIdx.x);
+    int key_tile_count = sequence_length / kKeyTile;
+
+    f16x8 q_fragment = q_fragments[(query_block * kSubgroupCount + subgroup) * kWaveSize + lane];
+    f32x8 out_acc    = zero_f32x8();
+
+    float running_max[kQueryTile];
+    float running_sum[kQueryTile];
+#pragma unroll
+    for(int row = 0; row < kQueryTile; ++row)
+    {
+        running_max[row] = -3.402823466e38f;
+        running_sum[row] = 0.0f;
+    }
+
+    for(int key_tile = 0; key_tile < key_tile_count; ++key_tile)
+    {
+        if(subgroup == 0)
+        {
+            Policy::store(ctx,
+                          &k_shared[lane],
+                          k_fragments[key_tile * kWaveSize + lane],
+                          k_fragment_offset(lane),
+                          kKStoreSite);
+            Policy::store(ctx,
+                          &v_shared[lane],
+                          v_fragments[key_tile * kWaveSize + lane],
+                          v_fragment_offset(lane),
+                          kVStoreSite);
+        }
+
+        Policy::syncthreads(ctx);
+
+        f16x8 k_fragment = Policy::load(ctx, &k_shared[lane], k_fragment_offset(lane), kKLoadSite);
+        f32x8 qk_acc     = zero_f32x8();
+        qk_acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(q_fragment, k_fragment, qk_acc);
+
+        int key_column = lane & 15;
+#pragma unroll
+        for(int elem = 0; elem < kFragmentElements; ++elem)
+        {
+            int query_row                           = rdna4_wmma_acc_m(lane, elem);
+            scores[subgroup][query_row][key_column] = qk_acc[elem] * 0.25f;
+        }
+
+        Policy::syncthreads(ctx);
+
+        if(lane == 0)
+        {
+            for(int query_row = 0; query_row < kQueryTile; ++query_row)
+            {
+                float tile_max = -3.402823466e38f;
+                for(int key = 0; key < kKeyTile; ++key)
+                {
+                    tile_max = fmaxf(tile_max, scores[subgroup][query_row][key]);
+                }
+
+                float new_max                      = fmaxf(running_max[query_row], tile_max);
+                float old_scale                    = running_sum[query_row] == 0.0f
+                                                         ? 0.0f
+                                                         : expf(running_max[query_row] - new_max);
+                row_old_scale[subgroup][query_row] = old_scale;
+
+                float tile_sum = 0.0f;
+                for(int key = 0; key < kKeyTile; ++key)
+                {
+                    float  weight      = expf(scores[subgroup][query_row][key] - new_max);
+                    half_t weight_half = static_cast<half_t>(weight);
+                    weights[subgroup][query_row][key] = weight_half;
+                    tile_sum += static_cast<float>(weight_half);
+                }
+
+                running_sum[query_row]       = running_sum[query_row] * old_scale + tile_sum;
+                running_max[query_row]       = new_max;
+                row_sum[subgroup][query_row] = running_sum[query_row];
+            }
+        }
+
+        Policy::syncthreads(ctx);
+
+#pragma unroll
+        for(int elem = 0; elem < kFragmentElements; ++elem)
+        {
+            int query_row = rdna4_wmma_acc_m(lane, elem);
+            out_acc[elem] *= row_old_scale[subgroup][query_row];
+        }
+
+        f16x8 p_fragment;
+#pragma unroll
+        for(int elem = 0; elem < kFragmentElements; ++elem)
+        {
+            int query_row    = lane & 15;
+            int key          = rdna4_wmma_f16_k(lane, elem);
+            p_fragment[elem] = weights[subgroup][query_row][key];
+        }
+
+        f16x8 v_fragment = Policy::load(ctx, &v_shared[lane], v_fragment_offset(lane), kVLoadSite);
+        f32x8 pv_acc     = zero_f32x8();
+        pv_acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(p_fragment, v_fragment, pv_acc);
+
+#pragma unroll
+        for(int elem = 0; elem < kFragmentElements; ++elem)
+        {
+            out_acc[elem] += pv_acc[elem];
+        }
+
+        Policy::syncthreads(ctx);
+    }
+
+    int value_column = lane & 15;
+#pragma unroll
+    for(int elem = 0; elem < kFragmentElements; ++elem)
+    {
+        int query_row    = rdna4_wmma_acc_m(lane, elem);
+        int global_query = query_block * kQueriesPerBlock + subgroup * kQueryTile + query_row;
+        out[global_query * kValueDim + value_column] = out_acc[elem] / row_sum[subgroup][query_row];
+    }
+}
+
+template <typename T>
+static T* gpu_alloc(std::size_t count)
+{
+    T* ptr = nullptr;
+    HIP_CHECK(hipMalloc(&ptr, count * sizeof(T)));
+    return ptr;
+}
+
+enum class Mode
+{
+    Noop,
+    HipMoiContextSampledWatchpoint,
+    HipMoiSampledWatchpointContext,
+};
+
+static bool is_hip_moi_mode(Mode mode)
+{
+    return mode != Mode::Noop;
+}
+
+struct SampledKnobs
+{
+    uint32_t watchpoints;
+    uint32_t sample_skip;
+    uint32_t delay_iters;
+    uint32_t probe_count;
+    bool     reports;
+};
+
+static SampledKnobs sampled_knobs_from_env()
+{
+    int  watchpoints = get_int_env_alias("SAMPLED_WATCHPOINTS", "TSAN_SAMPLED_WATCHPOINTS", 1);
+    int  sample_skip = get_int_env_alias("SAMPLED_SKIP", "TSAN_SAMPLED_SKIP", 32);
+    int  delay_iters = get_int_env_alias("SAMPLED_DELAY", "TSAN_SAMPLED_DELAY", 32);
+    int  probe_count = get_int_env_alias("SAMPLED_PROBES", "TSAN_SAMPLED_PROBES", 1);
+    bool reports     = get_int_env("SAMPLED_REPORTS", 0) != 0;
+
+    if(watchpoints <= 0 || (watchpoints & (watchpoints - 1)) != 0)
+    {
+        std::fprintf(stderr, "error: SAMPLED_WATCHPOINTS must be a positive power of two\n");
+        std::exit(EXIT_FAILURE);
+    }
+    if(sample_skip < 0 || delay_iters < 0 || probe_count < 0)
+    {
+        std::fprintf(stderr,
+                     "error: SAMPLED_SKIP, SAMPLED_DELAY, and SAMPLED_PROBES must "
+                     "be nonnegative\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    return SampledKnobs{
+        static_cast<uint32_t>(watchpoints),
+        static_cast<uint32_t>(sample_skip),
+        static_cast<uint32_t>(delay_iters),
+        static_cast<uint32_t>(probe_count),
+        reports,
+    };
+}
+
+static bool uses_default_static_sampled_policy(SampledKnobs knobs)
+{
+    return knobs.watchpoints == 1 && knobs.sample_skip == 32 && knobs.probe_count == 1
+           && knobs.delay_iters == 32 && !knobs.reports;
+}
+
+struct Allocation
+{
+    std::vector<hip_moi::host_context*> contexts;
+    hip_moi::context::storage_ref*      device_storage_refs = nullptr;
+    uint64_t                            storage_count       = 0;
+    uint32_t                            generation          = 1;
+};
+
+static Allocation make_allocation(Mode mode, int sequence_length, SampledKnobs sampled_knobs)
+{
+    Allocation allocation;
+    uint64_t   workgroups    = static_cast<uint64_t>(sequence_length / kQueriesPerBlock);
+    allocation.storage_count = workgroups;
+
+    if(!is_hip_moi_mode(mode))
+    {
+        return allocation;
+    }
+
+    hip_moi::host_context_options options;
+    options.storage_bytes = static_cast<std::size_t>(
+        get_int_env("HIP_MOI_STORAGE_BYTES", HIP_MOI_BENCH_STORAGE_BYTES));
+    options.diagnostic_capacity            = get_int_env("HIP_MOI_DIAGNOSTICS", 1024);
+    options.subgroup_capacity              = get_int_env("HIP_MOI_SUBGROUPS", kSubgroupCount);
+    options.sampled_watchpoint_capacity    = static_cast<int>(sampled_knobs.watchpoints);
+    options.sampled_watchpoint_sample_skip = sampled_knobs.sample_skip;
+    options.sampled_watchpoint_probe_count = sampled_knobs.probe_count;
+    options.sampled_watchpoint_delay_iters = sampled_knobs.delay_iters;
+    options.sampled_watchpoint_reports     = sampled_knobs.reports;
+    options.backend                        = hip_moi::backend_kind::sampled_watchpoint;
+    options.destructor_reports             = false;
+    options.destructor_aborts              = false;
+    options.diagnostic_stream              = nullptr;
+
+    std::vector<hip_moi::context::storage_ref> storage_refs;
+    storage_refs.reserve(workgroups);
+    for(uint64_t i = 0; i < workgroups; ++i)
+    {
+        auto* context = new hip_moi::host_context(options);
+        context->disable_destructor_check();
+        allocation.contexts.push_back(context);
+        storage_refs.push_back(context->launch_ref());
+    }
+
+    HIP_CHECK(
+        hipMalloc(&allocation.device_storage_refs, storage_refs.size() * sizeof(storage_refs[0])));
+    HIP_CHECK(hipMemcpy(allocation.device_storage_refs,
+                        storage_refs.data(),
+                        storage_refs.size() * sizeof(storage_refs[0]),
+                        hipMemcpyHostToDevice));
+    return allocation;
+}
+
+static Runtime next_runtime(Allocation& allocation)
+{
+    Runtime runtime{
+        allocation.device_storage_refs,
+        allocation.storage_count,
+        allocation.generation,
+    };
+    ++allocation.generation;
+    return runtime;
+}
+
+static void free_allocation(Allocation& allocation)
+{
+    if(allocation.device_storage_refs)
+    {
+        HIP_CHECK(hipFree(allocation.device_storage_refs));
+    }
+    for(auto* context : allocation.contexts)
+    {
+        delete context;
+    }
+    allocation = {};
+}
+
+template <typename Policy>
+static void launch_kernel(const f16x8* q,
+                          const f16x8* k,
+                          const f16x8* v,
+                          float*       out,
+                          int          sequence_length,
+                          Runtime      runtime,
+                          hipStream_t  stream)
+{
+    dim3 block(kThreads);
+    dim3 grid(sequence_length / kQueriesPerBlock);
+    attention_block_kernel<Policy>
+        <<<grid, block, 0, stream>>>(q, k, v, out, sequence_length, runtime);
+}
+
+template <typename Policy>
+static double run_one(const char*  name,
+                      Mode         mode,
+                      const f16x8* q,
+                      const f16x8* k,
+                      const f16x8* v,
+                      float*       out,
+                      int          sequence_length,
+                      SampledKnobs sampled_knobs,
+                      double       min_ms,
+                      double       warmup_ms)
+{
+    Allocation  allocation = make_allocation(mode, sequence_length, sampled_knobs);
+    hipStream_t stream     = nullptr;
+    for(int i = 0; i < 5; ++i)
+    {
+        launch_kernel<Policy>(q, k, v, out, sequence_length, next_runtime(allocation), stream);
+    }
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    hipEvent_t start;
+    hipEvent_t stop;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+
+    int calibration_iterations = std::max(1, get_int_env("BENCH_CALIBRATION_ITERS", 10));
+    int max_iterations         = std::max(1, get_int_env("MAX_ITERS", 100000));
+
+    auto run_timed_iterations = [&](int iteration_count) {
+        HIP_CHECK(hipEventRecord(start, stream));
+        for(int i = 0; i < iteration_count; ++i)
+        {
+            launch_kernel<Policy>(q, k, v, out, sequence_length, next_runtime(allocation), stream);
+        }
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+        float elapsed_ms = 0.0f;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start, stop));
+        HIP_CHECK(hipGetLastError());
+        return elapsed_ms;
+    };
+
+    auto target_iterations = [&](double target_ms, double estimate_ms) {
+        if(target_ms <= 0.0)
+        {
+            return 0;
+        }
+        int iterations
+            = std::max(1, static_cast<int>(std::ceil(target_ms / std::max(0.001, estimate_ms))));
+        return std::min(iterations, max_iterations);
+    };
+
+    auto run_until_target = [&](double target_ms, int* iteration_count) {
+        if(target_ms <= 0.0 || *iteration_count <= 0)
+        {
+            *iteration_count = 0;
+            return 0.0f;
+        }
+
+        float elapsed_ms = 0.0f;
+        for(;;)
+        {
+            elapsed_ms = run_timed_iterations(*iteration_count);
+            if(elapsed_ms >= target_ms || *iteration_count == max_iterations)
+            {
+                return elapsed_ms;
+            }
+
+            double scale = target_ms / std::max(0.001f, elapsed_ms);
+            int    next_iterations
+                = static_cast<int>(std::ceil(static_cast<double>(*iteration_count) * scale));
+            *iteration_count
+                = std::min(max_iterations, std::max(*iteration_count + 1, next_iterations));
+        }
+    };
+
+    float calibration_ms = run_timed_iterations(calibration_iterations);
+    float one_ms         = calibration_ms / calibration_iterations;
+
+    int   warmup_iterations = target_iterations(warmup_ms, one_ms);
+    float warmup_elapsed_ms = run_until_target(warmup_ms, &warmup_iterations);
+
+    double measurement_estimate_ms
+        = warmup_iterations > 0 && warmup_elapsed_ms > 0.0f
+              ? static_cast<double>(warmup_elapsed_ms) / warmup_iterations
+              : one_ms;
+    int   iterations = target_iterations(min_ms, measurement_estimate_ms);
+    float elapsed_ms = run_until_target(min_ms, &iterations);
+
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+
+    uint64_t reports = 0;
+    if(is_hip_moi_mode(mode))
+    {
+        for(auto* context : allocation.contexts)
+        {
+            int count = context->consume_diagnostics(nullptr);
+            if(count < 0)
+            {
+                std::fprintf(stderr, "error: failed to read hip-moi diagnostics\n");
+                std::exit(EXIT_FAILURE);
+            }
+            reports += static_cast<uint64_t>(count);
+        }
+        if(reports != 0)
+        {
+            std::printf("%-68s benchmark_tsan_reports=%llu\n",
+                        name,
+                        static_cast<unsigned long long>(reports));
+        }
+    }
+    free_allocation(allocation);
+
+    double ms  = elapsed_ms / iterations;
+    double ops = 2.0 * static_cast<double>(sequence_length) * static_cast<double>(sequence_length)
+                 * static_cast<double>(kHeadDim + kValueDim);
+    double         achieved = ops / (ms * 1.0e9);
+    DisplayLatency latency  = display_latency(ms);
+    std::printf("%-68s %#9.3g %s  %8.3f effective TFLOP/s"
+                "  total=%8.3f ms  iters=%d  warmup=%8.3f ms"
+                "  warmup_iters=%d\n",
+                name,
+                latency.value,
+                latency.unit,
+                achieved,
+                elapsed_ms,
+                iterations,
+                warmup_elapsed_ms,
+                warmup_iterations);
+    return ms;
+}
+
+static void print_device()
+{
+    int device = 0;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t prop;
+    HIP_CHECK(hipGetDeviceProperties(&prop, device));
+    std::printf("device %d: %s, gcnArch=%s, CUs=%d\n",
+                device,
+                prop.name,
+                prop.gcnArchName,
+                prop.multiProcessorCount);
+}
+
+int main()
+{
+    int    sequence_length = get_int_env("BENCH_SEQ", 1024);
+    double min_ms          = get_double_env("MIN_MS", 100.0);
+    double warmup_ms       = get_double_env("WARMUP_MS", min_ms);
+    if(sequence_length <= 0 || sequence_length % kQueriesPerBlock != 0
+       || sequence_length % kKeyTile != 0)
+    {
+        std::fprintf(
+            stderr, "error: BENCH_SEQ must be a positive multiple of %d\n", kQueriesPerBlock);
+        return EXIT_FAILURE;
+    }
+    if(min_ms <= 0.0)
+    {
+        std::fprintf(stderr, "error: MIN_MS must be positive\n");
+        return EXIT_FAILURE;
+    }
+    if(warmup_ms < 0.0)
+    {
+        std::fprintf(stderr, "error: WARMUP_MS must be nonnegative\n");
+        return EXIT_FAILURE;
+    }
+
+    int         query_blocks = sequence_length / kQueriesPerBlock;
+    int         key_tiles    = sequence_length / kKeyTile;
+    std::size_t q_vectors    = static_cast<std::size_t>(query_blocks) * kSubgroupCount * kWaveSize;
+    std::size_t kv_vectors   = static_cast<std::size_t>(key_tiles) * kWaveSize;
+    std::size_t output_scalars = static_cast<std::size_t>(sequence_length) * kValueDim;
+    f16x8*      q              = gpu_alloc<f16x8>(q_vectors);
+    f16x8*      k              = gpu_alloc<f16x8>(kv_vectors);
+    f16x8*      v              = gpu_alloc<f16x8>(kv_vectors);
+    float*      out            = gpu_alloc<float>(output_scalars);
+    HIP_CHECK(hipMemset(q, 0, q_vectors * sizeof(f16x8)));
+    HIP_CHECK(hipMemset(k, 0, kv_vectors * sizeof(f16x8)));
+    HIP_CHECK(hipMemset(v, 0, kv_vectors * sizeof(f16x8)));
+    HIP_CHECK(hipMemset(out, 0, output_scalars * sizeof(float)));
+
+    print_device();
+    std::printf("attention shape: seq=%d head_dim=%d value_dim=%d "
+                "query_blocks=%d waves_per_workgroup=%d min_ms=%.1f "
+                "warmup_ms=%.1f\n",
+                sequence_length,
+                kHeadDim,
+                kValueDim,
+                query_blocks,
+                kSubgroupCount,
+                min_ms,
+                warmup_ms);
+
+    SampledKnobs sampled_knobs = sampled_knobs_from_env();
+    std::printf("sampled knobs: watchpoints=%u skip=%u probes=%u delay=%u "
+                "reports=%s\n",
+                sampled_knobs.watchpoints,
+                sampled_knobs.sample_skip,
+                sampled_knobs.probe_count,
+                sampled_knobs.delay_iters,
+                sampled_knobs.reports ? "on" : "off");
+
+    bool use_static_fast = uses_default_static_sampled_policy(sampled_knobs);
+    if(use_static_fast)
+    {
+        std::printf("hip-moi sampled_watchpoint_context policy: static default "
+                    "publish-only\n");
+    }
+
+    std::string prefix              = "attention_wmma_seq" + std::to_string(sequence_length);
+    std::string sampled_mode_suffix = sampled_knobs.reports ? "_reporting" : "_publish_only";
+    run_one<NoopPolicy>((prefix + "_noop").c_str(),
+                        Mode::Noop,
+                        q,
+                        k,
+                        v,
+                        out,
+                        sequence_length,
+                        sampled_knobs,
+                        min_ms,
+                        warmup_ms);
+    run_one<ContextSampledPolicy>(
+        (prefix + "_hip_moi_context_sampled_watchpoint" + sampled_mode_suffix).c_str(),
+        Mode::HipMoiContextSampledWatchpoint,
+        q,
+        k,
+        v,
+        out,
+        sequence_length,
+        sampled_knobs,
+        min_ms,
+        warmup_ms);
+    if(use_static_fast)
+    {
+        run_one<SampledWatchpointContextPolicy>(
+            (prefix + "_hip_moi_sampled_watchpoint_context" + sampled_mode_suffix).c_str(),
+            Mode::HipMoiSampledWatchpointContext,
+            q,
+            k,
+            v,
+            out,
+            sequence_length,
+            sampled_knobs,
+            min_ms,
+            warmup_ms);
+    }
+
+    HIP_CHECK(hipFree(q));
+    HIP_CHECK(hipFree(k));
+    HIP_CHECK(hipFree(v));
+    HIP_CHECK(hipFree(out));
+    return 0;
+}

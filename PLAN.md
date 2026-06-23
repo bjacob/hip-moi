@@ -851,7 +851,7 @@ the fair default knobs; that has been achieved.
 
 ### Session 8: Broaden End-To-End Workloads
 
-Status: first correctness test in progress.
+Status: first correctness and benchmark rungs landed.
 
 The next non-negotiable scope increase is an end-to-end workload beyond one
 isolated matmul. The likely first candidate is an attention block. This should
@@ -876,7 +876,15 @@ but its fragment layout and phase structure should be close enough to guide the
 future benchmark extraction.
 
 The first benchmark version should be a benchmark/reference workload before it
-is a new detector feature. Keep the row structure familiar:
+is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now
+that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
+`010` correctness test, scales to one workgroup per 32-query block, defaults to
+`seq=1024`, and compares noop execution with both the general
+`context + sampled_watchpoint` path and the fast `sampled_watchpoint_context`
+path. It does not yet include a sampled-Loom row; that can be added later if we
+need a direct Loom comparison on the same attention workload.
+
+Future benchmark rows should keep the row structure familiar:
 
 * noop baseline,
 * sampled Loom-style comparison when feasible,

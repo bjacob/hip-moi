@@ -1,9 +1,10 @@
 # hip-moi Benchmarks
 
-These RDNA4 benchmarks are focused extractions from Jakub's
-`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`. They are vendored here so
-hip-moi performance work can be reproduced without reaching back into the
-external strategy repository.
+The matmul benchmarks are focused extractions from Jakub's
+`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`. The attention benchmark is
+a hip-moi-native workload grown from the instrumented correctness tests. They
+are vendored here so hip-moi performance work can be reproduced without
+reaching back into the external strategy repository.
 
 They compare the main rows needed for the current Loom-parity work:
 
@@ -17,6 +18,8 @@ row as a correctness/performance reference. In both benchmark families,
 `context + sampled_watchpoint` means the full diagnostic-capable
 `hip_moi::context` running its sampled backend, while
 `sampled_watchpoint_context` means the dedicated publish-only fast-view class.
+The attention benchmark currently compares only hip-moi rows against a noop
+baseline; it does not yet include a sampled-Loom attention row.
 
 The benchmarks intentionally focus on subgroup-level, full-workgroup-barrier
 LDS instrumentation. They are not the correctness test suite and they do not
@@ -32,10 +35,13 @@ SDK path used during development. They default to `gfx1201`.
 ./benchmarks/build_w2_2x4_benchmark.sh w4_4x16
 ./benchmarks/build_w2_2x4_benchmark.sh w8_16x8
 ./benchmarks/build_prod_16x8_benchmark.sh
+./benchmarks/build_attention_block_benchmark.sh
 ```
 
 Use the two-wave shape for quick intra-session experiments. Use the production
-16x8 benchmark as the current main gate for performance-sensitive commits.
+16x8 benchmark as the current main gate for matmul-focused
+performance-sensitive commits. Use the attention block benchmark for the first
+larger end-to-end workload beyond isolated matmul.
 
 Useful knobs:
 
@@ -44,6 +50,7 @@ BENCH_M=4096 BENCH_N=4096 BENCH_K=4096 ./benchmarks/build_prod_16x8_benchmark.sh
 MIN_MS=500 WARMUP_MS=500 ./benchmarks/build_prod_16x8_benchmark.sh
 SAMPLED_WATCHPOINTS=1 SAMPLED_SKIP=32 SAMPLED_PROBES=1 SAMPLED_DELAY=32 ./benchmarks/build_prod_16x8_benchmark.sh
 SAMPLED_REPORTS=1 ./benchmarks/build_prod_16x8_benchmark.sh
+BENCH_SEQ=2048 ./benchmarks/build_attention_block_benchmark.sh
 ```
 
 ## CMake
@@ -54,6 +61,8 @@ Benchmarks are disabled in the default build. Enable them explicitly:
 cmake -S . -B ../hip-moi-build -DHIP_MOI_BUILD_BENCHMARKS=ON
 cmake --build ../hip-moi-build --target hip_moi_benchmark_prod_16x8
 ../hip-moi-build/benchmarks/hip_moi_benchmark_prod_16x8
+cmake --build ../hip-moi-build --target hip_moi_benchmark_attention_block
+../hip-moi-build/benchmarks/hip_moi_benchmark_attention_block
 ```
 
 The CMake targets are:
@@ -61,7 +70,8 @@ The CMake targets are:
 * `hip_moi_benchmark_w2_2x4`,
 * `hip_moi_benchmark_w4_4x16`,
 * `hip_moi_benchmark_w8_16x8`,
-* `hip_moi_benchmark_prod_16x8`.
+* `hip_moi_benchmark_prod_16x8`,
+* `hip_moi_benchmark_attention_block`.
 
 They are RDNA4-only and are skipped unless `CMAKE_HIP_ARCHITECTURES` names a
 `gfx12*` target.
@@ -88,3 +98,13 @@ The production-shaped row is the current main performance signal:
 | Shape | noop | sampled Loom | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
 | w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.65 ms | 25.9 ms | 3.38 ms |
+
+The attention row is the first larger end-to-end workload beyond isolated
+matmul. It uses RDNA4 WMMA for both QK and PV, two subgroups per workgroup, one
+workgroup per 32-query block, and K/V fragment staging through LDS. Its
+reported TFLOP/s is an effective QK+PV matmul-rate proxy; softmax and scalar
+phase work are intentionally not modeled as FLOPs.
+
+| Shape | noop | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: |
+| seq=1024, head_dim=16, value_dim=16 | 238 µs | 409 µs | 278 µs |
