@@ -352,18 +352,30 @@ back to a static site and LDS location:
 Jakub's `sanitizer-strategy/rdna4_matmul` benchmark is now the guiding
 performance loop.
 
-The local `hip-moi-benchmark` branch contains an extracted benchmark family
-derived from `rdna4_matmul/rdna4_matmul.hip`. It compares:
+The local `hip-moi-benchmark` branch contains extracted benchmark families
+derived from `rdna4_matmul/rdna4_matmul.hip`.
+
+The small `w2_2x4_benchmark.hip` family compares:
 
 * noop,
 * sampled Loom,
 * hip-moi exact shadow through explicit LDS-offset APIs,
 * hip-moi sampled watchpoints through explicit LDS-offset APIs.
 
-The benchmark now constructs the hip-moi device context once near kernel entry
-and passes it through the instrumented access helpers. That better matches the
-intended source-instrumentation shape than rebuilding a context inside every
-instrumented access wrapper.
+The production `prod_16x8_benchmark.hip` extraction is now the main
+optimization target. It keeps Jakub's real fp16 production 16x8 row shape:
+8 waves, 16x8 WMMA tiles, `KGroup=2`, the pipelined LDS staging pattern, and
+runtime `BENCH_M/N/K` sizes. It compares only the rows that matter for the
+current Loom-parity loop:
+
+* noop,
+* sampled Loom publish-only,
+* hip-moi sampled watchpoints publish-only.
+
+Both extracted benchmarks now construct the hip-moi device context once near
+kernel entry and pass it through the instrumented access helpers. That better
+matches the intended source-instrumentation shape than rebuilding a context
+inside every instrumented access wrapper.
 
 The sampled rows now share one fair knob set:
 
@@ -377,7 +389,7 @@ By default this is `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
 benchmark prints these effective knobs and names sampled rows as
 `publish_only` or `reporting`.
 
-The current go-to shapes are:
+The current tiny go-to shapes are:
 
 ```bash
 ./rdna4_matmul/build_w2_2x4_benchmark.sh
@@ -385,12 +397,30 @@ The current go-to shapes are:
 ./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
 ```
 
-Use the 2-wave shape for fast intra-session iteration. Run all three before a
-session-ending commit when performance-sensitive code has changed.
+Use the 2-wave shape for fast intra-session iteration and the 2/4/8 set when a
+change specifically targets tiny-shape overhead or wave-count scaling.
+
+The current production go-to benchmark is:
+
+```bash
+./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+Run the production benchmark before a session-ending commit when
+performance-sensitive code changed. The current focused baseline at
+`BENCH_M=BENCH_N=BENCH_K=4096` is roughly:
+
+```text
+noop                  1.17 ms
+sampled Loom          8.63 ms
+hip-moi sampled      17.6  ms
+```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
-commit. For doc-only commits, either append a fresh run or explicitly note that
-the commit is performance-equivalent to the previous logged entry.
+commit when they are the relevant benchmark set; otherwise append the raw output
+of the production benchmark. For doc-only commits, either append a fresh run or
+explicitly note that the commit is performance-equivalent to the previous
+logged entry.
 
 The current hip-moi rows exercise the explicit-offset exact-shadow and
 sampled-watchpoint paths. Under the fair publish-only default, sampled hip-moi
@@ -586,7 +616,18 @@ latency printing, sampled hip-moi moved from `0.00483` to `0.00425` ms on
 policy path for non-default sampled knobs, so dense/reporting sweeps remain
 honest.
 
-Use the 2/4/8-wave benchmark set to tune:
+The main benchmark was then updated with the same static publish-only hip-moi
+sampled row for Jakub's production fp16 16x8 matmul. A new focused
+`prod_16x8_benchmark.hip` extracts that row family and is now the next
+optimization gate. With fair publish-only knobs
+(`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`) and
+`BENCH_M=BENCH_N=BENCH_K=4096`, the focused baseline is roughly `1.17 ms`
+noop, `8.63 ms` sampled Loom, and `17.6 ms` hip-moi sampled watchpoints. That
+puts hip-moi at about 2x sampled Loom on the production shape, even though the
+tiny 2/4/8-wave benchmark has reached parity. The next performance work should
+therefore be driven by the production extraction.
+
+Use the 2/4/8-wave benchmark set to tune tiny-shape overhead:
 
 * watchpoint count,
 * probe count,
@@ -599,12 +640,13 @@ Inspect generated code when benchmark movement is surprising. The main danger is
 spilling caused by instrumentation VGPR usage; global-memory traffic from spills
 can dominate the actual sanitizer work.
 
-Next likely target: inspect generated code for the static sampled row before
-adding more API. The remaining gap is now small enough that local changes could
-be noise unless guided by VGPR/code-size evidence. If there is still visible
-library overhead, the likely library-side version is a smaller sampled hot-path
-context/view that carries only the fields needed by the sampled backend, while
-preserving the ordinary user-facing `host_context` API.
+Next likely target: inspect generated code for the production static sampled
+row and compare it to Jakub's sampled Loom row. The tiny benchmark gap is now
+small enough that local changes there could be noise; the production extraction
+has a visible 2x gap. If generated code confirms excess live state in hip-moi,
+the likely library-side direction is a smaller sampled hot-path context/view
+that carries only the fields needed by the sampled backend, while preserving
+the ordinary user-facing `host_context` API.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 

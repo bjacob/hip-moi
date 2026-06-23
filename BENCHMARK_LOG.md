@@ -764,3 +764,46 @@ fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only            0.00578 ms      0.1
 fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.0129 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.224 ms  iters=7777  warmup= 100.173 ms  warmup_iters=7600
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only   0.00573 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.014 ms  iters=17467  warmup= 100.029 ms  warmup_iters=17426
 ```
+
+## 2026-06-23 production 16x8 focused baseline
+
+hip-moi commit measured: `e51dfb9` (`Add static sampled watchpoint policy`)
+sanitizer-strategy benchmark commit: `3c6da04`
+
+This session integrated the static publish-only hip-moi sampled path into
+Jakub's main `rdna4_matmul.hip` production fp16 16x8 row, then extracted that
+row into `rdna4_matmul/prod_16x8_benchmark.hip` as the next-phase focused
+benchmark. The focused benchmark keeps only:
+
+* noop,
+* sampled Loom publish-only,
+* hip-moi sampled watchpoint publish-only.
+
+The focused benchmark defaults to the fair sampled knobs
+`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off` and to
+`BENCH_M=BENCH_N=BENCH_K=4096`.
+
+Main-harness cross-check with matching sampled delay:
+
+```text
+fp16_wmma_tiled_prod_16x8_sampled_loom_tsan      8.42 ms  16.31 TFLOP/s
+fp16_wmma_tiled_prod_16x8_hip_moi_sampled_static 17.8 ms   7.72 TFLOP/s
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.17 ms    117.94 TFLOP/s   61.8% of 191 TFLOP/s  total= 101.379 ms  iters=87  warmup= 100.356 ms  warmup_iters=87
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.63 ms     15.93 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.543 ms  iters=12  warmup= 103.996 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      17.6 ms      7.81 TFLOP/s    4.1% of 191 TFLOP/s  total= 105.628 ms  iters=6  warmup= 106.477 ms  warmup_iters=6
+```
