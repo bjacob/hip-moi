@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# clangd does not discover the TheRock ROCm tree from CMake's HIP compiler
+# setup on its own. Keep the SDK path explicit for editor diagnostics. clangd
+# only needs to parse device code, so avoid requiring ROCm device bitcode.
+CompileFlags:
+  Add:
+    - --rocm-path=/home/benoit/workspace/TheRock-build/dist/rocm
+    - -nogpulib
+
+---
+If:
+  PathMatch: include/hip_moi/.*\.hpp
+CompileFlags:
+  Add:
+    - -x
+    - hip
+    - --offload-arch=gfx1201
