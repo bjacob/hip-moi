@@ -11,5 +11,6 @@
 #include "hip_moi/common.hpp"
 #include "hip_moi/context.hpp"
 #include "hip_moi/host_context.hpp"
+#include "hip_moi/shadow.hpp"
 
 #endif // HIP_MOI_HIP_MOI_HPP

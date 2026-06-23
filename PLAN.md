@@ -387,6 +387,10 @@ especially as a source of later multi-subgroup or RDNA4 shapes.
 
 ### Session 1: Shadow ABI Skeleton
 
+Status: implemented. `hip_moi/shadow.hpp` defines the compact exact shadow
+entry and sampled watchpoint entry helpers, with focused tests covering
+pack/unpack behavior and conflict predicates.
+
 Add Loom-style constants and compact record helpers:
 
 * access-kind enum values compatible with the existing diagnostics,

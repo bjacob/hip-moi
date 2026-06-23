@@ -105,3 +105,5 @@ hip_moi_add_gtest(hip_moi_instrumented_context_coalesced_conflict_test
                   instrumented/023_context_coalesced_conflict_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_hard_synchronization_negative_test
                   instrumented/024_hard_synchronization_negative_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_shadow_abi_test
+                  instrumented/025_shadow_abi_test.hip)
