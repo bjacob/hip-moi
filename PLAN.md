@@ -326,7 +326,7 @@ derived from `rdna4_matmul/rdna4_matmul.hip`. It compares:
 
 * noop,
 * sampled Loom,
-* hip-moi with site-id coalescing enabled.
+* hip-moi exact shadow through explicit LDS-offset APIs.
 
 The current go-to shapes are:
 
@@ -343,10 +343,12 @@ Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
 commit. For doc-only commits, either append a fresh run or explicitly note that
 the commit is performance-equivalent to the previous logged entry.
 
-The current hip-moi row is orders of magnitude slower than sampled Loom because
-it still uses the record/log/scan path. The near-term benchmark goal is to make
-the hip-moi row exercise the new Loom-like backend and exit the multi-millisecond
-record-scan regime on the 2-wave shape.
+The current hip-moi row now exercises the exact-shadow offset path, so it has
+exited the old multi-millisecond record/log/scan regime on the 2-wave and 4-wave
+shapes. It remains much slower than sampled Loom because every instrumented LDS
+access still performs exact shadow traffic; the next benchmark goal is to add a
+sampled-Loom-style watchpoint backend and compare that directly to Jakub's
+sampled Loom row.
 
 ## Test Corpus
 
@@ -421,10 +423,10 @@ the new storage layout able to represent:
 ### Session 3: Explicit LDS-Offset APIs
 
 Status: implemented. `context` now provides `lds_load_at` and `lds_store_at`
-overloads that accept an explicit LDS byte offset. They currently route through
-the existing record/log backend for compatibility while preserving site ids and
-safe/racy behavior; the offset is now available as the API hook that the
-Loom-like shadow backend will consume.
+overloads that accept an explicit LDS byte offset. The extracted
+sanitizer-strategy benchmark now routes its hip-moi row through these overloads,
+so the go-to benchmark measures offset-aware hip-moi instrumentation rather than
+the older implicit-pointer path.
 
 Add `lds_load_at` and `lds_store_at` overloads. Initially they may route through
 the current backend for compatibility. Then wire them to the exact shadow path.
