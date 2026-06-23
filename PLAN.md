@@ -411,9 +411,9 @@ performance-sensitive code changed. The current focused baseline at
 `BENCH_M=BENCH_N=BENCH_K=4096` is roughly:
 
 ```text
-noop                  1.17 ms
+noop                  1.16 ms
 sampled Loom          8.63 ms
-hip-moi sampled      17.6  ms
+hip-moi sampled       7.35 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -679,6 +679,14 @@ Production sampled roadmap:
    policy facts needed by `lds_load_at` / `lds_store_at`. It should not keep
    diagnostic buffers, exact-shadow pointers, generic options, or barrier-test
    state live in the production sampled access path.
+   Status: implemented for publish-only sampled policies as
+   `sampled_watchpoint_context`. The focused production benchmark now routes the
+   static publish-only hip-moi row through this view. That dropped the hip-moi
+   sampled production row from roughly `16.9 ms` after the delay-loop cleanup to
+   `7.35 ms`, beating sampled Loom's roughly `8.63 ms` on the same run. Codegen
+   improved from 1024 private bytes and 769 VGPR spills to 116 private bytes
+   and 40 VGPR spills. This confirms that the main production gap was the full
+   context's live state, not the sampled watchpoint algorithm.
 3. Add a full-workgroup-barrier sampled epoch path. In the production benchmark,
    every `ctx.syncthreads()` is a full workgroup barrier, and sampled Loom uses
    one per-workgroup epoch header. hip-moi still carries the more general

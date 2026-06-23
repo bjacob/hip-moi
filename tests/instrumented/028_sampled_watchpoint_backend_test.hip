@@ -27,6 +27,11 @@ namespace
         /*ProbeCount=*/0,
         /*DelayIters=*/0,
         /*ReportConflicts=*/true>;
+    using FastPublishOnlyPolicy = hip_moi::sampled_watchpoint_policy<
+        /*SampleSkip=*/1,
+        /*ProbeCount=*/1,
+        /*DelayIters=*/0,
+        /*ReportConflicts=*/false>;
 
     struct observed_metadata
     {
@@ -42,6 +47,24 @@ namespace
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
+    }
+
+    __device__ hip_moi::sampled_watchpoint_context
+        make_fast_context(hip_moi::context::storage_ref storage)
+    {
+        hip_moi::sampled_watchpoint_context::config cfg{
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*subgroup_count=*/kSubgroupCount,
+        };
+        hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
+            storage.subgroup_states,
+            storage.subgroup_capacity,
+            storage.sampled_watchpoints,
+            storage.sampled_watchpoint_capacity,
+            storage.generation,
+        };
+        return hip_moi::sampled_watchpoint_context(fast_storage, cfg);
     }
 
     __global__ void sampled_safe_kernel(hip_moi::context::storage_ref storage)
@@ -63,6 +86,29 @@ namespace
                 &value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
+    }
+
+    __global__ void sampled_fast_context_smoke_kernel(hip_moi::context::storage_ref storage,
+                                                      int*                          out)
+    {
+        __shared__ int values[kThreadCount];
+
+        hip_moi::sampled_watchpoint_context ctx = make_fast_context(storage);
+        ctx.init_workgroup();
+
+        int index = static_cast<int>(threadIdx.x);
+        ctx.lds_store_at<FastPublishOnlyPolicy>(&values[index],
+                                                index,
+                                                /*lds_byte_offset=*/index * sizeof(int),
+                                                kProducerSite);
+        ctx.syncthreads();
+
+        int loaded = ctx.lds_load_at<FastPublishOnlyPolicy>(
+            &values[index], /*lds_byte_offset=*/index * sizeof(int), kConsumerSite);
+        if(index == 0)
+        {
+            out[0] = loaded + values[kThreadCount - 1];
+        }
     }
 
     __global__ void sampled_race_kernel(hip_moi::context::storage_ref storage)
@@ -146,5 +192,34 @@ namespace
         ASSERT_GT(observed.diagnostic_count, 0);
         EXPECT_EQ(observed.diagnostics[0].kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
+    }
+
+    TEST(HipMoiSampledWatchpointBackend, FastContextRunsPublishOnlyAccesses)
+    {
+        hip_moi::test::device_context_storage storage;
+        ASSERT_NO_FATAL_FAILURE(storage.allocate_with_sampled_watchpoints(
+            /*diagnostic_capacity=*/kDiagnosticCapacity,
+            /*subgroup_capacity=*/kSubgroupCount,
+            /*sampled_watchpoint_capacity=*/kWatchpointCapacity));
+
+        int* device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMemset(device_output, 0, sizeof(int)));
+
+        hipLaunchKernelGGL(sampled_fast_context_smoke_kernel,
+                           dim3(1),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           sampled_ref(storage),
+                           device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        int output = 0;
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+        EXPECT_EQ(output, kThreadCount - 1);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 } // namespace

@@ -895,3 +895,68 @@ Takeaway: the delay-loop code-size issue is fixed, but the production gap is
 still dominated by hip-moi live state and scratch traffic. The next target is a
 smaller sampled hot-path view that keeps the full `context` fields out of the
 instrumented access path.
+
+## 2026-06-23 after sampled hot-path view
+
+hip-moi commit measured: this commit (`Add sampled watchpoint hot-path context`)
+sanitizer-strategy benchmark commit: `bb6f8a6`
+
+This pass added `hip_moi::sampled_watchpoint_context`, a sampled publish-only
+device view that carries only subgroup epochs, sampled watchpoints, generation,
+and subgroup geometry. The focused production benchmark now routes only the
+static publish-only hip-moi row through this view; runtime/reporting sampled
+mode still uses the full `hip_moi::context`.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.48 TFLOP/s   62.0% of 191 TFLOP/s  total= 102.084 ms  iters=88  warmup= 100.745 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.60 ms     15.99 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.164 ms  iters=12  warmup= 103.938 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      7.42 ms     18.51 TFLOP/s    9.7% of 191 TFLOP/s  total= 103.939 ms  iters=14  warmup= 103.880 ms  warmup_iters=14
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.33 TFLOP/s   62.0% of 191 TFLOP/s  total= 102.214 ms  iters=88  warmup= 101.109 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.63 ms     15.93 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.527 ms  iters=12  warmup= 103.505 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      7.35 ms     18.69 TFLOP/s    9.8% of 191 TFLOP/s  total= 102.951 ms  iters=14  warmup= 104.011 ms  warmup_iters=14
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                116     45    256           40   0x12228
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  delay s_nop
+sampled Loom             11752            75             72          82
+hip-moi static sampled   13695            22             22          83
+```
+
+Takeaway: on this focused production benchmark, sampled hip-moi now beats
+sampled Loom under the fair publish-only sampled knobs. The win comes from
+removing the full context's cold state from the hot row, which nearly eliminates
+the spill/scratch gap. The remaining runtime sampled row is intentionally still
+large because it preserves runtime knobs and reporting support.
