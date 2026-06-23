@@ -402,3 +402,63 @@ fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18
 fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  2.206 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 101.479 ms  iters=46  warmup= 101.832 ms  warmup_iters=46
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint            2.206 ms      0.00 TFLOP/s    0.0% of 191 TFLOP/s  total= 101.456 ms  iters=46  warmup= 101.526 ms  warmup_iters=46
 ```
+
+## 2026-06-23 after legacy record/log cleanup
+
+hip-moi commit measured: this commit
+sanitizer-strategy benchmark commit: `76181cc`
+
+The cleanup removed the old record/log backend, lane-record coalescing storage,
+and pointer-only LDS helpers. The benchmark now exercises only explicit-offset
+exact-shadow and sampled-watchpoint paths.
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=32 N=64 K=16 waves=2 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w2_2x4_noop                                   0.003 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.089 ms  iters=34642  warmup= 100.083 ms  warmup_iters=34670
+fp16_wmma_tiled_w2_2x4_sampled_loom_tsan                      0.005 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.027 ms  iters=20952  warmup= 100.092 ms  warmup_iters=20962
+fp16_wmma_tiled_w2_2x4_hip_moi_exact_shadow                   0.011 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.196 ms  iters=9041  warmup= 100.291 ms  warmup_iters=9008
+fp16_wmma_tiled_w2_2x4_hip_moi_sampled_watchpoint             0.010 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.127 ms  iters=9708  warmup= 100.144 ms  warmup_iters=9385
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=64 N=256 K=16 waves=4 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w4_4x16_noop                                  0.003 ms      0.17 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.465 ms  iters=32463  warmup= 100.001 ms  warmup_iters=32197
+fp16_wmma_tiled_w4_4x16_sampled_loom_tsan                     0.006 ms      0.09 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.026 ms  iters=17079  warmup= 100.051 ms  warmup_iters=17013
+fp16_wmma_tiled_w4_4x16_hip_moi_exact_shadow                  0.020 ms      0.03 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.075 ms  iters=4924  warmup= 100.621 ms  warmup_iters=4950
+fp16_wmma_tiled_w4_4x16_hip_moi_sampled_watchpoint            0.020 ms      0.03 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.137 ms  iters=4977  warmup= 100.004 ms  warmup_iters=4971
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=256 N=128 K=16 waves=8 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w8_16x8_noop                                  0.003 ms      0.32 TFLOP/s    0.2% of 191 TFLOP/s  total= 100.165 ms  iters=30888  warmup= 100.068 ms  warmup_iters=30885
+fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.024 ms  iters=17124  warmup= 100.120 ms  warmup_iters=17084
+fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.018 ms      0.06 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.500 ms  iters=5682  warmup= 100.062 ms  warmup_iters=5569
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint            0.017 ms      0.06 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.317 ms  iters=5817  warmup= 100.014 ms  warmup_iters=5804
+```

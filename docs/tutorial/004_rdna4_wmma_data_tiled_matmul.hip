@@ -23,6 +23,9 @@ namespace
     using f16x8_t = _Float16 __attribute__((ext_vector_type(8)));
     using f32x8_t = float __attribute__((ext_vector_type(8)));
 
+    constexpr int kASharedByteOffset = 0;
+    constexpr int kBSharedByteOffset = kThreadCount * static_cast<int>(sizeof(f16x8_t));
+
     void check_hip(hipError_t status, const char* expression)
     {
         if(status == hipSuccess)
@@ -178,13 +181,23 @@ namespace
 
         int lane = static_cast<int>(threadIdx.x) & 31;
 
-        ctx.lds_store(&a_shared[lane], load_global_fragment(a_global, lane));
-        ctx.lds_store(&b_shared[lane], load_global_fragment(b_global, lane));
+        ctx.lds_store_at(&a_shared[lane],
+                         load_global_fragment(a_global, lane),
+                         /*lds_byte_offset=*/kASharedByteOffset
+                             + lane * static_cast<int>(sizeof(f16x8_t)));
+        ctx.lds_store_at(&b_shared[lane],
+                         load_global_fragment(b_global, lane),
+                         /*lds_byte_offset=*/kBSharedByteOffset
+                             + lane * static_cast<int>(sizeof(f16x8_t)));
 
         ctx.syncthreads();
 
-        f16x8_t a   = ctx.lds_load(&a_shared[lane]);
-        f16x8_t b   = ctx.lds_load(&b_shared[lane]);
+        f16x8_t a = ctx.lds_load_at(&a_shared[lane],
+                                    /*lds_byte_offset=*/kASharedByteOffset
+                                        + lane * static_cast<int>(sizeof(f16x8_t)));
+        f16x8_t b = ctx.lds_load_at(&b_shared[lane],
+                                    /*lds_byte_offset=*/kBSharedByteOffset
+                                        + lane * static_cast<int>(sizeof(f16x8_t)));
         f32x8_t acc = {};
         acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a, b, acc);
 

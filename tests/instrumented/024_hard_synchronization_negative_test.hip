@@ -20,7 +20,6 @@ namespace
     constexpr int kThreadCount        = 64;
     constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
-    constexpr int kAccessCapacity     = 8;
     constexpr int kDiagnosticCapacity = 8;
 
     constexpr hip_moi::site_id kSimulatedBarrierSite(0x2401u);
@@ -28,16 +27,14 @@ namespace
     hip_moi::host_context_options small_host_context_options()
     {
         hip_moi::host_context_options options;
-        options.storage_bytes          = 64 * 1024;
-        options.access_record_capacity = kAccessCapacity;
-        options.diagnostic_capacity    = kDiagnosticCapacity;
-        options.subgroup_capacity      = kSubgroupCount;
+        options.storage_bytes       = 64 * 1024;
+        options.diagnostic_capacity = kDiagnosticCapacity;
+        options.subgroup_capacity   = kSubgroupCount;
         return options;
     }
 
     struct observed_metadata
     {
-        int                          access_count;
         int                          diagnostic_count;
         hip_moi::context::diagnostic diagnostics[kDiagnosticCapacity];
     };
@@ -61,14 +58,14 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store(&value, 23);
+            ctx.lds_store_at(&value, 23, /*lds_byte_offset=*/0);
         }
 
         ctx.simulate_syncthreads(/*participates=*/true, kSimulatedBarrierSite);
 
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            (void)ctx.lds_load(&value);
+            (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
         ctx.finish();
     }
@@ -86,10 +83,6 @@ namespace
     template <typename Storage>
     void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
-                                          storage.access_count_device(),
-                                          sizeof(observed->access_count),
-                                          hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->diagnostic_count,
                                           storage.diagnostic_count_device(),
                                           sizeof(observed->diagnostic_count),
@@ -105,10 +98,10 @@ namespace
                   hip_moi::test::device_context_storage* storage,
                   observed_metadata*                     observed)
     {
-        ASSERT_NO_FATAL_FAILURE(storage->allocate(
-            /*access_capacity=*/kAccessCapacity,
+        ASSERT_NO_FATAL_FAILURE(storage->allocate_with_exact_shadow(
             /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/kSubgroupCount));
+            /*subgroup_capacity=*/kSubgroupCount,
+            /*exact_shadow_entry_capacity=*/1));
 
         hipLaunchKernelGGL(kernel, dim3(1), dim3(kThreadCount), 0, 0, storage->ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
@@ -139,7 +132,6 @@ namespace
         observed_metadata                     observed = {};
         ASSERT_NO_FATAL_FAILURE(run_case(simulated_barrier_safe_kernel, &storage, &observed));
 
-        EXPECT_EQ(observed.access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
     }
 
@@ -150,7 +142,6 @@ namespace
         ASSERT_NO_FATAL_FAILURE(
             run_case(simulated_barrier_missing_participant_kernel, &storage, &observed));
 
-        EXPECT_EQ(observed.access_count, 0);
         ASSERT_EQ(observed.diagnostic_count, 1);
         expect_barrier_divergence_diagnostic(observed.diagnostics[0]);
     }

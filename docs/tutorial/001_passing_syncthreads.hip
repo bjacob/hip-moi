@@ -67,14 +67,14 @@ namespace
 
         if(threadIdx.x == 0)
         {
-            ctx.lds_store(&value, 41);
+            ctx.lds_store_at(&value, 41, /*lds_byte_offset=*/0);
         }
 
         ctx.syncthreads();
 
         if(threadIdx.x == 1)
         {
-            out[0] = ctx.lds_load(&value) + 1;
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0) + 1;
         }
     }
 

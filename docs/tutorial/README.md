@@ -35,8 +35,21 @@ expect that failure and check the diagnostic text.
 Start with an ordinary HIP kernel that communicates through LDS and uses
 `__syncthreads()` to order the producer before the consumer. To instrument it,
 pass a `hip_moi::context::storage_ref`, create a `hip_moi::context`, replace LDS
-accesses with `ctx.lds_store` / `ctx.lds_load`, and replace the barrier with
-`ctx.syncthreads()`.
+accesses with `ctx.lds_store_at` / `ctx.lds_load_at`, and replace the barrier
+with `ctx.syncthreads()`.
+
+The `_at` API takes the ordinary LDS pointer and a byte offset within the
+kernel's shared-memory layout:
+
+```c++
+ctx.lds_store_at(&value, 456, /*lds_byte_offset=*/0);
+ctx.syncthreads();
+int observed = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
+```
+
+The explicit offset is not just decoration. The current fast paths operate on
+compact shadow metadata keyed by LDS byte offsets, which avoids the old
+pointer-only record log.
 
 The host side owns storage with `hip_moi::host_context`:
 
@@ -100,17 +113,3 @@ The compiled companion is `003_destructor_fallback.hip`.
 shows a plain data-tiled 16x16x16 f16 WMMA kernel, then instruments the LDS
 publication and consumption with `hip_moi::context`. It is gated by the CMake
 RDNA4 architecture check.
-
-## Coalescing
-
-`006_context_coalescing.hip` shows how to opt in to coalescing at a static LDS
-access site:
-
-```c++
-constexpr hip_moi::site_id site = HIP_MOI_SITE_ID();
-ctx.lds_store(&shared[lane], value, site);
-```
-
-A nonzero `site_id` says the access site is eligible for automatic coalescing.
-The detector still falls back to exact records when the observed lane-to-address
-pattern is not regular enough to summarize safely.

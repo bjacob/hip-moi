@@ -30,11 +30,6 @@ namespace hip_moi
             return value_;
         }
 
-        __host__ __device__ constexpr bool allows_coalescing() const
-        {
-            return value_ != 0;
-        }
-
     private:
         uint64_t value_ = 0;
     };
@@ -68,54 +63,6 @@ namespace hip_moi
 
     namespace detail
     {
-        template <typename Context, typename = void>
-        struct optional_coalesced_access_record
-        {
-            using type                      = unsigned char;
-            static constexpr bool available = false;
-        };
-
-        template <typename Context>
-        struct optional_coalesced_access_record<
-            Context,
-            std::void_t<typename Context::coalesced_access_record>>
-        {
-            using type                      = typename Context::coalesced_access_record;
-            static constexpr bool available = true;
-        };
-
-        template <typename Context, typename = void>
-        struct optional_coalescing_access_record
-        {
-            using type                      = unsigned char;
-            static constexpr bool available = false;
-        };
-
-        template <typename Context>
-        struct optional_coalescing_access_record<
-            Context,
-            std::void_t<typename Context::coalescing_access_record>>
-        {
-            using type                      = typename Context::coalescing_access_record;
-            static constexpr bool available = true;
-        };
-
-        template <typename Context, typename = void>
-        struct optional_coalescing_group_record
-        {
-            using type                      = unsigned char;
-            static constexpr bool available = false;
-        };
-
-        template <typename Context>
-        struct optional_coalescing_group_record<
-            Context,
-            std::void_t<typename Context::coalescing_group_record>>
-        {
-            using type                      = typename Context::coalescing_group_record;
-            static constexpr bool available = true;
-        };
-
         __host__ __device__ constexpr uint64_t fnv1a64(const char* text)
         {
             uint64_t hash = 14695981039346656037ull;

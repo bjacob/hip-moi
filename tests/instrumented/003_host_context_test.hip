@@ -25,13 +25,9 @@ namespace
     hip_moi::host_context_options small_context_options()
     {
         hip_moi::host_context_options options;
-        options.storage_bytes                     = 64 * 1024;
-        options.access_record_capacity            = 16;
-        options.coalesced_access_record_capacity  = 0;
-        options.coalescing_access_record_capacity = 0;
-        options.coalescing_group_record_capacity  = 0;
-        options.diagnostic_capacity               = 4;
-        options.subgroup_capacity                 = kSubgroupCount;
+        options.storage_bytes       = 64 * 1024;
+        options.diagnostic_capacity = 4;
+        options.subgroup_capacity   = kSubgroupCount;
         return options;
     }
 
@@ -62,14 +58,14 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store(&value, 456);
+            ctx.lds_store_at(&value, 456, /*lds_byte_offset=*/0);
         }
 
         ctx.syncthreads();
 
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            out[0] = ctx.lds_load(&value);
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
         ctx.finish();
     }
@@ -83,11 +79,11 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store(&value, 789);
+            ctx.lds_store_at(&value, 789, /*lds_byte_offset=*/0);
         }
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            out[0] = ctx.lds_load(&value);
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
         ctx.finish();
     }
@@ -205,20 +201,15 @@ namespace
         EXPECT_EQ(moi.storage_bytes(), options.storage_bytes);
         EXPECT_GT(moi.layout_bytes(), 0u);
         EXPECT_LE(moi.layout_bytes(), moi.storage_bytes());
-        EXPECT_GT(moi.access_record_capacity(), 0);
         EXPECT_GT(moi.diagnostic_capacity(), 0);
         EXPECT_EQ(moi.subgroup_capacity(), kSubgroupCount);
-        EXPECT_GT(moi.coalesced_access_record_capacity(), 0);
-        EXPECT_GT(moi.coalescing_access_record_capacity(), 0);
-        EXPECT_GT(moi.coalescing_group_record_capacity(), 0);
         EXPECT_GT(moi.exact_shadow_entry_capacity(), 0);
-        EXPECT_GT(moi.sampled_watchpoint_capacity(), 0);
+        EXPECT_EQ(moi.sampled_watchpoint_capacity(), 0);
 
         hip_moi::context::storage_ref ref = moi.device_ref();
-        EXPECT_NE(ref.shadow_epoch, nullptr);
         EXPECT_NE(ref.exact_shadow_entries, nullptr);
         EXPECT_EQ(ref.exact_shadow_entry_capacity, moi.exact_shadow_entry_capacity());
-        EXPECT_NE(ref.sampled_watchpoints, nullptr);
+        EXPECT_EQ(ref.sampled_watchpoints, nullptr);
         EXPECT_EQ(ref.sampled_watchpoint_capacity, moi.sampled_watchpoint_capacity());
         EXPECT_NE(ref.generation, 0u);
     }
@@ -226,22 +217,14 @@ namespace
     TEST(HipMoiHostContext, ExplicitCapacityOverridesAreHonored)
     {
         hip_moi::host_context_options options;
-        options.storage_bytes                     = 64 * 1024;
-        options.access_record_capacity            = 19;
-        options.coalesced_access_record_capacity  = 7;
-        options.coalescing_access_record_capacity = 11;
-        options.coalescing_group_record_capacity  = 13;
-        options.exact_shadow_entry_capacity       = 23;
-        options.sampled_watchpoint_capacity       = 29;
-        options.diagnostic_capacity               = 5;
-        options.subgroup_capacity                 = kSubgroupCount;
+        options.storage_bytes               = 64 * 1024;
+        options.exact_shadow_entry_capacity = 23;
+        options.sampled_watchpoint_capacity = 29;
+        options.diagnostic_capacity         = 5;
+        options.subgroup_capacity           = kSubgroupCount;
 
         hip_moi::host_context moi(options);
 
-        EXPECT_EQ(moi.access_record_capacity(), 19);
-        EXPECT_EQ(moi.coalesced_access_record_capacity(), 7);
-        EXPECT_EQ(moi.coalescing_access_record_capacity(), 11);
-        EXPECT_EQ(moi.coalescing_group_record_capacity(), 13);
         EXPECT_EQ(moi.exact_shadow_entry_capacity(), 23);
         EXPECT_EQ(moi.sampled_watchpoint_capacity(), 29);
         EXPECT_EQ(moi.diagnostic_capacity(), 5);
@@ -249,15 +232,13 @@ namespace
         EXPECT_LE(moi.layout_bytes(), moi.storage_bytes());
     }
 
-    TEST(HipMoiHostContext, OptionalCoalescingCapacitiesCanBeDisabled)
+    TEST(HipMoiHostContext, SampledBackendAutoAllocatesWatchpointsOnly)
     {
         hip_moi::host_context_options options = small_context_options();
+        options.backend                       = hip_moi::backend_kind::sampled_watchpoint;
         hip_moi::host_context         moi(options);
 
-        EXPECT_EQ(moi.coalesced_access_record_capacity(), 0);
-        EXPECT_EQ(moi.coalescing_access_record_capacity(), 0);
-        EXPECT_EQ(moi.coalescing_group_record_capacity(), 0);
-        EXPECT_GT(moi.exact_shadow_entry_capacity(), 0);
+        EXPECT_EQ(moi.exact_shadow_entry_capacity(), 0);
         EXPECT_GT(moi.sampled_watchpoint_capacity(), 0);
 
         int* device_output = nullptr;
@@ -293,25 +274,15 @@ namespace
             "storage options are invalid");
     }
 
-    TEST(HipMoiHostContext, RejectsZeroRequiredCapacities)
+    TEST(HipMoiHostContext, RejectsZeroDiagnosticCapacity)
     {
         ASSERT_DEATH(
             {
                 hip_moi::host_context_options options;
-                options.access_record_capacity = 0;
-                options.diagnostic_capacity    = 4;
+                options.diagnostic_capacity = 0;
                 hip_moi::host_context moi(options);
             },
-            "access and diagnostic capacities");
-
-        ASSERT_DEATH(
-            {
-                hip_moi::host_context_options options;
-                options.access_record_capacity = 16;
-                options.diagnostic_capacity    = 0;
-                hip_moi::host_context moi(options);
-            },
-            "access and diagnostic capacities");
+            "diagnostic capacity");
     }
 
     TEST(HipMoiHostContext, RejectsTinyStorageBytes)

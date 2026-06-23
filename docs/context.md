@@ -28,28 +28,36 @@ hip_moi::host_context moi(options);
 ```
 
 `storage_bytes` defaults to 16 MiB. The host context partitions that budget into
-exact access records, diagnostics, subgroup epoch state, counters, and optional
-coalescing metadata.
+diagnostics, subgroup epoch state, counters, and the selected shadow backend's
+metadata.
 
 This keeps the ordinary API stable as the internal metadata layout changes. A
 user should not normally need to decide how many records of each internal type
 to allocate.
 
-## Capacity Overrides
+## Backend Storage
 
-`host_context_options` still has typed-capacity fields:
+The current device context has two backends:
+
+* `backend_kind::exact_shadow` stores one packed shadow entry per LDS shadow
+  granule. It is the default and gives deterministic conflict diagnostics for
+  instrumented cross-subgroup accesses whose byte offsets fit in the shadow.
+* `backend_kind::sampled_watchpoint` stores a smaller watchpoint table and
+  samples one lane per subgroup/site/generation. It is designed as the
+  lower-overhead Loom-inspired benchmark path, at the cost of intentionally
+  sampling rather than observing every lane.
+
+For the selected backend, a negative capacity means "derive this capacity from
+`storage_bytes`." A positive value fixes that capacity. Zero disables the
+backend storage, which is useful only for saturation tests; a host context
+rejects zero capacity for the backend it is asked to run.
 
 ```c++
-options.access_record_capacity = 1024;
-options.diagnostic_capacity = 64;
+hip_moi::host_context_options options;
+options.backend = hip_moi::backend_kind::sampled_watchpoint;
+options.sampled_watchpoint_capacity = -1; // fill remaining byte budget
+options.exact_shadow_entry_capacity = 0;  // no exact-shadow table
 ```
-
-These are advanced overrides and test controls. A negative value means "derive
-this capacity from `storage_bytes`." A positive value fixes that capacity. For
-optional coalescing buffers, zero disables that buffer.
-
-The access-record and diagnostic capacities cannot be zero: exact access logging
-and diagnostics are the correctness fallback when coalescing is not applicable.
 
 ## Inspecting The Layout
 
@@ -58,11 +66,10 @@ Host contexts expose the computed layout:
 ```c++
 std::size_t allocated = moi.storage_bytes();
 std::size_t used = moi.layout_bytes();
-int access_records = moi.access_record_capacity();
 int diagnostics = moi.diagnostic_capacity();
-int summaries = moi.coalesced_access_record_capacity();
-int coalescing_accesses = moi.coalescing_access_record_capacity();
-int coalescing_groups = moi.coalescing_group_record_capacity();
+int subgroups = moi.subgroup_capacity();
+int exact_entries = moi.exact_shadow_entry_capacity();
+int watchpoints = moi.sampled_watchpoint_capacity();
 ```
 
 These values are meant for tuning and tests. Kernels still receive only the
@@ -81,29 +88,18 @@ real kernels that already pressure LDS capacity.
 
 ## Saturation
 
-Storage saturation should degrade into diagnostics or conservative fallback, not
-silent corruption.
+Storage saturation should degrade into diagnostics, not silent corruption.
 
 Start with the default 16 MiB host-owned budget unless there is a reason not to.
-Increase `storage_bytes` when host reports mention `metadata_full`, diagnostic
-buffer truncation, or unexpectedly high coalescing fallback counts. Reduce it
-only when the allocator's reported `layout_bytes()` and computed capacities show
-comfortable headroom for the kernels being diagnosed.
+Increase `storage_bytes` when host reports mention `metadata_full` or diagnostic
+buffer truncation. Reduce it only when the allocator's reported `layout_bytes()`
+and computed capacities show comfortable headroom for the kernels being
+diagnosed.
 
-Exact access-record overflow emits a `metadata_full` diagnostic when possible.
-If the diagnostic buffer itself fills, hip-moi keeps counting total diagnostics
-but only stores the first `diagnostic_capacity` records for host-side reporting.
-
-Coalescing is optional. If coalescing access storage is absent or full, opted-in
-accesses fall back to exact access records and increment
-`coalescing_fallback_count` when that counter exists. If coalescing group
-scratch is absent or too small, epoch-close summary construction falls back to a
-slower scan over the coalescing access log.
-
-The bad saturation case is still possible: if coalescing falls back to exact
-records and exact access storage is also full, hip-moi may emit only
-`metadata_full` diagnostics and may miss some specific conflicts. The intended
-user response is to increase `storage_bytes` or narrow instrumentation scope.
+If a shadow table cannot represent an access, hip-moi emits a `metadata_full`
+diagnostic when possible. If the diagnostic buffer itself fills, hip-moi keeps
+counting total diagnostics but only stores the first `diagnostic_capacity`
+records for host-side reporting.
 
 ## Subgroup Capacity
 

@@ -67,11 +67,11 @@ namespace
 
         if(threadIdx.x == 0)
         {
-            ctx.lds_store(&value, 123);
+            ctx.lds_store_at(&value, 123, /*lds_byte_offset=*/0);
         }
         if(threadIdx.x == kThreadsPerSubgroup)
         {
-            out[0] = ctx.lds_load(&value);
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
         ctx.finish();
     }

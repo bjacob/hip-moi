@@ -89,20 +89,8 @@ hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_safe_mvp_test
                   instrumented/001_single_subgroup_safe_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_host_context_test
                   instrumented/003_host_context_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_context_multisubgroup_test
-                  instrumented/017_context_multisubgroup_test.hip)
-if(_hip_moi_build_rdna4_tests)
-  hip_moi_add_gtest(hip_moi_instrumented_rdna4_multisubgroup_wmma_data_tiled_test
-                    instrumented/018_rdna4_multisubgroup_wmma_data_tiled_test.hip)
-  hip_moi_add_gtest(hip_moi_instrumented_rdna4_multisubgroup_wmma_row_major_test
-                    instrumented/019_rdna4_multisubgroup_wmma_row_major_test.hip)
-endif()
 hip_moi_add_gtest(hip_moi_instrumented_site_id_test
                   instrumented/020_site_id_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_context_coalescing_test
-                  instrumented/022_context_coalescing_test.hip)
-hip_moi_add_gtest(hip_moi_instrumented_context_coalesced_conflict_test
-                  instrumented/023_context_coalesced_conflict_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_hard_synchronization_negative_test
                   instrumented/024_hard_synchronization_negative_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_shadow_abi_test

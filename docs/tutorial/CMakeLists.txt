@@ -75,8 +75,6 @@ hip_moi_add_tutorial(hip_moi_tutorial_003_destructor_fallback
                      003_destructor_fallback.hip)
 hip_moi_add_tutorial(hip_moi_tutorial_005_context_cross_subgroup_race
                      005_context_cross_subgroup_race.hip)
-hip_moi_add_tutorial(hip_moi_tutorial_006_context_coalescing
-                     006_context_coalescing.hip)
 
 hip_moi_add_passing_tutorial_test(HipMoiTutorial.001PassingSyncthreads
                                   hip_moi_tutorial_001_passing_syncthreads)
@@ -94,8 +92,6 @@ hip_moi_add_failing_tutorial_test(HipMoiTutorial.005ContextCrossSubgroupRace
                                   "first_subgroup="
                                   "second_subgroup="
                                   "HIP_MOI_CHECK failed")
-hip_moi_add_passing_tutorial_test(HipMoiTutorial.006ContextCoalescing
-                                  hip_moi_tutorial_006_context_coalescing)
 
 if(_hip_moi_build_rdna4_tutorials)
   hip_moi_add_tutorial(hip_moi_tutorial_004_rdna4_wmma_data_tiled_matmul

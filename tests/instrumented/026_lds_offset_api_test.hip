@@ -17,14 +17,13 @@ namespace
     constexpr int              kThreadCount        = 64;
     constexpr int              kThreadsPerSubgroup = 32;
     constexpr int              kSubgroupCount      = 2;
-    constexpr int              kAccessCapacity     = 8;
     constexpr int              kDiagnosticCapacity = 8;
+    constexpr int              kExactShadowEntries = 1;
     constexpr hip_moi::site_id kProducerSite(0x101);
     constexpr hip_moi::site_id kConsumerSite(0x202);
 
     struct observed_metadata
     {
-        int                          access_count;
         int                          diagnostic_count;
         hip_moi::context::diagnostic diagnostics[kDiagnosticCapacity];
     };
@@ -79,10 +78,6 @@ namespace
     template <typename Storage>
     void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
-                                          storage.access_count_device(),
-                                          sizeof(observed->access_count),
-                                          hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->diagnostic_count,
                                           storage.diagnostic_count_device(),
                                           sizeof(observed->diagnostic_count),
@@ -96,10 +91,10 @@ namespace
     TEST(HipMoiLdsOffsetApi, OffsetAccessesPreserveCurrentSafeBehavior)
     {
         hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/kAccessCapacity,
+        ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
             /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/kSubgroupCount));
+            /*subgroup_capacity=*/kSubgroupCount,
+            /*exact_shadow_entry_capacity=*/kExactShadowEntries));
 
         int* device_output = nullptr;
         HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
@@ -119,7 +114,6 @@ namespace
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
         EXPECT_EQ(output, 77);
-        EXPECT_EQ(observed.access_count, 2);
         EXPECT_EQ(observed.diagnostic_count, 0);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
@@ -128,10 +122,10 @@ namespace
     TEST(HipMoiLdsOffsetApi, OffsetAccessesPreserveCurrentDiagnosticBehavior)
     {
         hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(
-            /*access_capacity=*/kAccessCapacity,
+        ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
             /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/kSubgroupCount));
+            /*subgroup_capacity=*/kSubgroupCount,
+            /*exact_shadow_entry_capacity=*/kExactShadowEntries));
 
         hipLaunchKernelGGL(offset_race_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());

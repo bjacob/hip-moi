@@ -17,7 +17,6 @@ namespace
     constexpr int              kThreadCount        = 64;
     constexpr int              kThreadsPerSubgroup = 32;
     constexpr int              kSubgroupCount      = 2;
-    constexpr int              kAccessCapacity     = 1;
     constexpr int              kDiagnosticCapacity = 8;
     constexpr int              kExactShadowEntries = 1;
     constexpr hip_moi::site_id kProducerSite(0x101);
@@ -26,7 +25,6 @@ namespace
 
     struct observed_metadata
     {
-        int                          access_count;
         int                          diagnostic_count;
         hip_moi::context::diagnostic diagnostics[kDiagnosticCapacity];
     };
@@ -95,10 +93,6 @@ namespace
     template <typename Storage>
     void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->access_count,
-                                          storage.access_count_device(),
-                                          sizeof(observed->access_count),
-                                          hipMemcpyDeviceToHost));
         HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&observed->diagnostic_count,
                                           storage.diagnostic_count_device(),
                                           sizeof(observed->diagnostic_count),
@@ -117,11 +111,10 @@ namespace
                || (diagnostic.first_site_id == second && diagnostic.second_site_id == first);
     }
 
-    TEST(HipMoiExactShadowBackend, SynchronizedOffsetAccessesDoNotUseDeferredLog)
+    TEST(HipMoiExactShadowBackend, SynchronizedOffsetAccessesDoNotReport)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
-            /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
             /*exact_shadow_entry_capacity=*/kExactShadowEntries));
@@ -149,17 +142,15 @@ namespace
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
         EXPECT_EQ(output, 77);
-        EXPECT_EQ(observed.access_count, 0);
         EXPECT_EQ(observed.diagnostic_count, 0);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiExactShadowBackend, RacyOffsetAccessesDiagnoseWithoutDeferredLog)
+    TEST(HipMoiExactShadowBackend, RacyOffsetAccessesDiagnose)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
-            /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
             /*exact_shadow_entry_capacity=*/kExactShadowEntries));
@@ -172,7 +163,6 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
-        EXPECT_EQ(observed.access_count, 0);
         ASSERT_GT(observed.diagnostic_count, 0);
         EXPECT_EQ(observed.diagnostics[0].kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
@@ -184,7 +174,6 @@ namespace
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
-            /*access_capacity=*/kAccessCapacity,
             /*diagnostic_capacity=*/kDiagnosticCapacity,
             /*subgroup_capacity=*/kSubgroupCount,
             /*exact_shadow_entry_capacity=*/kExactShadowEntries));
@@ -197,7 +186,6 @@ namespace
         observed_metadata observed = {};
         ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
 
-        EXPECT_EQ(observed.access_count, 0);
         ASSERT_GT(observed.diagnostic_count, 0);
         EXPECT_EQ(observed.diagnostics[0].kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::metadata_full));

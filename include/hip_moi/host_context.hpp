@@ -20,19 +20,14 @@ namespace hip_moi
 
     struct host_context_options
     {
-        // Byte budget for host-owned device metadata storage. The owning host
-        // context partitions this into the typed buffers needed by its mode.
+        // Byte budget for host-owned device metadata storage.
         std::size_t storage_bytes = default_host_context_storage_bytes;
 
-        // Optional typed-capacity overrides. Negative means "derive from the
-        // byte budget"; zero disables optional coalescing buffers.
-        int access_record_capacity            = -1;
-        int coalesced_access_record_capacity  = -1;
-        int coalescing_access_record_capacity = -1;
-        int coalescing_group_record_capacity  = -1;
-        int exact_shadow_entry_capacity       = -1;
-        int sampled_watchpoint_capacity       = -1;
-        int diagnostic_capacity               = -1;
+        // Negative means "derive from storage_bytes". A positive value fixes
+        // the capacity. Zero disables that storage class.
+        int exact_shadow_entry_capacity = -1;
+        int sampled_watchpoint_capacity = -1;
+        int diagnostic_capacity         = -1;
 
         // Number of subgroups represented in this context.
         int subgroup_capacity = 64;
@@ -45,1044 +40,644 @@ namespace hip_moi
         std::FILE* diagnostic_stream = stderr;
     };
 
-    namespace detail
+    class host_context
     {
-        struct host_context_traits
+    public:
+        using device_context = context;
+        using diagnostic     = context::diagnostic;
+        using storage_ref    = context::storage_ref;
+
+        explicit host_context(host_context_options options = host_context_options{})
+            : options_(options)
+            , destructor_reports_(options.destructor_reports)
+            , destructor_aborts_(options.destructor_aborts)
+            , diagnostic_stream_(options.diagnostic_stream)
         {
-            using device_context = context;
+            validate_options_or_abort();
+            allocate_or_abort();
+            clear_device_metadata_or_abort();
+        }
 
-            static const char* name()
-            {
-                return "host_context";
-            }
+        host_context(const host_context&)            = delete;
+        host_context& operator=(const host_context&) = delete;
 
-            static void report_diagnostic(std::FILE*                 stream,
-                                          int                        index,
-                                          const context::diagnostic& diagnostic_record,
-                                          const char*                kind_name)
-            {
-                if(static_cast<diagnostic_kind>(diagnostic_record.kind)
-                   == diagnostic_kind::barrier_divergence)
-                {
-                    std::fprintf(stream,
-                                 "hip-moi diagnostic %d: kind=%s epoch=%u "
-                                 "expected_threads=%u observed_threads=%u "
-                                 "site_id=0x%llx\n",
-                                 index,
-                                 kind_name,
-                                 diagnostic_record.epoch,
-                                 diagnostic_record.expected_thread_count,
-                                 diagnostic_record.observed_thread_count,
-                                 static_cast<unsigned long long>(diagnostic_record.first_site_id));
-                    return;
-                }
-
-                std::fprintf(stream,
-                             "hip-moi diagnostic %d: kind=%s epoch=%u "
-                             "first_subgroup=%u second_subgroup=%u "
-                             "first_addr=0x%llx second_addr=0x%llx "
-                             "first_size=%u second_size=%u "
-                             "first_site_id=0x%llx second_site_id=0x%llx\n",
-                             index,
-                             kind_name,
-                             diagnostic_record.epoch,
-                             diagnostic_record.first_subgroup_id,
-                             diagnostic_record.second_subgroup_id,
-                             static_cast<unsigned long long>(diagnostic_record.first_addr),
-                             static_cast<unsigned long long>(diagnostic_record.second_addr),
-                             diagnostic_record.first_size,
-                             diagnostic_record.second_size,
-                             static_cast<unsigned long long>(diagnostic_record.first_site_id),
-                             static_cast<unsigned long long>(diagnostic_record.second_site_id));
-            }
-        };
-
-        template <typename Traits>
-        class host_context_impl
+        ~host_context()
         {
-        public:
-            using device_context = typename Traits::device_context;
-            using access_record  = typename device_context::access_record;
-            using coalesced_access_record =
-                typename optional_coalesced_access_record<device_context>::type;
-            using coalescing_access_record =
-                typename optional_coalescing_access_record<device_context>::type;
-            using coalescing_group_record =
-                typename optional_coalescing_group_record<device_context>::type;
-            using diagnostic  = typename device_context::diagnostic;
-            using storage_ref = typename device_context::storage_ref;
-
-            static constexpr bool has_coalesced_access_records
-                = optional_coalesced_access_record<device_context>::available;
-            static constexpr bool has_coalescing_access_records
-                = optional_coalescing_access_record<device_context>::available;
-            static constexpr bool has_coalescing_group_records
-                = optional_coalescing_group_record<device_context>::available;
-
-            explicit host_context_impl(host_context_options options = host_context_options{})
-                : options_(options)
-                , destructor_reports_(options.destructor_reports)
-                , destructor_aborts_(options.destructor_aborts)
-                , diagnostic_stream_(options.diagnostic_stream)
+            if(!diagnostics_consumed_ && (destructor_reports_ || destructor_aborts_))
             {
-                validate_options_or_abort();
-                allocate_or_abort();
-                clear_device_metadata_or_abort();
-            }
-
-            host_context_impl(const host_context_impl&)            = delete;
-            host_context_impl& operator=(const host_context_impl&) = delete;
-
-            ~host_context_impl()
-            {
-                if(!diagnostics_consumed_ && (destructor_reports_ || destructor_aborts_))
+                std::FILE* stream = destructor_reports_ ? diagnostic_stream_ : nullptr;
+                int        count  = consume_diagnostics(stream);
+                if(count != 0 && destructor_aborts_)
                 {
-                    std::FILE* stream = destructor_reports_ ? diagnostic_stream_ : nullptr;
-                    int        count  = consume_diagnostics(stream);
-                    if(count != 0 && destructor_aborts_)
+                    if(stream)
                     {
-                        if(stream)
-                        {
-                            std::fprintf(stream,
-                                         "hip-moi: unconsumed diagnostics in %s "
-                                         "destructor; aborting\n",
-                                         Traits::name());
-                            std::fflush(stream);
-                        }
-                        std::abort();
+                        std::fprintf(stream,
+                                     "hip-moi: unconsumed diagnostics in host_context "
+                                     "destructor; aborting\n");
+                        std::fflush(stream);
                     }
-                }
-                release();
-            }
-
-            storage_ref device_ref()
-            {
-                diagnostics_consumed_ = false;
-                uint64_t generation   = next_generation();
-                if constexpr(has_coalescing_access_records)
-                {
-                    storage_ref ref{
-                        access_records_,
-                        access_record_capacity_,
-                        diagnostics_,
-                        diagnostic_capacity_,
-                        subgroup_states_,
-                        subgroup_capacity_,
-                        access_count_,
-                        epoch_access_count_,
-                        diagnostic_count_,
-                        coalesced_access_records_,
-                        coalesced_access_record_capacity_,
-                        coalesced_access_count_,
-                        coalescing_access_records_,
-                        coalescing_access_record_capacity_,
-                        coalescing_access_count_,
-                        epoch_coalescing_access_count_,
-                        coalescing_fallback_count_,
-                        coalescing_group_records_,
-                        coalescing_group_record_capacity_,
-                        coalescing_group_count_,
-                    };
-                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
-                    ref.shadow_epoch                    = shadow_epoch_;
-                    ref.exact_shadow_entries            = exact_shadow_entries_;
-                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
-                    ref.sampled_watchpoints             = sampled_watchpoints_;
-                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation;
-                    ref.backend                         = static_cast<uint32_t>(options_.backend);
-                    return ref;
-                }
-                else if constexpr(has_coalesced_access_records)
-                {
-                    storage_ref ref{
-                        access_records_,
-                        access_record_capacity_,
-                        diagnostics_,
-                        diagnostic_capacity_,
-                        subgroup_states_,
-                        subgroup_capacity_,
-                        access_count_,
-                        epoch_access_count_,
-                        diagnostic_count_,
-                        coalesced_access_records_,
-                        coalesced_access_record_capacity_,
-                        coalesced_access_count_,
-                    };
-                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
-                    ref.shadow_epoch                    = shadow_epoch_;
-                    ref.exact_shadow_entries            = exact_shadow_entries_;
-                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
-                    ref.sampled_watchpoints             = sampled_watchpoints_;
-                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation;
-                    ref.backend                         = static_cast<uint32_t>(options_.backend);
-                    return ref;
-                }
-                else
-                {
-                    storage_ref ref{
-                        access_records_,
-                        access_record_capacity_,
-                        diagnostics_,
-                        diagnostic_capacity_,
-                        subgroup_states_,
-                        subgroup_capacity_,
-                        access_count_,
-                        epoch_access_count_,
-                        diagnostic_count_,
-                    };
-                    ref.simulated_barrier_arrival_count = simulated_barrier_arrival_count_;
-                    ref.shadow_epoch                    = shadow_epoch_;
-                    ref.exact_shadow_entries            = exact_shadow_entries_;
-                    ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
-                    ref.sampled_watchpoints             = sampled_watchpoints_;
-                    ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation;
-                    ref.backend                         = static_cast<uint32_t>(options_.backend);
-                    return ref;
+                    std::abort();
                 }
             }
+            release();
+        }
 
-            storage_ref ref()
+        storage_ref device_ref()
+        {
+            diagnostics_consumed_ = false;
+            uint64_t generation   = next_generation();
+            return storage_ref{
+                diagnostics_,
+                diagnostic_capacity_,
+                subgroup_states_,
+                subgroup_capacity_,
+                diagnostic_count_,
+                simulated_barrier_arrival_count_,
+                exact_shadow_entries_,
+                exact_shadow_entry_capacity_,
+                sampled_watchpoints_,
+                sampled_watchpoint_capacity_,
+                generation,
+                static_cast<uint32_t>(options_.backend),
+            };
+        }
+
+        storage_ref ref()
+        {
+            return device_ref();
+        }
+
+        bool check(std::FILE* stream = stderr)
+        {
+            return consume_diagnostics(stream) == 0;
+        }
+
+        int consume_diagnostics(std::FILE* stream = stderr)
+        {
+            diagnostics_consumed_ = true;
+
+            hipError_t status = hipDeviceSynchronize();
+            if(status != hipSuccess)
             {
-                return device_ref();
+                report_hip_error(stream, "hipDeviceSynchronize", status);
+                last_diagnostic_count_ = -1;
+                return -1;
             }
 
-            bool check(std::FILE* stream = stderr)
+            int diagnostic_count = 0;
+            status               = hipMemcpy(&diagnostic_count,
+                               diagnostic_count_,
+                               sizeof(diagnostic_count),
+                               hipMemcpyDeviceToHost);
+            if(status != hipSuccess)
             {
-                return consume_diagnostics(stream) == 0;
+                report_hip_error(stream, "hipMemcpy(diagnostic_count)", status);
+                last_diagnostic_count_ = -1;
+                return -1;
             }
 
-            int consume_diagnostics(std::FILE* stream = stderr)
+            last_diagnostic_count_ = diagnostic_count;
+            if(diagnostic_count <= 0)
             {
-                diagnostics_consumed_ = true;
-
-                hipError_t status = hipDeviceSynchronize();
-                if(status != hipSuccess)
-                {
-                    report_hip_error(stream, "hipDeviceSynchronize", status);
-                    last_diagnostic_count_ = -1;
-                    return -1;
-                }
-
-                int diagnostic_count = 0;
-                status               = hipMemcpy(&diagnostic_count,
-                                   diagnostic_count_,
-                                   sizeof(diagnostic_count),
-                                   hipMemcpyDeviceToHost);
-                if(status != hipSuccess)
-                {
-                    report_hip_error(stream, "hipMemcpy(diagnostic_count)", status);
-                    last_diagnostic_count_ = -1;
-                    return -1;
-                }
-
-                last_diagnostic_count_ = diagnostic_count;
-                if(diagnostic_count <= 0)
-                {
-                    return diagnostic_count;
-                }
-
-                int stored_count = diagnostic_count;
-                if(stored_count > diagnostic_capacity_)
-                {
-                    stored_count = diagnostic_capacity_;
-                }
-
-                diagnostic* host_diagnostics = new diagnostic[stored_count];
-                status                       = hipMemcpy(host_diagnostics,
-                                   diagnostics_,
-                                   stored_count * sizeof(diagnostic),
-                                   hipMemcpyDeviceToHost);
-                if(status != hipSuccess)
-                {
-                    delete[] host_diagnostics;
-                    report_hip_error(stream, "hipMemcpy(diagnostics)", status);
-                    last_diagnostic_count_ = -1;
-                    return -1;
-                }
-
-                report_diagnostics(stream, host_diagnostics, stored_count, diagnostic_count);
-                delete[] host_diagnostics;
                 return diagnostic_count;
             }
 
-            int last_diagnostic_count() const
+            int stored_count = diagnostic_count;
+            if(stored_count > diagnostic_capacity_)
             {
-                return last_diagnostic_count_;
+                stored_count = diagnostic_capacity_;
             }
 
-            std::size_t storage_bytes() const
+            diagnostic* host_diagnostics = new diagnostic[stored_count];
+            status                       = hipMemcpy(host_diagnostics,
+                               diagnostics_,
+                               stored_count * sizeof(diagnostic),
+                               hipMemcpyDeviceToHost);
+            if(status != hipSuccess)
             {
-                return storage_bytes_;
+                delete[] host_diagnostics;
+                report_hip_error(stream, "hipMemcpy(diagnostics)", status);
+                last_diagnostic_count_ = -1;
+                return -1;
             }
 
-            std::size_t layout_bytes() const
-            {
-                return layout_bytes_;
-            }
+            report_diagnostics(stream, host_diagnostics, stored_count, diagnostic_count);
+            delete[] host_diagnostics;
+            return diagnostic_count;
+        }
 
-            int access_record_capacity() const
-            {
-                return access_record_capacity_;
-            }
+        int last_diagnostic_count() const
+        {
+            return last_diagnostic_count_;
+        }
 
-            int coalesced_access_record_capacity() const
-            {
-                return coalesced_access_record_capacity_;
-            }
+        std::size_t storage_bytes() const
+        {
+            return storage_bytes_;
+        }
 
-            int coalescing_access_record_capacity() const
-            {
-                return coalescing_access_record_capacity_;
-            }
+        std::size_t layout_bytes() const
+        {
+            return layout_bytes_;
+        }
 
-            int coalescing_group_record_capacity() const
-            {
-                return coalescing_group_record_capacity_;
-            }
+        int exact_shadow_entry_capacity() const
+        {
+            return exact_shadow_entry_capacity_;
+        }
 
-            int exact_shadow_entry_capacity() const
-            {
-                return exact_shadow_entry_capacity_;
-            }
+        int sampled_watchpoint_capacity() const
+        {
+            return sampled_watchpoint_capacity_;
+        }
 
-            int sampled_watchpoint_capacity() const
-            {
-                return sampled_watchpoint_capacity_;
-            }
+        int diagnostic_capacity() const
+        {
+            return diagnostic_capacity_;
+        }
 
-            int diagnostic_capacity() const
-            {
-                return diagnostic_capacity_;
-            }
+        int subgroup_capacity() const
+        {
+            return subgroup_capacity_;
+        }
 
-            int subgroup_capacity() const
-            {
-                return subgroup_capacity_;
-            }
+        backend_kind backend() const
+        {
+            return options_.backend;
+        }
 
-            void set_destructor_reporting_enabled(bool enabled)
-            {
-                destructor_reports_ = enabled;
-            }
+        void set_destructor_reporting_enabled(bool enabled)
+        {
+            destructor_reports_ = enabled;
+        }
 
-            void set_destructor_abort_enabled(bool enabled)
-            {
-                destructor_aborts_ = enabled;
-            }
+        void set_destructor_abort_enabled(bool enabled)
+        {
+            destructor_aborts_ = enabled;
+        }
 
-            void disable_destructor_reporting()
-            {
-                set_destructor_reporting_enabled(false);
-            }
+        void disable_destructor_reporting()
+        {
+            set_destructor_reporting_enabled(false);
+        }
 
-            void disable_destructor_abort()
-            {
-                set_destructor_abort_enabled(false);
-            }
+        void disable_destructor_abort()
+        {
+            set_destructor_abort_enabled(false);
+        }
 
-            void disable_destructor_check()
-            {
-                disable_destructor_reporting();
-                disable_destructor_abort();
-            }
+        void disable_destructor_check()
+        {
+            disable_destructor_reporting();
+            disable_destructor_abort();
+        }
 
-        private:
-            static const char* diagnostic_kind_name(uint32_t kind)
-            {
-                switch(static_cast<diagnostic_kind>(kind))
-                {
-                case diagnostic_kind::none:
-                    return "none";
-                case diagnostic_kind::access_conflict:
-                    return "access_conflict";
-                case diagnostic_kind::metadata_full:
-                    return "metadata_full";
-                case diagnostic_kind::barrier_divergence:
-                    return "barrier_divergence";
-                }
-                return "unknown";
-            }
+    private:
+        static bool is_auto_capacity(int capacity)
+        {
+            return capacity < 0;
+        }
 
-            static void
-                report_hip_error(std::FILE* stream, const char* operation, hipError_t status)
-            {
-                if(!stream)
-                {
-                    return;
-                }
-                std::fprintf(
-                    stream, "hip-moi: %s failed: %s\n", operation, hipGetErrorString(status));
-                std::fflush(stream);
-            }
+        static std::size_t align_up(std::size_t offset, std::size_t alignment)
+        {
+            std::size_t remainder = offset % alignment;
+            return remainder == 0 ? offset : offset + (alignment - remainder);
+        }
 
-            static void report_diagnostics(std::FILE*        stream,
-                                           const diagnostic* diagnostics,
-                                           int               stored_count,
-                                           int               diagnostic_count)
-            {
-                if(!stream)
-                {
-                    return;
-                }
-
-                std::fprintf(stream, "hip-moi: %d diagnostic(s)\n", diagnostic_count);
-                for(int i = 0; i < stored_count; ++i)
-                {
-                    const diagnostic& diagnostic_record = diagnostics[i];
-                    Traits::report_diagnostic(
-                        stream, i, diagnostic_record, diagnostic_kind_name(diagnostic_record.kind));
-                }
-                if(stored_count < diagnostic_count)
-                {
-                    std::fprintf(stream,
-                                 "hip-moi: diagnostic buffer stored %d of %d diagnostic(s)\n",
-                                 stored_count,
-                                 diagnostic_count);
-                }
-                std::fflush(stream);
-            }
-
-            static bool is_auto_capacity(int capacity)
-            {
-                return capacity < 0;
-            }
-
-            uint64_t next_generation()
-            {
-                ++generation_;
-                if(generation_ == 0)
-                {
-                    generation_ = 1;
-                }
-                return generation_;
-            }
-
-            static std::size_t align_up(std::size_t offset, std::size_t alignment)
-            {
-                std::size_t remainder = offset % alignment;
-                return remainder == 0 ? offset : offset + (alignment - remainder);
-            }
-
-            static int checked_capacity(std::size_t capacity, const char* name)
-            {
-                if(capacity > static_cast<std::size_t>(INT_MAX))
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: %s auto-capacity does not fit in int (%llu)\n",
-                                 name,
-                                 static_cast<unsigned long long>(capacity));
-                    std::fflush(stderr);
-                    std::abort();
-                }
-                return static_cast<int>(capacity);
-            }
-
-            template <typename T>
-            static void append_slice_size(std::size_t* offset, int capacity)
-            {
-                if(capacity <= 0)
-                {
-                    return;
-                }
-
-                *offset = align_up(*offset, alignof(T));
-                *offset += static_cast<std::size_t>(capacity) * sizeof(T);
-            }
-
-            template <typename T>
-            static void
-                assign_slice(unsigned char* base, int capacity, std::size_t* offset, T** ptr)
-            {
-                if(capacity <= 0)
-                {
-                    *ptr = nullptr;
-                    return;
-                }
-
-                *offset = align_up(*offset, alignof(T));
-                *ptr    = reinterpret_cast<T*>(base + *offset);
-                *offset += static_cast<std::size_t>(capacity) * sizeof(T);
-            }
-
-            void validate_options_or_abort() const
-            {
-                if(options_.storage_bytes == 0 || options_.access_record_capacity < -1
-                   || options_.coalesced_access_record_capacity < -1
-                   || options_.coalescing_access_record_capacity < -1
-                   || options_.coalescing_group_record_capacity < -1
-                   || options_.exact_shadow_entry_capacity < -1
-                   || options_.sampled_watchpoint_capacity < -1 || options_.diagnostic_capacity < -1
-                   || options_.subgroup_capacity <= 0)
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: %s storage options are invalid "
-                                 "(bytes=%llu access=%d coalesced_access=%d "
-                                 "coalescing_access=%d group=%d exact_shadow=%d "
-                                 "sampled_watchpoints=%d diagnostics=%d subgroups=%d)\n",
-                                 Traits::name(),
-                                 static_cast<unsigned long long>(options_.storage_bytes),
-                                 options_.access_record_capacity,
-                                 options_.coalesced_access_record_capacity,
-                                 options_.coalescing_access_record_capacity,
-                                 options_.coalescing_group_record_capacity,
-                                 options_.exact_shadow_entry_capacity,
-                                 options_.sampled_watchpoint_capacity,
-                                 options_.diagnostic_capacity,
-                                 options_.subgroup_capacity);
-                    std::fflush(stderr);
-                    std::abort();
-                }
-
-                if(options_.access_record_capacity == 0 || options_.diagnostic_capacity == 0)
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: %s access and diagnostic capacities must be "
-                                 "positive, or -1 for auto (access=%d diagnostics=%d)\n",
-                                 Traits::name(),
-                                 options_.access_record_capacity,
-                                 options_.diagnostic_capacity);
-                    std::fflush(stderr);
-                    std::abort();
-                }
-            }
-
-            int auto_diagnostic_capacity() const
-            {
-                std::size_t diagnostic_bytes = storage_bytes_ / 64;
-                if(diagnostic_bytes < sizeof(diagnostic))
-                {
-                    diagnostic_bytes = sizeof(diagnostic);
-                }
-
-                constexpr std::size_t kMaxAutoDiagnosticBytes = 256u * 1024u;
-                if(diagnostic_bytes > kMaxAutoDiagnosticBytes)
-                {
-                    diagnostic_bytes = kMaxAutoDiagnosticBytes;
-                }
-
-                std::size_t capacity = diagnostic_bytes / sizeof(diagnostic);
-                if(capacity == 0)
-                {
-                    capacity = 1;
-                }
-                return checked_capacity(capacity, "diagnostic");
-            }
-
-            std::size_t layout_byte_count() const
-            {
-                std::size_t offset = 0;
-                append_slice_size<access_record>(&offset, access_record_capacity_);
-                if constexpr(has_coalesced_access_records)
-                {
-                    append_slice_size<coalesced_access_record>(&offset,
-                                                               coalesced_access_record_capacity_);
-                    append_slice_size<int>(&offset, coalesced_access_record_capacity_ > 0 ? 1 : 0);
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    append_slice_size<coalescing_access_record>(&offset,
-                                                                coalescing_access_record_capacity_);
-                    append_slice_size<int>(&offset, 3);
-                    if constexpr(has_coalescing_group_records)
-                    {
-                        append_slice_size<coalescing_group_record>(
-                            &offset, coalescing_group_record_capacity_);
-                        append_slice_size<int>(&offset,
-                                               coalescing_group_record_capacity_ > 0 ? 1 : 0);
-                    }
-                }
-                append_slice_size<diagnostic>(&offset, diagnostic_capacity_);
-                append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
-                append_slice_size<int>(&offset, 4);
-                append_slice_size<uint64_t>(&offset, 1);
-                append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
-                append_slice_size<uint64_t>(&offset, sampled_watchpoint_capacity_);
-                return offset;
-            }
-
-            void assign_layout_slices()
-            {
-                std::size_t offset = 0;
-                assign_slice<access_record>(
-                    device_storage_, access_record_capacity_, &offset, &access_records_);
-                if constexpr(has_coalesced_access_records)
-                {
-                    assign_slice<coalesced_access_record>(device_storage_,
-                                                          coalesced_access_record_capacity_,
-                                                          &offset,
-                                                          &coalesced_access_records_);
-                    assign_slice<int>(device_storage_,
-                                      coalesced_access_record_capacity_ > 0 ? 1 : 0,
-                                      &offset,
-                                      &coalesced_access_count_);
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    assign_slice<coalescing_access_record>(device_storage_,
-                                                           coalescing_access_record_capacity_,
-                                                           &offset,
-                                                           &coalescing_access_records_);
-                    assign_slice<int>(device_storage_, 1, &offset, &coalescing_access_count_);
-                    assign_slice<int>(device_storage_, 1, &offset, &epoch_coalescing_access_count_);
-                    assign_slice<int>(device_storage_, 1, &offset, &coalescing_fallback_count_);
-                    if constexpr(has_coalescing_group_records)
-                    {
-                        assign_slice<coalescing_group_record>(device_storage_,
-                                                              coalescing_group_record_capacity_,
-                                                              &offset,
-                                                              &coalescing_group_records_);
-                        assign_slice<int>(device_storage_,
-                                          coalescing_group_record_capacity_ > 0 ? 1 : 0,
-                                          &offset,
-                                          &coalescing_group_count_);
-                    }
-                }
-                assign_slice<diagnostic>(
-                    device_storage_, diagnostic_capacity_, &offset, &diagnostics_);
-                assign_slice<subgroup_state>(
-                    device_storage_, subgroup_capacity_, &offset, &subgroup_states_);
-                assign_slice<int>(device_storage_, 1, &offset, &access_count_);
-                assign_slice<int>(device_storage_, 1, &offset, &epoch_access_count_);
-                assign_slice<int>(device_storage_, 1, &offset, &diagnostic_count_);
-                assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
-                assign_slice<uint64_t>(device_storage_, 1, &offset, &shadow_epoch_);
-                assign_slice<uint64_t>(
-                    device_storage_, exact_shadow_entry_capacity_, &offset, &exact_shadow_entries_);
-                assign_slice<uint64_t>(
-                    device_storage_, sampled_watchpoint_capacity_, &offset, &sampled_watchpoints_);
-                layout_bytes_ = offset;
-            }
-
-            int capacity_from_bytes(std::size_t byte_count,
-                                    std::size_t element_size,
-                                    const char* name) const
-            {
-                return checked_capacity(byte_count / element_size, name);
-            }
-
-            bool shrink_one_auto_capacity()
-            {
-                if constexpr(has_coalescing_group_records)
-                {
-                    if(is_auto_capacity(options_.coalescing_group_record_capacity)
-                       && coalescing_group_record_capacity_ > 0)
-                    {
-                        --coalescing_group_record_capacity_;
-                        return true;
-                    }
-                }
-                if constexpr(has_coalesced_access_records)
-                {
-                    if(is_auto_capacity(options_.coalesced_access_record_capacity)
-                       && coalesced_access_record_capacity_ > 0)
-                    {
-                        --coalesced_access_record_capacity_;
-                        return true;
-                    }
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    if(is_auto_capacity(options_.coalescing_access_record_capacity)
-                       && coalescing_access_record_capacity_ > 0)
-                    {
-                        --coalescing_access_record_capacity_;
-                        return true;
-                    }
-                }
-                if(is_auto_capacity(options_.sampled_watchpoint_capacity)
-                   && sampled_watchpoint_capacity_ > 0)
-                {
-                    --sampled_watchpoint_capacity_;
-                    return true;
-                }
-                if(is_auto_capacity(options_.exact_shadow_entry_capacity)
-                   && exact_shadow_entry_capacity_ > 0)
-                {
-                    --exact_shadow_entry_capacity_;
-                    return true;
-                }
-                if(is_auto_capacity(options_.access_record_capacity) && access_record_capacity_ > 1)
-                {
-                    --access_record_capacity_;
-                    return true;
-                }
-                return false;
-            }
-
-            void compute_layout_or_abort()
-            {
-                storage_bytes_       = options_.storage_bytes;
-                subgroup_capacity_   = options_.subgroup_capacity;
-                diagnostic_capacity_ = is_auto_capacity(options_.diagnostic_capacity)
-                                           ? auto_diagnostic_capacity()
-                                           : options_.diagnostic_capacity;
-
-                access_record_capacity_ = is_auto_capacity(options_.access_record_capacity)
-                                              ? 0
-                                              : options_.access_record_capacity;
-                exact_shadow_entry_capacity_
-                    = is_auto_capacity(options_.exact_shadow_entry_capacity)
-                          ? 0
-                          : options_.exact_shadow_entry_capacity;
-                sampled_watchpoint_capacity_
-                    = is_auto_capacity(options_.sampled_watchpoint_capacity)
-                          ? 0
-                          : options_.sampled_watchpoint_capacity;
-
-                if constexpr(has_coalesced_access_records)
-                {
-                    coalesced_access_record_capacity_
-                        = is_auto_capacity(options_.coalesced_access_record_capacity)
-                              ? 0
-                              : options_.coalesced_access_record_capacity;
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    coalescing_access_record_capacity_
-                        = is_auto_capacity(options_.coalescing_access_record_capacity)
-                              ? 0
-                              : options_.coalescing_access_record_capacity;
-                }
-                if constexpr(has_coalescing_group_records)
-                {
-                    coalescing_group_record_capacity_
-                        = is_auto_capacity(options_.coalescing_group_record_capacity)
-                              ? 0
-                              : options_.coalescing_group_record_capacity;
-                }
-
-                std::size_t fixed_bytes = layout_byte_count();
-                if(fixed_bytes > storage_bytes_)
-                {
-                    report_storage_too_small_and_abort(fixed_bytes);
-                }
-
-                std::size_t remaining_bytes = storage_bytes_ - fixed_bytes;
-                int         total_weight    = 0;
-                if(is_auto_capacity(options_.access_record_capacity))
-                {
-                    total_weight += 4;
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    if(is_auto_capacity(options_.coalescing_access_record_capacity))
-                    {
-                        total_weight += 8;
-                    }
-                }
-                if constexpr(has_coalesced_access_records)
-                {
-                    if(is_auto_capacity(options_.coalesced_access_record_capacity))
-                    {
-                        total_weight += 1;
-                    }
-                }
-                if constexpr(has_coalescing_group_records)
-                {
-                    if(is_auto_capacity(options_.coalescing_group_record_capacity))
-                    {
-                        total_weight += 1;
-                    }
-                }
-                if(is_auto_capacity(options_.exact_shadow_entry_capacity))
-                {
-                    total_weight += 2;
-                }
-                if(is_auto_capacity(options_.sampled_watchpoint_capacity))
-                {
-                    total_weight += 1;
-                }
-
-                if(total_weight > 0)
-                {
-                    if(is_auto_capacity(options_.access_record_capacity))
-                    {
-                        access_record_capacity_ = capacity_from_bytes(
-                            remaining_bytes * 4 / static_cast<std::size_t>(total_weight),
-                            sizeof(access_record),
-                            "access");
-                    }
-                    if constexpr(has_coalescing_access_records)
-                    {
-                        if(is_auto_capacity(options_.coalescing_access_record_capacity))
-                        {
-                            coalescing_access_record_capacity_ = capacity_from_bytes(
-                                remaining_bytes * 8 / static_cast<std::size_t>(total_weight),
-                                sizeof(coalescing_access_record),
-                                "coalescing_access");
-                        }
-                    }
-                    if constexpr(has_coalesced_access_records)
-                    {
-                        if(is_auto_capacity(options_.coalesced_access_record_capacity))
-                        {
-                            coalesced_access_record_capacity_ = capacity_from_bytes(
-                                remaining_bytes / static_cast<std::size_t>(total_weight),
-                                sizeof(coalesced_access_record),
-                                "coalesced_access");
-                        }
-                    }
-                    if constexpr(has_coalescing_group_records)
-                    {
-                        if(is_auto_capacity(options_.coalescing_group_record_capacity))
-                        {
-                            coalescing_group_record_capacity_ = capacity_from_bytes(
-                                remaining_bytes / static_cast<std::size_t>(total_weight),
-                                sizeof(coalescing_group_record),
-                                "coalescing_group");
-                        }
-                    }
-                    if(is_auto_capacity(options_.exact_shadow_entry_capacity))
-                    {
-                        exact_shadow_entry_capacity_ = capacity_from_bytes(
-                            remaining_bytes * 2 / static_cast<std::size_t>(total_weight),
-                            sizeof(uint64_t),
-                            "exact_shadow");
-                    }
-                    if(is_auto_capacity(options_.sampled_watchpoint_capacity))
-                    {
-                        sampled_watchpoint_capacity_ = capacity_from_bytes(
-                            remaining_bytes / static_cast<std::size_t>(total_weight),
-                            sizeof(uint64_t),
-                            "sampled_watchpoint");
-                    }
-                }
-
-                while(layout_byte_count() > storage_bytes_ && shrink_one_auto_capacity())
-                {
-                }
-
-                layout_bytes_ = layout_byte_count();
-                if(layout_bytes_ > storage_bytes_)
-                {
-                    report_storage_too_small_and_abort(layout_bytes_);
-                }
-                if(access_record_capacity_ <= 0 || diagnostic_capacity_ <= 0)
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: %s storage_bytes=%llu is too small for positive "
-                                 "access and diagnostic capacities (access=%d diagnostics=%d)\n",
-                                 Traits::name(),
-                                 static_cast<unsigned long long>(storage_bytes_),
-                                 access_record_capacity_,
-                                 diagnostic_capacity_);
-                    std::fflush(stderr);
-                    std::abort();
-                }
-            }
-
-            void report_storage_too_small_and_abort(std::size_t required_bytes) const
+        static int checked_capacity(std::size_t capacity, const char* name)
+        {
+            if(capacity > static_cast<std::size_t>(INT_MAX))
             {
                 std::fprintf(stderr,
-                             "hip-moi: %s storage_bytes=%llu is too small; "
-                             "layout requires at least %llu bytes "
-                             "(access=%d coalesced_access=%d coalescing_access=%d "
-                             "coalescing_group=%d exact_shadow=%d sampled_watchpoints=%d "
+                             "hip-moi: %s auto-capacity does not fit in int (%llu)\n",
+                             name,
+                             static_cast<unsigned long long>(capacity));
+                std::fflush(stderr);
+                std::abort();
+            }
+            return static_cast<int>(capacity);
+        }
+
+        template <typename T>
+        static void append_slice_size(std::size_t* offset, int capacity)
+        {
+            if(capacity <= 0)
+            {
+                return;
+            }
+
+            *offset = align_up(*offset, alignof(T));
+            *offset += static_cast<std::size_t>(capacity) * sizeof(T);
+        }
+
+        template <typename T>
+        static void assign_slice(unsigned char* base, int capacity, std::size_t* offset, T** ptr)
+        {
+            if(capacity <= 0)
+            {
+                *ptr = nullptr;
+                return;
+            }
+
+            *offset = align_up(*offset, alignof(T));
+            *ptr    = reinterpret_cast<T*>(base + *offset);
+            *offset += static_cast<std::size_t>(capacity) * sizeof(T);
+        }
+
+        uint64_t next_generation()
+        {
+            ++generation_;
+            if(generation_ == 0)
+            {
+                generation_ = 1;
+            }
+            return generation_;
+        }
+
+        void validate_options_or_abort() const
+        {
+            if(options_.storage_bytes == 0 || options_.exact_shadow_entry_capacity < -1
+               || options_.sampled_watchpoint_capacity < -1 || options_.diagnostic_capacity < -1
+               || options_.subgroup_capacity <= 0)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: host_context storage options are invalid "
+                             "(bytes=%llu exact_shadow=%d sampled_watchpoints=%d "
                              "diagnostics=%d subgroups=%d)\n",
-                             Traits::name(),
-                             static_cast<unsigned long long>(storage_bytes_),
-                             static_cast<unsigned long long>(required_bytes),
-                             access_record_capacity_,
-                             coalesced_access_record_capacity_,
-                             coalescing_access_record_capacity_,
-                             coalescing_group_record_capacity_,
-                             exact_shadow_entry_capacity_,
-                             sampled_watchpoint_capacity_,
-                             diagnostic_capacity_,
-                             subgroup_capacity_);
+                             static_cast<unsigned long long>(options_.storage_bytes),
+                             options_.exact_shadow_entry_capacity,
+                             options_.sampled_watchpoint_capacity,
+                             options_.diagnostic_capacity,
+                             options_.subgroup_capacity);
                 std::fflush(stderr);
                 std::abort();
             }
 
-            void allocate_or_abort()
+            if(options_.diagnostic_capacity == 0)
             {
-                compute_layout_or_abort();
+                std::fprintf(stderr,
+                             "hip-moi: host_context diagnostic capacity must be positive, "
+                             "or -1 for auto\n");
+                std::fflush(stderr);
+                std::abort();
+            }
+        }
 
-                void*      allocated = nullptr;
-                hipError_t status    = hipMalloc(&allocated, storage_bytes_);
-                if(status != hipSuccess)
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: hipMalloc(%s storage, %llu bytes) failed: %s\n",
-                                 Traits::name(),
-                                 static_cast<unsigned long long>(storage_bytes_),
-                                 hipGetErrorString(status));
-                    std::fflush(stderr);
-                    std::abort();
-                }
-                device_storage_ = static_cast<unsigned char*>(allocated);
-                assign_layout_slices();
+        int auto_diagnostic_capacity() const
+        {
+            std::size_t diagnostic_bytes = storage_bytes_ / 64;
+            if(diagnostic_bytes < sizeof(diagnostic))
+            {
+                diagnostic_bytes = sizeof(diagnostic);
             }
 
-            void clear_device_metadata_or_abort()
+            constexpr std::size_t kMaxAutoDiagnosticBytes = 256u * 1024u;
+            if(diagnostic_bytes > kMaxAutoDiagnosticBytes)
             {
-                hip_memset_or_abort(access_records_,
-                                    0,
-                                    access_record_capacity_ * sizeof(access_record),
-                                    "access_records");
-                if constexpr(has_coalesced_access_records)
-                {
-                    if(coalesced_access_record_capacity_ > 0)
-                    {
-                        hip_memset_or_abort(coalesced_access_records_,
-                                            0,
-                                            coalesced_access_record_capacity_
-                                                * sizeof(coalesced_access_record),
-                                            "coalesced_access_records");
-                        hip_memset_or_abort(
-                            coalesced_access_count_, 0, sizeof(int), "coalesced_access_count");
-                    }
-                }
-                if constexpr(has_coalescing_access_records)
-                {
-                    hip_memset_or_abort(
-                        coalescing_access_count_, 0, sizeof(int), "coalescing_access_count");
-                    hip_memset_or_abort(epoch_coalescing_access_count_,
-                                        0,
-                                        sizeof(int),
-                                        "epoch_coalescing_access_count");
-                    hip_memset_or_abort(
-                        coalescing_fallback_count_, 0, sizeof(int), "coalescing_fallback_count");
-                    if(coalescing_access_record_capacity_ > 0)
-                    {
-                        hip_memset_or_abort(coalescing_access_records_,
-                                            0,
-                                            coalescing_access_record_capacity_
-                                                * sizeof(coalescing_access_record),
-                                            "coalescing_access_records");
-                    }
-                    if constexpr(has_coalescing_group_records)
-                    {
-                        if(coalescing_group_record_capacity_ > 0)
-                        {
-                            hip_memset_or_abort(coalescing_group_records_,
-                                                0,
-                                                coalescing_group_record_capacity_
-                                                    * sizeof(coalescing_group_record),
-                                                "coalescing_group_records");
-                            hip_memset_or_abort(
-                                coalescing_group_count_, 0, sizeof(int), "coalescing_group_count");
-                        }
-                    }
-                }
-                hip_memset_or_abort(
-                    diagnostics_, 0, diagnostic_capacity_ * sizeof(diagnostic), "diagnostics");
-                hip_memset_or_abort(subgroup_states_,
-                                    0,
-                                    subgroup_capacity_ * sizeof(subgroup_state),
-                                    "subgroup_states");
-                hip_memset_or_abort(access_count_, 0, sizeof(int), "access_count");
-                hip_memset_or_abort(epoch_access_count_, 0, sizeof(int), "epoch_access_count");
-                hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
-                hip_memset_or_abort(simulated_barrier_arrival_count_,
-                                    0,
-                                    sizeof(int),
-                                    "simulated_barrier_arrival_count");
-                hip_memset_or_abort(shadow_epoch_, 0, sizeof(uint64_t), "shadow_epoch");
-                hip_memset_or_abort(exact_shadow_entries_,
-                                    0,
-                                    exact_shadow_entry_capacity_ * sizeof(uint64_t),
-                                    "exact_shadow_entries");
-                hip_memset_or_abort(sampled_watchpoints_,
-                                    0,
-                                    sampled_watchpoint_capacity_ * sizeof(uint64_t),
-                                    "sampled_watchpoints");
+                diagnostic_bytes = kMaxAutoDiagnosticBytes;
             }
 
-            static void
-                hip_memset_or_abort(void* ptr, int value, size_t byte_count, const char* name)
+            std::size_t capacity = diagnostic_bytes / sizeof(diagnostic);
+            if(capacity == 0)
             {
-                if(byte_count == 0)
-                {
-                    return;
-                }
+                capacity = 1;
+            }
+            return checked_capacity(capacity, "diagnostic");
+        }
 
-                hipError_t status = hipMemset(ptr, value, byte_count);
-                if(status != hipSuccess)
-                {
-                    std::fprintf(stderr,
-                                 "hip-moi: hipMemset(%s, %llu bytes) failed: %s\n",
-                                 name,
-                                 static_cast<unsigned long long>(byte_count),
-                                 hipGetErrorString(status));
-                    std::fflush(stderr);
-                    std::abort();
-                }
+        std::size_t layout_byte_count() const
+        {
+            std::size_t offset = 0;
+            append_slice_size<diagnostic>(&offset, diagnostic_capacity_);
+            append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
+            append_slice_size<int>(&offset, 2);
+            append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
+            append_slice_size<uint64_t>(&offset, sampled_watchpoint_capacity_);
+            return offset;
+        }
+
+        void assign_layout_slices()
+        {
+            std::size_t offset = 0;
+            assign_slice<diagnostic>(device_storage_, diagnostic_capacity_, &offset, &diagnostics_);
+            assign_slice<subgroup_state>(
+                device_storage_, subgroup_capacity_, &offset, &subgroup_states_);
+            assign_slice<int>(device_storage_, 1, &offset, &diagnostic_count_);
+            assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
+            assign_slice<uint64_t>(
+                device_storage_, exact_shadow_entry_capacity_, &offset, &exact_shadow_entries_);
+            assign_slice<uint64_t>(
+                device_storage_, sampled_watchpoint_capacity_, &offset, &sampled_watchpoints_);
+            layout_bytes_ = offset;
+        }
+
+        int capacity_from_bytes(std::size_t byte_count,
+                                std::size_t element_size,
+                                const char* name) const
+        {
+            return checked_capacity(byte_count / element_size, name);
+        }
+
+        bool shrink_one_auto_capacity()
+        {
+            if(is_auto_capacity(options_.sampled_watchpoint_capacity)
+               && sampled_watchpoint_capacity_ > 0)
+            {
+                --sampled_watchpoint_capacity_;
+                return true;
+            }
+            if(is_auto_capacity(options_.exact_shadow_entry_capacity)
+               && exact_shadow_entry_capacity_ > 0)
+            {
+                --exact_shadow_entry_capacity_;
+                return true;
+            }
+            return false;
+        }
+
+        void compute_layout_or_abort()
+        {
+            storage_bytes_       = options_.storage_bytes;
+            subgroup_capacity_   = options_.subgroup_capacity;
+            diagnostic_capacity_ = is_auto_capacity(options_.diagnostic_capacity)
+                                       ? auto_diagnostic_capacity()
+                                       : options_.diagnostic_capacity;
+
+            exact_shadow_entry_capacity_ = is_auto_capacity(options_.exact_shadow_entry_capacity)
+                                               ? 0
+                                               : options_.exact_shadow_entry_capacity;
+            sampled_watchpoint_capacity_ = is_auto_capacity(options_.sampled_watchpoint_capacity)
+                                               ? 0
+                                               : options_.sampled_watchpoint_capacity;
+
+            std::size_t fixed_bytes = layout_byte_count();
+            if(fixed_bytes > storage_bytes_)
+            {
+                report_storage_too_small_and_abort(fixed_bytes);
             }
 
-            void release()
+            std::size_t remaining_bytes = storage_bytes_ - fixed_bytes;
+            if(options_.backend == backend_kind::sampled_watchpoint)
             {
-                if(device_storage_)
+                if(is_auto_capacity(options_.sampled_watchpoint_capacity))
                 {
-                    (void)hipFree(device_storage_);
-                    device_storage_ = nullptr;
+                    sampled_watchpoint_capacity_ = capacity_from_bytes(
+                        remaining_bytes, sizeof(uint64_t), "sampled_watchpoint");
                 }
-                access_records_                  = nullptr;
-                diagnostics_                     = nullptr;
-                coalesced_access_records_        = nullptr;
-                coalescing_access_records_       = nullptr;
-                coalescing_group_records_        = nullptr;
-                subgroup_states_                 = nullptr;
-                access_count_                    = nullptr;
-                epoch_access_count_              = nullptr;
-                diagnostic_count_                = nullptr;
-                simulated_barrier_arrival_count_ = nullptr;
-                coalesced_access_count_          = nullptr;
-                coalescing_access_count_         = nullptr;
-                epoch_coalescing_access_count_   = nullptr;
-                coalescing_fallback_count_       = nullptr;
-                coalescing_group_count_          = nullptr;
-                shadow_epoch_                    = nullptr;
-                exact_shadow_entries_            = nullptr;
-                sampled_watchpoints_             = nullptr;
+            }
+            else if(is_auto_capacity(options_.exact_shadow_entry_capacity))
+            {
+                exact_shadow_entry_capacity_
+                    = capacity_from_bytes(remaining_bytes, sizeof(uint64_t), "exact_shadow");
             }
 
-            host_context_options      options_;
-            bool                      diagnostics_consumed_              = true;
-            bool                      destructor_reports_                = true;
-            bool                      destructor_aborts_                 = true;
-            std::FILE*                diagnostic_stream_                 = stderr;
-            int                       last_diagnostic_count_             = 0;
-            std::size_t               storage_bytes_                     = 0;
-            std::size_t               layout_bytes_                      = 0;
-            int                       access_record_capacity_            = 0;
-            int                       coalesced_access_record_capacity_  = 0;
-            int                       coalescing_access_record_capacity_ = 0;
-            int                       coalescing_group_record_capacity_  = 0;
-            int                       exact_shadow_entry_capacity_       = 0;
-            int                       sampled_watchpoint_capacity_       = 0;
-            int                       diagnostic_capacity_               = 0;
-            int                       subgroup_capacity_                 = 0;
-            uint64_t                  generation_                        = 1;
-            unsigned char*            device_storage_                    = nullptr;
-            access_record*            access_records_                    = nullptr;
-            coalesced_access_record*  coalesced_access_records_          = nullptr;
-            coalescing_access_record* coalescing_access_records_         = nullptr;
-            coalescing_group_record*  coalescing_group_records_          = nullptr;
-            diagnostic*               diagnostics_                       = nullptr;
-            subgroup_state*           subgroup_states_                   = nullptr;
-            int*                      access_count_                      = nullptr;
-            int*                      epoch_access_count_                = nullptr;
-            int*                      diagnostic_count_                  = nullptr;
-            int*                      simulated_barrier_arrival_count_   = nullptr;
-            int*                      coalesced_access_count_            = nullptr;
-            int*                      coalescing_access_count_           = nullptr;
-            int*                      epoch_coalescing_access_count_     = nullptr;
-            int*                      coalescing_fallback_count_         = nullptr;
-            int*                      coalescing_group_count_            = nullptr;
-            uint64_t*                 shadow_epoch_                      = nullptr;
-            uint64_t*                 exact_shadow_entries_              = nullptr;
-            uint64_t*                 sampled_watchpoints_               = nullptr;
-        };
-    } // namespace detail
+            while(layout_byte_count() > storage_bytes_ && shrink_one_auto_capacity())
+            {
+            }
 
-    using host_context = detail::host_context_impl<detail::host_context_traits>;
+            layout_bytes_ = layout_byte_count();
+            if(layout_bytes_ > storage_bytes_)
+            {
+                report_storage_too_small_and_abort(layout_bytes_);
+            }
+            if(diagnostic_capacity_ <= 0)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: host_context storage_bytes=%llu is too small for "
+                             "a positive diagnostic capacity\n",
+                             static_cast<unsigned long long>(storage_bytes_));
+                std::fflush(stderr);
+                std::abort();
+            }
+            if(options_.backend == backend_kind::sampled_watchpoint
+               && sampled_watchpoint_capacity_ <= 0)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: host_context sampled_watchpoint capacity must be "
+                             "positive for sampled backend\n");
+                std::fflush(stderr);
+                std::abort();
+            }
+            if(options_.backend == backend_kind::exact_shadow && exact_shadow_entry_capacity_ <= 0)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: host_context exact_shadow capacity must be positive "
+                             "for exact backend\n");
+                std::fflush(stderr);
+                std::abort();
+            }
+        }
 
-    template <typename HostContext>
-    inline void check_or_abort(HostContext& context, const char* file, int line)
+        void report_storage_too_small_and_abort(std::size_t required_bytes) const
+        {
+            std::fprintf(stderr,
+                         "hip-moi: host_context storage_bytes=%llu is too small; "
+                         "layout requires at least %llu bytes "
+                         "(exact_shadow=%d sampled_watchpoints=%d diagnostics=%d "
+                         "subgroups=%d)\n",
+                         static_cast<unsigned long long>(storage_bytes_),
+                         static_cast<unsigned long long>(required_bytes),
+                         exact_shadow_entry_capacity_,
+                         sampled_watchpoint_capacity_,
+                         diagnostic_capacity_,
+                         subgroup_capacity_);
+            std::fflush(stderr);
+            std::abort();
+        }
+
+        void allocate_or_abort()
+        {
+            compute_layout_or_abort();
+
+            void*      allocated = nullptr;
+            hipError_t status    = hipMalloc(&allocated, storage_bytes_);
+            if(status != hipSuccess)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: hipMalloc(host_context storage, %llu bytes) failed: %s\n",
+                             static_cast<unsigned long long>(storage_bytes_),
+                             hipGetErrorString(status));
+                std::fflush(stderr);
+                std::abort();
+            }
+            device_storage_ = static_cast<unsigned char*>(allocated);
+            assign_layout_slices();
+        }
+
+        void clear_device_metadata_or_abort()
+        {
+            hip_memset_or_abort(
+                diagnostics_, 0, diagnostic_capacity_ * sizeof(diagnostic), "diagnostics");
+            hip_memset_or_abort(subgroup_states_,
+                                0,
+                                subgroup_capacity_ * sizeof(subgroup_state),
+                                "subgroup_states");
+            hip_memset_or_abort(diagnostic_count_, 0, sizeof(int), "diagnostic_count");
+            hip_memset_or_abort(simulated_barrier_arrival_count_,
+                                0,
+                                sizeof(int),
+                                "simulated_barrier_arrival_count");
+            hip_memset_or_abort(exact_shadow_entries_,
+                                0,
+                                exact_shadow_entry_capacity_ * sizeof(uint64_t),
+                                "exact_shadow_entries");
+            hip_memset_or_abort(sampled_watchpoints_,
+                                0,
+                                sampled_watchpoint_capacity_ * sizeof(uint64_t),
+                                "sampled_watchpoints");
+        }
+
+        static void hip_memset_or_abort(void* ptr, int value, size_t byte_count, const char* name)
+        {
+            if(byte_count == 0)
+            {
+                return;
+            }
+
+            hipError_t status = hipMemset(ptr, value, byte_count);
+            if(status != hipSuccess)
+            {
+                std::fprintf(stderr,
+                             "hip-moi: hipMemset(%s, %llu bytes) failed: %s\n",
+                             name,
+                             static_cast<unsigned long long>(byte_count),
+                             hipGetErrorString(status));
+                std::fflush(stderr);
+                std::abort();
+            }
+        }
+
+        static const char* diagnostic_kind_name(uint32_t kind)
+        {
+            switch(static_cast<diagnostic_kind>(kind))
+            {
+            case diagnostic_kind::none:
+                return "none";
+            case diagnostic_kind::access_conflict:
+                return "access_conflict";
+            case diagnostic_kind::metadata_full:
+                return "metadata_full";
+            case diagnostic_kind::barrier_divergence:
+                return "barrier_divergence";
+            }
+            return "unknown";
+        }
+
+        static void report_hip_error(std::FILE* stream, const char* operation, hipError_t status)
+        {
+            if(!stream)
+            {
+                return;
+            }
+            std::fprintf(stream, "hip-moi: %s failed: %s\n", operation, hipGetErrorString(status));
+            std::fflush(stream);
+        }
+
+        static void report_diagnostics(std::FILE*        stream,
+                                       const diagnostic* diagnostics,
+                                       int               stored_count,
+                                       int               diagnostic_count)
+        {
+            if(!stream)
+            {
+                return;
+            }
+
+            std::fprintf(stream, "hip-moi: %d diagnostic(s)\n", diagnostic_count);
+            for(int i = 0; i < stored_count; ++i)
+            {
+                const diagnostic& diagnostic_record = diagnostics[i];
+                report_diagnostic(
+                    stream, i, diagnostic_record, diagnostic_kind_name(diagnostic_record.kind));
+            }
+            if(stored_count < diagnostic_count)
+            {
+                std::fprintf(stream,
+                             "hip-moi: diagnostic buffer stored %d of %d diagnostic(s)\n",
+                             stored_count,
+                             diagnostic_count);
+            }
+            std::fflush(stream);
+        }
+
+        static void report_diagnostic(std::FILE*        stream,
+                                      int               index,
+                                      const diagnostic& diagnostic_record,
+                                      const char*       kind_name)
+        {
+            if(static_cast<diagnostic_kind>(diagnostic_record.kind)
+               == diagnostic_kind::barrier_divergence)
+            {
+                std::fprintf(stream,
+                             "hip-moi diagnostic %d: kind=%s epoch=%u "
+                             "expected_threads=%u observed_threads=%u "
+                             "site_id=0x%llx\n",
+                             index,
+                             kind_name,
+                             diagnostic_record.epoch,
+                             diagnostic_record.expected_thread_count,
+                             diagnostic_record.observed_thread_count,
+                             static_cast<unsigned long long>(diagnostic_record.first_site_id));
+                return;
+            }
+
+            std::fprintf(stream,
+                         "hip-moi diagnostic %d: kind=%s epoch=%u "
+                         "first_subgroup=%u second_subgroup=%u "
+                         "first_addr=0x%llx second_addr=0x%llx "
+                         "first_size=%u second_size=%u "
+                         "first_site_id=0x%llx second_site_id=0x%llx\n",
+                         index,
+                         kind_name,
+                         diagnostic_record.epoch,
+                         diagnostic_record.first_subgroup_id,
+                         diagnostic_record.second_subgroup_id,
+                         static_cast<unsigned long long>(diagnostic_record.first_addr),
+                         static_cast<unsigned long long>(diagnostic_record.second_addr),
+                         diagnostic_record.first_size,
+                         diagnostic_record.second_size,
+                         static_cast<unsigned long long>(diagnostic_record.first_site_id),
+                         static_cast<unsigned long long>(diagnostic_record.second_site_id));
+        }
+
+        void release()
+        {
+            if(device_storage_)
+            {
+                (void)hipFree(device_storage_);
+                device_storage_ = nullptr;
+            }
+            diagnostics_                     = nullptr;
+            subgroup_states_                 = nullptr;
+            diagnostic_count_                = nullptr;
+            simulated_barrier_arrival_count_ = nullptr;
+            exact_shadow_entries_            = nullptr;
+            sampled_watchpoints_             = nullptr;
+        }
+
+        host_context_options options_;
+        bool                 diagnostics_consumed_            = true;
+        bool                 destructor_reports_              = true;
+        bool                 destructor_aborts_               = true;
+        std::FILE*           diagnostic_stream_               = stderr;
+        int                  last_diagnostic_count_           = 0;
+        std::size_t          storage_bytes_                   = 0;
+        std::size_t          layout_bytes_                    = 0;
+        int                  exact_shadow_entry_capacity_     = 0;
+        int                  sampled_watchpoint_capacity_     = 0;
+        int                  diagnostic_capacity_             = 0;
+        int                  subgroup_capacity_               = 0;
+        uint64_t             generation_                      = 1;
+        unsigned char*       device_storage_                  = nullptr;
+        diagnostic*          diagnostics_                     = nullptr;
+        subgroup_state*      subgroup_states_                 = nullptr;
+        int*                 diagnostic_count_                = nullptr;
+        int*                 simulated_barrier_arrival_count_ = nullptr;
+        uint64_t*            exact_shadow_entries_            = nullptr;
+        uint64_t*            sampled_watchpoints_             = nullptr;
+    };
+
+    inline void check_or_abort(host_context& context, const char* file, int line)
     {
         if(context.check(stderr))
         {

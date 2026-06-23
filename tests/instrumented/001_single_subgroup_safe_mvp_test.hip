@@ -31,8 +31,8 @@ namespace
 
         if(threadIdx.x == 0)
         {
-            ctx.lds_store(&value, 123);
-            out[0] = ctx.lds_load(&value);
+            ctx.lds_store_at(&value, 123, /*lds_byte_offset=*/0);
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
             out[1] = ctx.error_count();
         }
     }
@@ -40,7 +40,10 @@ namespace
     TEST(HipMoiInstrumentedSafeMvp, SameThreadStoreLoad)
     {
         hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate(16, 4, 1));
+        ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
+            /*diagnostic_capacity=*/4,
+            /*subgroup_capacity=*/1,
+            /*exact_shadow_entry_capacity=*/1));
 
         int* device_output = nullptr;
         HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, 2 * sizeof(int)));
@@ -68,15 +71,9 @@ namespace
                                           storage.diagnostic_count_device(),
                                           sizeof(diagnostic_count),
                                           hipMemcpyDeviceToHost));
-        int access_count = -1;
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&access_count,
-                                          storage.access_count_device(),
-                                          sizeof(access_count),
-                                          hipMemcpyDeviceToHost));
 
         EXPECT_EQ(output[0], 123);
         EXPECT_EQ(output[1], 0);
-        EXPECT_EQ(access_count, 2);
         EXPECT_EQ(diagnostic_count, 0);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));

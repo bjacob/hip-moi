@@ -51,17 +51,23 @@ removed. `hip_moi::context` is subgroup-scoped. It reports same-epoch LDS
 conflicts between different subgroups in the same workgroup. It intentionally
 does not report conflicts whose participants are wholly inside one subgroup.
 
-The current implementation still uses the earlier record/log/scan design:
+The legacy record/log/scan design has been removed from the active API and test
+suite. The implementation now has two explicit-offset subgroup-level paths:
 
-* ordinary accesses append `access_record` metadata,
-* site-id coalescing can record lane-carrying proof metadata,
-* epoch close scans records and emits deterministic diagnostics,
-* storage is partitioned into typed record buffers.
+* `backend_kind::exact_shadow` performs immediate exact shadow-table checks,
+* `backend_kind::sampled_watchpoint` performs selected-lane watchpoint checks.
 
-That design was useful to establish the API and test semantics, but it is not
-the long-term performance path. It performs too many global metadata writes and
-creates too much scan work. It should become a reference/debug backend while the
-main path moves to a Loom-inspired online detector.
+The active device access API requires a caller-supplied LDS byte offset:
+
+```c++
+ctx.lds_store_at(ptr, value, /*lds_byte_offset=*/offset, site);
+ctx.lds_load_at(ptr, /*lds_byte_offset=*/offset, site);
+```
+
+This is closer to Jakub's HIP prototype and to what compiler or assembly-level
+instrumentation would naturally know. Pointer-only `lds_load` / `lds_store`
+helpers were deleted because preserving them kept the old backend alive and
+made benchmark work measure the wrong thing.
 
 ## Current Detector Contract
 
@@ -134,9 +140,10 @@ The main hot-path operations should be:
 For subgroup-level hip-moi, the encoded owner should be the subgroup id rather
 than the exact thread id. Same-subgroup conflicts remain out of scope.
 
-The current access-record and coalescing-record data structures may remain as a
-debug/reference backend while the new path is brought up. They should not be
-used by the performance benchmark once the Loom-like backend exists.
+The old access-record and coalescing-record data structures are no longer part
+of the active implementation. If a future debug/reference backend is useful, it
+should be reintroduced deliberately instead of accidentally shaping the hot
+path.
 
 ## Exact Shadow Path
 
@@ -194,67 +201,47 @@ This path deliberately permits false negatives from sampling, limited probes, or
 table overwrites. It must not create false positives for the represented
 dword-cell ranges.
 
-## Source Site IDs and Coalescing
+## Source Site IDs and Regular Access Patterns
 
-The default `site_id` remains zero, meaning no site-specific optimization:
-
-```c++
-ctx.lds_store(&lds[index], value);
-```
-
-A nonzero site id opts a static access site into possible optimization:
+`site_id` is now a compact static-site token carried into shadow/watchpoint
+metadata and diagnostics:
 
 ```c++
-ctx.lds_store(&lds[index], value, HIP_MOI_SITE_ID());
+ctx.lds_store_at(&lds[index], value, /*lds_byte_offset=*/offset, HIP_MOI_SITE_ID());
 ```
 
-The earlier coalescing implementation proved that regular lane-to-address
-patterns can be recognized, but it did so by first writing one lane-carrying
-record per participating lane. That defeats the optimization goal.
+A nonzero site id does not currently enable a separate coalescing data
+structure. The lane-record coalescing implementation was removed because it
+still wrote per-lane metadata before proving anything, which defeated the
+optimization goal.
 
-The new coalescing target is online:
-
-* at an opted-in site, use subgroup intrinsics to inspect lane-local offsets,
-* prove common regular patterns directly,
-* publish one subgroup-level range when the proof succeeds,
-* fall back to sampled per-lane watchpoints or exact shadow checks when the
-  proof fails.
-
-The first regular patterns to support are:
-
-* contiguous per-lane accesses,
-* fixed-stride per-lane accesses,
-* descending fixed-stride accesses,
-* vector LDS accesses used by the RDNA4 WMMA benchmark.
+The underlying idea remains useful as a possible future direction: recognize
+regular lane-to-address patterns online and publish/check one subgroup-level
+range. That work should be Loom-inspired and should avoid collecting per-lane
+records in global memory. Candidate patterns include contiguous per-lane
+accesses, fixed-stride accesses, descending fixed-stride accesses, and the vector
+LDS accesses used by the RDNA4 WMMA benchmark.
 
 Dynamic instance identity is out of scope for now. If a static site has dynamic
-behavior that the online proof cannot validate, it should fall back
-conservatively.
+behavior that an online proof cannot validate, it should fall back
+conservatively to the selected shadow/watchpoint backend.
 
 ## LDS Offset API
 
 Real Loom gets LDS byte offsets from compiler lowering. A HIP library usually
 only sees pointers. Jakub's HIP helpers pass byte offsets explicitly, which is
-the right short-term shape for benchmark-driven work.
+the right shape for benchmark-driven work.
 
-Keep the current high-level API:
-
-```c++
-ctx.lds_store(ptr, value, site);
-ctx.lds_load(ptr, site);
-```
-
-Add explicit-offset overloads for the Loom-like fast path:
+The active API is explicit-offset only:
 
 ```c++
 ctx.lds_store_at(ptr, value, /*lds_byte_offset=*/offset, site);
 ctx.lds_load_at(ptr, /*lds_byte_offset=*/offset, site);
 ```
 
-The explicit-offset overloads are the benchmark path. Later, we can investigate
-whether `lds_load(ptr, site)` and `lds_store(ptr, value, site)` can derive LDS
-offsets reliably enough on HIP/Clang, but performance work should not wait on
-that question.
+Later, we can investigate whether HIP/Clang exposes a reliable way to derive
+LDS offsets from pointers, but performance work should not wait on that
+question.
 
 ## Context Storage
 
@@ -267,12 +254,18 @@ than access-record buffers:
 * one or more dispatch/generation slots,
 * per-workgroup epoch headers,
 * per-workgroup exact shadow entries or sampled watchpoint entries,
-* diagnostics and diagnostic counters,
-* optional debug/reference buffers.
+* diagnostics and diagnostic counters.
 
-Typed capacities for access records and coalescing records should be demoted to
-debug/reference backend options. The main backend should expose higher-level
-knobs:
+The current user-facing knobs are deliberately small:
+
+* `storage_bytes`,
+* selected `backend_kind`,
+* exact-shadow entry capacity override,
+* sampled-watchpoint capacity override,
+* diagnostic capacity,
+* subgroup capacity.
+
+Future backend tuning may add higher-level knobs:
 
 * LDS granule shift,
 * local memory byte span to shadow,
@@ -326,7 +319,8 @@ derived from `rdna4_matmul/rdna4_matmul.hip`. It compares:
 
 * noop,
 * sampled Loom,
-* hip-moi exact shadow through explicit LDS-offset APIs.
+* hip-moi exact shadow through explicit LDS-offset APIs,
+* hip-moi sampled watchpoints through explicit LDS-offset APIs.
 
 The current go-to shapes are:
 
@@ -343,12 +337,10 @@ Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
 commit. For doc-only commits, either append a fresh run or explicitly note that
 the commit is performance-equivalent to the previous logged entry.
 
-The current hip-moi row now exercises the exact-shadow offset path, so it has
-exited the old multi-millisecond record/log/scan regime on the 2-wave and 4-wave
-shapes. It remains much slower than sampled Loom because every instrumented LDS
-access still performs exact shadow traffic; the next benchmark goal is to add a
-sampled-Loom-style watchpoint backend and compare that directly to Jakub's
-sampled Loom row.
+The current hip-moi rows exercise the explicit-offset exact-shadow and
+sampled-watchpoint paths. The sampled path is not yet competitive with Jakub's
+sampled Loom row; the next benchmark goal is to shrink hot-path helper work,
+VGPR pressure, and selected-lane overhead.
 
 ## Test Corpus
 
@@ -359,17 +351,20 @@ Kept:
 
 * one single-subgroup diagnostic-free smoke test,
 * host API and destructor behavior tests,
-* core multi-subgroup conflict tests,
-* RDNA4 multi-subgroup WMMA tests in data-tiled and row-major layouts,
-* source-site id tests,
-* coalescing proof and coalesced-conflict tests,
-* simulated hard-synchronization diagnostics.
+* source-site id diagnostic tests,
+* simulated hard-synchronization diagnostics,
+* compact shadow/watchpoint ABI tests,
+* explicit LDS-offset API tests,
+* exact-shadow backend tests,
+* sampled-watchpoint backend tests.
 
 Removed:
 
 * the old single-subgroup thread-level ladder,
 * thread-level mirrors of multi-subgroup tests,
-* single-subgroup RDNA4 tests whose only role was thread-level coverage.
+* single-subgroup RDNA4 tests whose only role was thread-level coverage,
+* legacy record/log multi-subgroup tests,
+* legacy coalescing proof and coalesced-conflict tests.
 
 New tests should follow the implementation path:
 
@@ -379,8 +374,8 @@ New tests should follow the implementation path:
 4. sampled watchpoint positive and negative tests,
 5. sampling false-negative documentation tests where deterministic behavior can
    be forced by knobs,
-6. site-id coalescing tests for online regular-pattern proofs,
-7. RDNA4 WMMA benchmark-shaped tests using the same helper style as Jakub.
+6. RDNA4 WMMA benchmark-shaped tests using the same helper style as Jakub,
+7. online regular-pattern optimization tests if that direction becomes active.
 
 Reference tests remain useful as uninstrumented kernels that compile and run,
 especially as a source of later multi-subgroup or RDNA4 shapes.
@@ -407,13 +402,10 @@ No benchmark win is expected from this session.
 
 Status: implemented. `host_context` now allocates shadow epoch storage, exact
 shadow entries, sampled watchpoints, and a generation value inside the existing
-byte-budget layout while leaving the record/log/scan backend active.
+byte-budget layout. The old access-record/coalescing storage has been removed.
 
 Teach `host_context` to allocate a shadow/watchpoint backend layout from
-`storage_bytes`.
-
-Keep existing record buffers available for the debug/reference backend, but make
-the new storage layout able to represent:
+`storage_bytes`. The storage layout represents:
 
 * per-workgroup epoch headers,
 * exact shadow entries or sampled watchpoints,
@@ -423,16 +415,14 @@ the new storage layout able to represent:
 ### Session 3: Explicit LDS-Offset APIs
 
 Status: implemented. `context` now provides `lds_load_at` and `lds_store_at`
-overloads that accept an explicit LDS byte offset. The extracted
+helpers that accept an explicit LDS byte offset. The extracted
 sanitizer-strategy benchmark now routes its hip-moi row through these overloads,
 so the go-to benchmark measures offset-aware hip-moi instrumentation rather than
-the older implicit-pointer path.
+the older implicit-pointer path. Pointer-only `lds_load` and `lds_store` were
+deleted during cleanup.
 
-Add `lds_load_at` and `lds_store_at` overloads. Initially they may route through
-the current backend for compatibility. Then wire them to the exact shadow path.
-
-Update one or two focused tests and the extracted benchmark glue to pass
-explicit LDS byte offsets at the hip-moi helper sites.
+Update focused tests, tutorials, and benchmark glue to pass explicit LDS byte
+offsets at the hip-moi helper sites.
 
 ### Session 4: Exact Shadow Backend
 
@@ -440,7 +430,7 @@ Status: implemented for explicit-offset accesses. `lds_load_at` and
 `lds_store_at` now use the exact shadow table when exact-shadow storage is
 present, emit immediate diagnostics for same-epoch cross-subgroup conflicts, and
 report metadata saturation for out-of-range LDS offsets. Calls without explicit
-LDS offsets still use the existing record/log backend.
+LDS offsets no longer exist in the public API.
 
 Implement the exact subgroup-level shadow path:
 
@@ -477,18 +467,15 @@ Implement the sampled-Loom-style backend:
 
 This is the first session expected to materially improve benchmark numbers.
 
-### Session 6: Online Site-ID Coalescing
+### Session 6: Legacy Cleanup
 
-Replace lane-record coalescing on the benchmark path with online subgroup
-coalescing:
+Status: implemented. The record/log backend, lane-record coalescing data
+structures, pointer-only LDS APIs, and their stale tests/docs have been removed.
+The remaining implementation is the explicit-offset shadow/watchpoint path.
 
-* prove contiguous and fixed-stride patterns with subgroup intrinsics,
-* publish one subgroup-level range when proof succeeds,
-* fall back when proof fails,
-* keep the old record-based coalescing path only as debug/reference support.
-
-This is the main path toward making hip-moi competitive with Jakub's sampled
-Loom row.
+This cleanup is meant to make the next performance sessions honest: if a
+benchmark moves, it is because the Loom-style path moved, not because a legacy
+fallback accidentally absorbed the work.
 
 ### Session 7: Benchmark-Driven Tightening
 
@@ -505,10 +492,17 @@ Inspect generated code when benchmark movement is surprising. The main danger is
 spilling caused by instrumentation VGPR usage; global-memory traffic from spills
 can dominate the actual sanitizer work.
 
+### Possible Later Work: Online Regular-Pattern Summaries
+
+If benchmark analysis shows enough repeated regular LDS shapes to justify it,
+revisit online subgroup regular-pattern detection. This should use subgroup
+intrinsics to prove contiguous or fixed-stride access ranges without first
+writing per-lane records to global memory.
+
 ## Near-Term Non-Goals
 
 * Reintroducing thread-level same-subgroup diagnostics.
-* Making the record/log/scan backend competitive.
+* Reintroducing the record/log/scan backend as a performance path.
 * Diagnosing naked fences without atomics. Fence-only reasoning does not create
   synchronizes-with edges; any future fence work must be paired with atomics.
 * Preserving the original race. The value proposition is deterministic

@@ -18,18 +18,14 @@ Current files:
 * `001_single_subgroup_safe_mvp_test.hip`: one diagnostic-free API smoke test.
 * `003_host_context_test.hip`: `hip_moi::host_context`, `HIP_MOI_CHECK`,
   destructor reporting/aborting, byte-budget allocation, and diagnostic text.
-* `017_context_multisubgroup_test.hip`: core cross-subgroup conflict and epoch
-  behavior.
-* `018_rdna4_multisubgroup_wmma_data_tiled_test.hip`: RDNA4 WMMA data-tiled
-  multi-subgroup cases.
-* `019_rdna4_multisubgroup_wmma_row_major_test.hip`: RDNA4 WMMA row-major
-  multi-subgroup cases.
-* `020_site_id_test.hip`: source-site ids in access records and diagnostics.
-* `022_context_coalescing_test.hip`: coalescing access logs and summaries.
-* `023_context_coalesced_conflict_test.hip`: conflict detection using coalesced
-  summaries.
+* `020_site_id_test.hip`: source-site ids in diagnostics.
 * `024_hard_synchronization_negative_test.hip`: non-hanging simulated barrier
   divergence diagnostics.
+* `025_shadow_abi_test.hip`: host/device shadow-packing ABI checks.
+* `026_lds_offset_api_test.hip`: explicit LDS byte-offset instrumentation.
+* `027_exact_shadow_backend_test.hip`: deterministic exact-shadow conflict
+  diagnostics.
+* `028_sampled_watchpoint_backend_test.hip`: sampled watchpoint diagnostics.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the
