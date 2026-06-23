@@ -53,13 +53,10 @@ namespace
         make_fast_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::sampled_watchpoint_context::config cfg{
-            /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
-            /*subgroup_count=*/kSubgroupCount,
         };
         hip_moi::sampled_watchpoint_context::storage_ref fast_storage{
-            storage.subgroup_states,
-            storage.subgroup_capacity,
+            storage.subgroup_states ? &storage.subgroup_states[0].epoch : nullptr,
             storage.sampled_watchpoints,
             storage.sampled_watchpoint_capacity,
             storage.generation,

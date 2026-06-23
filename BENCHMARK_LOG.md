@@ -960,3 +960,67 @@ sampled Loom under the fair publish-only sampled knobs. The win comes from
 removing the full context's cold state from the hot row, which nearly eliminates
 the spill/scratch gap. The remaining runtime sampled row is intentionally still
 large because it preserves runtime knobs and reporting support.
+
+## 2026-06-23 after workgroup epoch sampled view
+
+hip-moi commit measured: this commit (`Use workgroup epoch in sampled watchpoint context`)
+sanitizer-strategy benchmark commit: `653f3b2`
+
+This pass changed `hip_moi::sampled_watchpoint_context` from subgroup-epoch
+array storage to a single `workgroup_epoch` pointer. The focused benchmark
+passes `&subgroup_states[0].epoch` to the sampled view, so the host storage
+layout does not need to change, but the publish-only hot context no longer
+carries subgroup-state capacity or loops over subgroup epochs.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.86 TFLOP/s   62.2% of 191 TFLOP/s  total= 101.754 ms  iters=88  warmup= 100.130 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.66 ms     15.86 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.975 ms  iters=12  warmup= 104.234 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      5.35 ms     25.70 TFLOP/s   13.5% of 191 TFLOP/s  total= 101.592 ms  iters=19  warmup= 101.695 ms  warmup_iters=19
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.78 TFLOP/s   62.2% of 191 TFLOP/s  total= 100.667 ms  iters=87  warmup= 102.955 ms  warmup_iters=89
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.59 ms     16.00 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.057 ms  iters=12  warmup= 103.467 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      5.27 ms     26.06 TFLOP/s   13.6% of 191 TFLOP/s  total= 100.193 ms  iters=19  warmup= 100.855 ms  warmup_iters=19
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                100     43    256           32   0x11284
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  delay s_nop
+sampled Loom             11752            75             72          82
+hip-moi static sampled   12909            20             20          83
+```
+
+Takeaway: the single workgroup epoch is measurable. The publish-only sampled
+view is now substantially below sampled Loom on this benchmark, with much lower
+private memory and scratch traffic. Remaining obvious benchmark-specific work is
+capacity-one slot specialization and access-size templating.

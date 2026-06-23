@@ -412,8 +412,8 @@ performance-sensitive code changed. The current focused baseline at
 
 ```text
 noop                  1.16 ms
-sampled Loom          8.63 ms
-hip-moi sampled       7.35 ms
+sampled Loom          8.59 ms
+hip-moi sampled       5.27 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -694,6 +694,12 @@ Production sampled roadmap:
    use the Loom-shaped sequence: barrier, one workgroup epoch increment by one
    thread, barrier. Keep subgroup-specific epochs out of the hot sampled path
    unless a later benchmark requires them.
+   Status: implemented in the sampled publish-only view as a single
+   `workgroup_epoch` pointer. Existing host allocation is reused by passing
+   `&subgroup_states[0].epoch` to the view, but the hot context no longer
+   carries subgroup-state capacity or loops over subgroup epochs. The focused
+   production hip-moi sampled row dropped again from roughly `7.35 ms` to
+   `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
 4. Specialize hot-path constants that are fixed in the production row:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,

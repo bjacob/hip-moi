@@ -19,15 +19,12 @@ namespace hip_moi
     public:
         struct config
         {
-            int thread_count;
             int threads_per_subgroup;
-            int subgroup_count;
         };
 
         struct storage_ref
         {
-            subgroup_state* subgroup_states             = nullptr;
-            int             subgroup_capacity           = 0;
+            uint32_t*       workgroup_epoch             = nullptr;
             uint64_t*       sampled_watchpoints         = nullptr;
             int             sampled_watchpoint_capacity = 0;
             uint64_t        generation                  = 0;
@@ -43,10 +40,9 @@ namespace hip_moi
         {
             if(thread_id() == 0)
             {
-                int subgroup_count = stored_subgroup_count();
-                for(int i = 0; i < subgroup_count; ++i)
+                if(storage_.workgroup_epoch)
                 {
-                    storage_.subgroup_states[i].epoch = 0;
+                    *storage_.workgroup_epoch = 0;
                 }
                 __threadfence();
             }
@@ -95,8 +91,7 @@ namespace hip_moi
                 return 0;
             }
             uint32_t subgroup = thread_id() / static_cast<uint32_t>(cfg_.threads_per_subgroup);
-            uint32_t count    = detail::configured_subgroup_count(cfg_);
-            return subgroup < count ? subgroup : count - 1u;
+            return subgroup;
         }
 
         __device__ uint32_t lane_in_subgroup() const
@@ -115,19 +110,13 @@ namespace hip_moi
                 + gridDim.x * (blockIdx.y + gridDim.y * static_cast<uint32_t>(blockIdx.z)));
         }
 
-        __device__ int stored_subgroup_count() const
-        {
-            return detail::stored_subgroup_count(storage_, cfg_);
-        }
-
         __device__ void advance_epoch() const
         {
             if(thread_id() == 0)
             {
-                int subgroup_count = stored_subgroup_count();
-                for(int i = 0; i < subgroup_count; ++i)
+                if(storage_.workgroup_epoch)
                 {
-                    ++storage_.subgroup_states[i].epoch;
+                    ++*storage_.workgroup_epoch;
                 }
                 __threadfence();
             }
@@ -135,7 +124,7 @@ namespace hip_moi
 
         __device__ uint32_t current_epoch() const
         {
-            return detail::current_epoch(storage_, subgroup_id());
+            return storage_.workgroup_epoch ? *storage_.workgroup_epoch : 0;
         }
 
         __device__ uint32_t sampled_site_seed(site_id site) const
