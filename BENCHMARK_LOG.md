@@ -1153,3 +1153,65 @@ Takeaway: replacing device-wide fences with atomic epoch updates improves the
 production benchmark despite a modest spill increase. Keep this unless a later
 correctness review shows that sampled fast-path epoch ordering requires a
 stronger fence than the Loom-shaped atomic-plus-barriers sequence.
+
+## 2026-06-23 after local sampled epoch tracking
+
+hip-moi commit measured: this commit (`Track sampled epoch locally in fast path`)
+sanitizer-strategy benchmark commit: `f1ee1fe`
+
+This pass kept the Loom-shaped global atomic epoch update but stopped reading
+the epoch word from global memory at each sampled access. Each thread now tracks
+its local epoch in the sampled hot-path context and increments it after
+`ctx.syncthreads()`.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.46 TFLOP/s   62.0% of 191 TFLOP/s  total= 102.102 ms  iters=88  warmup= 100.933 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.61 ms     15.96 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.323 ms  iters=12  warmup= 103.795 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      3.78 ms     36.31 TFLOP/s   19.0% of 191 TFLOP/s  total= 102.192 ms  iters=27  warmup= 103.606 ms  warmup_iters=27
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.19 TFLOP/s   61.9% of 191 TFLOP/s  total= 101.168 ms  iters=87  warmup= 101.396 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.59 ms     16.00 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.101 ms  iters=12  warmup= 104.436 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      3.81 ms     36.06 TFLOP/s   18.9% of 191 TFLOP/s  total= 102.907 ms  iters=27  warmup= 103.530 ms  warmup_iters=27
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                 88     41    256           25   0x0a204
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  flat_atomic  global_atomic  delay s_nop
+sampled Loom             12462            75             72            0             88          82
+hip-moi static sampled    8272            19             19           89              0          83
+```
+
+Takeaway: local epoch tracking is a larger win than the prior fence removal.
+It avoids a global epoch load on every sampled access while preserving the
+global epoch word for the Loom-shaped barrier protocol.

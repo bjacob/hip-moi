@@ -33,11 +33,13 @@ namespace hip_moi
         __device__ sampled_watchpoint_context(storage_ref storage, config cfg)
             : storage_(storage)
             , cfg_(cfg)
+            , epoch_(0)
         {
         }
 
         __device__ void init_workgroup()
         {
+            epoch_ = 0;
             if(thread_id() == 0)
             {
                 if(storage_.workgroup_epoch)
@@ -52,6 +54,7 @@ namespace hip_moi
         {
             __syncthreads();
             advance_epoch();
+            ++epoch_;
             __syncthreads();
         }
 
@@ -124,7 +127,7 @@ namespace hip_moi
 
         __device__ uint32_t current_epoch() const
         {
-            return storage_.workgroup_epoch ? *storage_.workgroup_epoch : 0;
+            return epoch_;
         }
 
         __device__ uint32_t sampled_site_seed(site_id site) const
@@ -269,6 +272,9 @@ namespace hip_moi
 
         storage_ref storage_;
         config      cfg_;
+        // Per-thread copy of the workgroup epoch; avoids a global load at each
+        // sampled access site in the publish-only fast path.
+        uint32_t epoch_;
     };
 } // namespace hip_moi
 

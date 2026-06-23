@@ -416,7 +416,7 @@ performance-sensitive code changed. The current focused baseline at
 ```text
 noop                  1.16 ms
 sampled Loom          8.59 ms
-hip-moi sampled       4.42 ms
+hip-moi sampled       3.81 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -710,6 +710,11 @@ Production sampled roadmap:
    rose from 68 to 88 bytes and VGPR spills from 16 to 25. The win appears to
    come from removing device-wide fences from the barrier path, not from smaller
    generated code.
+   The sampled view then stopped reloading the epoch from global memory at each
+   sampled access. Each thread now keeps a local epoch copy and increments it
+   after the instrumented barrier while thread 0 still updates the global epoch
+   word. That moved the focused production row again to roughly `3.81 ms` and
+   reduced static sampled code size to `0x0a204`.
 4. Specialize hot-path constants that are fixed in the production row:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,
