@@ -29,6 +29,8 @@ namespace
         std::exit(EXIT_FAILURE);
     }
 
+    // Allocate enough context storage for one workgroup with two subgroups and
+    // the diagnostic metadata needed by HIP_MOI_CHECK.
     hip_moi::host_context_options small_context_options()
     {
         hip_moi::host_context_options options;
@@ -37,6 +39,7 @@ namespace
         return options;
     }
 
+    // Plain HIP version: without a barrier, this write/read pair is unordered.
     [[maybe_unused]] __global__ void plain_cross_subgroup_race_kernel(int* out)
     {
         __shared__ int value;
@@ -51,11 +54,15 @@ namespace
         }
     }
 
+    // General context version: this is the user-facing diagnostic path, not the
+    // faster publish-only sampled-watchpoint path shown in 006.
     __global__ void cross_subgroup_race_kernel(
         int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
+        // Thread 0 and thread 32 are representatives of two different
+        // subgroups in this 64-thread workgroup.
         hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
@@ -67,12 +74,15 @@ namespace
 
         if(threadIdx.x == 0)
         {
+            // Both operations touch the same shared scalar at LDS byte offset 0.
             ctx.lds_store_at(&value, 123, /*lds_byte_offset=*/0);
         }
         if(threadIdx.x == kThreadsPerSubgroup)
         {
             out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
         }
+        // There is no barrier, so finish() closes the kernel's final epoch and
+        // makes the conflict visible to the host.
         ctx.finish();
     }
 } // namespace
@@ -97,6 +107,8 @@ int main()
                        moi.device_ref());
     check_hip(hipGetLastError(), "hipGetLastError");
 
+    // The explicit host check reports the diagnostic and aborts. This is the
+    // same failure the destructor would catch if left unconsumed.
     HIP_MOI_CHECK(moi);
 
     std::fprintf(stderr, "expected HIP_MOI_CHECK to abort\n");

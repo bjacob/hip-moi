@@ -37,6 +37,8 @@ namespace
         std::exit(EXIT_FAILURE);
     }
 
+    // Small integer inputs make the f16->f32 WMMA result exactly comparable to
+    // the host reference, avoiding tolerance-based checks in the tutorial.
     __host__ __device__ int a_value(int m, int k)
     {
         return ((2 * m + 3 * k) % 5) - 2;
@@ -47,6 +49,9 @@ namespace
         return ((1 + 3 * n + k) % 5) - 2;
     }
 
+    // RDNA4 maps each lane's f16x8 fragment elements to K coordinates in a
+    // fixed pattern. The tutorial uses that mapping to pack A/B inputs exactly
+    // as the WMMA intrinsic expects them.
     __host__ __device__ int rdna4_wmma_f16_k(int lane, int idx)
     {
         int reg  = idx >> 1;
@@ -54,16 +59,22 @@ namespace
         return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
     }
 
+    // Each lane receives eight accumulator elements. This maps a lane-local
+    // accumulator element back to the matrix row it represents.
     __host__ __device__ int rdna4_wmma_acc_m(int lane, int elem)
     {
         return elem + 8 * (lane >> 4);
     }
 
+    // Data-tiled layout stores one vector fragment per lane contiguously. Lane
+    // i therefore starts at i * kFragmentElements.
     __host__ __device__ int data_tiled_fragment_offset(int lane, int elem)
     {
         return lane * kFragmentElements + elem;
     }
 
+    // The matmul uses one 32-thread subgroup, so hip-moi only needs one
+    // subgroup slot. The storage budget is intentionally small for the tutorial.
     hip_moi::host_context_options context_options()
     {
         hip_moi::host_context_options options;
@@ -72,6 +83,8 @@ namespace
         return options;
     }
 
+    // Prepare host inputs already packed in the data-tiled per-lane layout that
+    // load_global_fragment reads with one f16x8 vector load.
     void fill_data_tiled_inputs(_Float16* a, _Float16* b)
     {
         for(int lane = 0; lane < kThreadCount; ++lane)
@@ -98,6 +111,8 @@ namespace
         return static_cast<float>(acc);
     }
 
+    // The kernel stores C in the same data-tiled per-lane layout, so validation
+    // walks lane fragments rather than a conventional row-major matrix.
     bool check_reference_output(const float* output, const char* label)
     {
         for(int lane = 0; lane < kThreadCount; ++lane)
@@ -124,16 +139,21 @@ namespace
         return true;
     }
 
+    // One lane owns one packed f16x8 fragment in global memory.
     __device__ f16x8_t load_global_fragment(const _Float16* global_fragments, int lane)
     {
         return reinterpret_cast<const f16x8_t*>(global_fragments)[lane];
     }
 
+    // Store the lane's f32x8 accumulator fragment with the same data-tiled
+    // vector layout used by the input fragments.
     __device__ void store_global_fragment(float* global_fragments, int lane, f32x8_t fragment)
     {
         reinterpret_cast<f32x8_t*>(global_fragments)[lane] = fragment;
     }
 
+    // Plain HIP/RDNA4 version: stage data-tiled A/B fragments through LDS,
+    // synchronize, then execute one WMMA instruction per lane.
     __global__ void plain_data_tiled_wmma_kernel(const _Float16* a_global,
                                                  const _Float16* b_global,
                                                  float*          c_global)
@@ -158,6 +178,9 @@ namespace
         store_global_fragment(c_global, lane, acc);
     }
 
+    // Create the general diagnostic context inside the kernel. This tutorial
+    // uses one subgroup, so it is a correctness smoke test rather than a race
+    // diagnostic example.
     __device__ hip_moi::context make_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
@@ -168,6 +191,9 @@ namespace
         return hip_moi::context(storage, cfg);
     }
 
+    // Instrumented version of the same matmul: only the LDS publication and
+    // consumption are wrapped; the WMMA intrinsic and global stores are ordinary
+    // kernel code.
     __global__ void instrumented_data_tiled_wmma_kernel(const _Float16*             a_global,
                                                         const _Float16*             b_global,
                                                         float*                      c_global,
@@ -181,6 +207,8 @@ namespace
 
         int lane = static_cast<int>(threadIdx.x) & 31;
 
+        // The explicit LDS byte offsets distinguish the A and B shared arrays
+        // and identify each lane's vector slot within them.
         ctx.lds_store_at(&a_shared[lane],
                          load_global_fragment(a_global, lane),
                          /*lds_byte_offset=*/kASharedByteOffset
@@ -192,6 +220,8 @@ namespace
 
         ctx.syncthreads();
 
+        // After ctx.syncthreads(), these loads are in the next epoch and should
+        // not conflict with the earlier stores.
         f16x8_t a = ctx.lds_load_at(&a_shared[lane],
                                     /*lds_byte_offset=*/kASharedByteOffset
                                         + lane * static_cast<int>(sizeof(f16x8_t)));
@@ -239,6 +269,8 @@ int main()
     check_hip(hipGetLastError(), "hipGetLastError(plain)");
     check_hip(hipDeviceSynchronize(), "hipDeviceSynchronize(plain)");
 
+    // host_context owns the device metadata buffer used by the instrumented
+    // kernel and is checked immediately after launch.
     hip_moi::host_context moi(context_options());
     hipLaunchKernelGGL(instrumented_data_tiled_wmma_kernel,
                        dim3(1),

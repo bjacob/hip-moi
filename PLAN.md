@@ -177,7 +177,9 @@ particular, `006_sampled_watchpoint_context.hip` shows the high-performance
 publish-only recipe used by the benchmarks: sampled backend host allocation,
 one watchpoint entry, static publish-only policy, direct
 `sampled_watchpoint_context` construction, explicit LDS byte offsets, and no
-`HIP_MOI_CHECK` on the fast path.
+`HIP_MOI_CHECK` on the fast path. The companion `.hip` files are intentionally
+commented as readable standalone programs so readers can move from the tutorial
+README to compilable examples without already knowing hip-moi's terminology.
 
 This split is important for the next scope increases:
 

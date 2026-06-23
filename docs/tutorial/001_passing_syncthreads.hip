@@ -27,6 +27,9 @@ namespace
         std::exit(EXIT_FAILURE);
     }
 
+    // Keep this tutorial's device metadata allocation small. Real programs can
+    // use the larger defaults; this one workgroup example only needs one
+    // subgroup slot and a small storage buffer.
     hip_moi::host_context_options small_context_options()
     {
         hip_moi::host_context_options options;
@@ -35,6 +38,8 @@ namespace
         return options;
     }
 
+    // Plain HIP version: thread 0 publishes through LDS, __syncthreads()
+    // orders that store before thread 1 consumes the value.
     __global__ void plain_producer_consumer_kernel(int* out)
     {
         __shared__ int value;
@@ -52,10 +57,15 @@ namespace
         }
     }
 
+    // Instrumented version: host_context owns storage on the host side and
+    // passes this storage_ref into the kernel so each workgroup can create a
+    // hip_moi::context.
     __global__ void producer_consumer_kernel(int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
+        // This example launches one subgroup, so hip-moi will not report any
+        // cross-subgroup conflicts. It still demonstrates the API shape.
         hip_moi::context::config cfg{
             /*thread_count=*/static_cast<int>(blockDim.x),
             /*threads_per_subgroup=*/static_cast<int>(blockDim.x),
@@ -67,6 +77,8 @@ namespace
 
         if(threadIdx.x == 0)
         {
+            // The final argument is the byte offset of value within LDS. Scalar
+            // value is the first and only shared object here, so its offset is 0.
             ctx.lds_store_at(&value, 41, /*lds_byte_offset=*/0);
         }
 
@@ -109,6 +121,8 @@ int main()
                        moi.device_ref());
     check_hip(hipGetLastError(), "hipGetLastError(context)");
 
+    // Explicitly consume diagnostics after the kernel. This safe example should
+    // print nothing and return normally.
     HIP_MOI_CHECK(moi);
 
     int output[2] = {-1, -1};
