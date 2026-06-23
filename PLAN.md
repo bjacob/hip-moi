@@ -94,6 +94,10 @@ instrumentation would naturally know. Pointer-only `lds_load` / `lds_store`
 helpers were deleted because preserving them kept the old backend alive and
 made benchmark work measure the wrong thing.
 
+The top-level CMake build enables `CMAKE_EXPORT_COMPILE_COMMANDS` by default so
+clangd and other tooling can use the generated compilation database. The
+generated root `compile_commands.json` is intentionally ignored by git.
+
 ## Current Detector Contract
 
 A diagnostic of interest is:

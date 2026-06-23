@@ -7,7 +7,7 @@
 
 # Typically a user-created symlink to the build directory, to enable discovery
 # by clangd.
-compile_commands.json
+/compile_commands.json
 
 # TeX build byproducts. PDFs under docs/ may be checked in intentionally.
 *.aux

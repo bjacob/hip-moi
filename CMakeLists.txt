@@ -15,6 +15,12 @@ endif()
 
 project(hip_moi LANGUAGES CXX HIP)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS
+    ON
+    CACHE BOOL
+          "Generate compile_commands.json for editor and tooling integration"
+    FORCE)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_STANDARD 17)
