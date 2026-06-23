@@ -85,7 +85,8 @@ using sampled_publish_only = hip_moi::sampled_watchpoint_policy<
     /*SampleSkip=*/32,
     /*ProbeCount=*/1,
     /*DelayIters=*/32,
-    /*ReportConflicts=*/false>;
+    /*ReportConflicts=*/false,
+    /*StaticWatchpointCapacity=*/1>;
 
 ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, sampled_publish_only>(
     ptr, value, /*lds_byte_offset=*/offset, site);
@@ -95,6 +96,13 @@ This is the low-overhead path for benchmark/source-instrumented code that does
 not need runtime policy tuning. If the policy must vary between launches, keep
 using `host_context_options` and the ordinary `lds_*_at<backend_kind::...>`
 overloads.
+
+The final policy argument is optional and defaults to `0`, meaning that the
+watchpoint capacity is read from runtime context storage. Passing `1` tells the
+sampled hot-path view that the table has exactly one watchpoint entry, so slot
+selection folds to zero instead of running the generic slot-mixing code. That is
+useful for fair publish-only benchmark rows that intentionally match Jakub's
+one-watchpoint sampled Loom configuration.
 
 ## Inspecting The Layout
 

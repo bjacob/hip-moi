@@ -176,8 +176,14 @@ namespace hip_moi
             return lane_in_subgroup() == selected_lane;
         }
 
+        template <typename SampledPolicy>
         __device__ uint32_t sampled_watchpoint_slot(uint32_t start_cell, uint32_t epoch) const
         {
+            if constexpr(SampledPolicy::static_watchpoint_capacity == 1)
+            {
+                return 0;
+            }
+
             uint32_t seed = epoch * 0x85ebca6bu;
             seed ^= static_cast<uint32_t>(storage_.generation) * 0xc2b2ae35u;
             seed ^= start_cell * 0x165667b1u;
@@ -254,7 +260,7 @@ namespace hip_moi
                                                         static_cast<uint32_t>(storage_.generation),
                                                         start_cell,
                                                         cell_count);
-            uint32_t slot = sampled_watchpoint_slot(start_cell, epoch);
+            uint32_t slot = sampled_watchpoint_slot<SampledPolicy>(start_cell, epoch);
             (void)atomicExch(
                 reinterpret_cast<unsigned long long*>(&storage_.sampled_watchpoints[slot]),
                 static_cast<unsigned long long>(packed));

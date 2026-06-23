@@ -222,11 +222,14 @@ benchmark row.
 
 The sampled access API now has two policy layers. Runtime policy fields in
 `host_context_options` preserve launch-time flexibility. A compile-time
-`sampled_watchpoint_policy<SampleSkip, ProbeCount, DelayIters, ReportConflicts>`
-can instead be supplied as a second template argument to
+`sampled_watchpoint_policy<SampleSkip, ProbeCount, DelayIters, ReportConflicts,
+StaticWatchpointCapacity>` can instead be supplied as a second template argument to
 `lds_load_at<backend_kind::sampled_watchpoint, Policy>` or
 `lds_store_at<backend_kind::sampled_watchpoint, Policy>`. That lets hot
-publish-only rows erase runtime policy loads and reporting branches.
+publish-only rows erase runtime policy loads and reporting branches. The final
+static-capacity argument is optional and defaults to zero, which means "use the
+runtime watchpoint capacity." A value of one lets the sampled hot-path view fold
+slot selection to zero for one-watchpoint benchmark rows.
 
 Selection is site-aware, but conflict rendezvous is range-aware: the watchpoint
 slot is keyed by the watched LDS range, epoch, and generation, not by source
@@ -413,7 +416,7 @@ performance-sensitive code changed. The current focused baseline at
 ```text
 noop                  1.16 ms
 sampled Loom          8.59 ms
-hip-moi sampled       5.27 ms
+hip-moi sampled       4.57 ms
 ```
 
 Append the raw output of those three commands to `BENCHMARK_LOG.md` at each
@@ -704,6 +707,14 @@ Production sampled roadmap:
    32 threads per subgroup, power-of-two watchpoint capacity, one probe,
    publish-only reporting, and known access sizes. Avoid generic range loops,
    division/modulo, and policy loads in the static sampled path.
+   Status: partially implemented for one-watchpoint publish-only rows. The
+   static sampled policy can now declare `StaticWatchpointCapacity=1`, and the
+   sampled hot-path view folds watchpoint slot selection to zero in that case.
+   The focused production hip-moi sampled row moved from roughly `5.27 ms` to
+   `4.57 ms`. Codegen improved from 100 private bytes and 32 VGPR spills to 68
+   private bytes and 16 VGPR spills, and code size dropped from `0x11284` to
+   `0x0aff4`. Remaining low-risk specialization work is mostly access-size
+   templating and any still-visible generic range loops.
 5. Isolate cold diagnostics and storage validation. Publish-only mode should not
    inline reporting, metadata-full diagnostics, or slow validation branches into
    every instrumented access. If those paths are still required for safety,

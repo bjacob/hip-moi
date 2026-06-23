@@ -1024,3 +1024,67 @@ Takeaway: the single workgroup epoch is measurable. The publish-only sampled
 view is now substantially below sampled Loom on this benchmark, with much lower
 private memory and scratch traffic. Remaining obvious benchmark-specific work is
 capacity-one slot specialization and access-size templating.
+
+## 2026-06-23 after static watchpoint capacity specialization
+
+hip-moi commit measured: this commit (`Specialize sampled watchpoint capacity`)
+sanitizer-strategy benchmark commit: `f1ee1fe`
+
+This pass added an optional static watchpoint-capacity template argument to
+`sampled_watchpoint_policy` and used `StaticWatchpointCapacity=1` in the focused
+production benchmark's static publish-only hip-moi row. The sampled hot-path view
+now folds watchpoint slot selection to zero when that policy says the table has
+exactly one entry.
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_prod_16x8_benchmark.sh
+```
+
+First output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.62 TFLOP/s   62.1% of 191 TFLOP/s  total= 101.965 ms  iters=88  warmup= 100.387 ms  warmup_iters=88
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.58 ms     16.01 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.007 ms  iters=12  warmup= 103.789 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      4.56 ms     30.14 TFLOP/s   15.8% of 191 TFLOP/s  total= 104.870 ms  iters=23  warmup= 103.558 ms  warmup_iters=23
+```
+
+Repeat output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=4096 N=4096 K=4096 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+hip-moi sampled policy: static default publish-only
+fp16_wmma_tiled_w8_16x8_noop                                    1.16 ms    118.52 TFLOP/s   62.1% of 191 TFLOP/s  total= 102.044 ms  iters=88  warmup= 102.931 ms  warmup_iters=90
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.61 ms     15.96 TFLOP/s    8.4% of 191 TFLOP/s  total= 103.325 ms  iters=12  warmup= 104.179 ms  warmup_iters=12
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      4.57 ms     30.10 TFLOP/s   15.8% of 191 TFLOP/s  total= 105.022 ms  iters=23  warmup= 100.147 ms  warmup_iters=22
+```
+
+Codegen audit on the focused production benchmark:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled                 68     40    256           16   0x0aff4
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  delay s_nop
+sampled Loom             11752            75             72          82
+hip-moi static sampled    8344            16             16          83
+```
+
+Takeaway: one-watchpoint slot specialization was a real win and pushed the
+publish-only sampled hot path well below sampled Loom on this production
+extraction. Remaining obvious specialization work is access-size templating and
+checking whether the generated code still carries avoidable generic range loops.
