@@ -867,6 +867,14 @@ reference, and exercises both the diagnostic-capable exact context and the
 publish-only sampled fast context. It is intentionally scalar and audit-friendly;
 the benchmark version should be WMMA-heavy and more production-shaped.
 
+The next rung is `tests/instrumented/010_rdna4_wmma_attention_block_test.hip`.
+It is RDNA4-gated, grows the shape to 32 queries by 32 keys, uses two subgroups
+in one workgroup, stages packed K/V fragments through LDS, computes QK and PV
+with RDNA4 WMMA, and compares both exact-context and sampled-fast-context
+instrumented kernels against a host reference. This remains a correctness test,
+but its fragment layout and phase structure should be close enough to guide the
+future benchmark extraction.
+
 The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. Keep the row structure familiar:
 

@@ -28,6 +28,8 @@ Current files:
 * `008_sampled_watchpoint_backend_test.hip`: sampled watchpoint diagnostics.
 * `009_attention_block_test.hip`: scalar attention-shaped Q/K/V tiled LDS
   correctness test for the exact context and sampled fast context.
+* `010_rdna4_wmma_attention_block_test.hip`: RDNA4-only WMMA-heavy attention
+  correctness test, used as the stepping stone toward an attention benchmark.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the

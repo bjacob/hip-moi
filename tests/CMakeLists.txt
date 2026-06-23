@@ -103,3 +103,7 @@ hip_moi_add_gtest(hip_moi_instrumented_sampled_watchpoint_backend_test
                   instrumented/008_sampled_watchpoint_backend_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_attention_block_test
                   instrumented/009_attention_block_test.hip)
+if(_hip_moi_build_rdna4_tests)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_attention_block_test
+                    instrumented/010_rdna4_wmma_attention_block_test.hip)
+endif()
