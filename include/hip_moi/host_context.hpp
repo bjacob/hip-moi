@@ -156,6 +156,7 @@ namespace hip_moi
             storage_ref device_ref()
             {
                 diagnostics_consumed_ = false;
+                uint64_t generation   = next_generation();
                 if constexpr(has_coalescing_access_records)
                 {
                     storage_ref ref{
@@ -186,7 +187,7 @@ namespace hip_moi
                     ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation_;
+                    ref.generation                      = generation;
                     return ref;
                 }
                 else if constexpr(has_coalesced_access_records)
@@ -211,7 +212,7 @@ namespace hip_moi
                     ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation_;
+                    ref.generation                      = generation;
                     return ref;
                 }
                 else
@@ -233,7 +234,7 @@ namespace hip_moi
                     ref.exact_shadow_entry_capacity     = exact_shadow_entry_capacity_;
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
-                    ref.generation                      = generation_;
+                    ref.generation                      = generation;
                     return ref;
                 }
             }
@@ -442,6 +443,16 @@ namespace hip_moi
             static bool is_auto_capacity(int capacity)
             {
                 return capacity < 0;
+            }
+
+            uint64_t next_generation()
+            {
+                ++generation_;
+                if(generation_ == 0)
+                {
+                    generation_ = 1;
+                }
+                return generation_;
             }
 
             static std::size_t align_up(std::size_t offset, std::size_t alignment)

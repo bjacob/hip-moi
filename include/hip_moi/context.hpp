@@ -8,6 +8,7 @@
 #define HIP_MOI_CONTEXT_HPP
 
 #include "hip_moi/common.hpp"
+#include "hip_moi/shadow.hpp"
 
 #include <type_traits>
 
@@ -473,7 +474,7 @@ namespace hip_moi
         __device__ void
             record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
         {
-            record_access_at(ptr, byte_count, kind, /*lds_byte_offset=*/0, site);
+            record_access_without_shadow(ptr, byte_count, kind, site);
         }
 
         __device__ void record_access_at(const void* ptr,
@@ -482,7 +483,19 @@ namespace hip_moi
                                          uint32_t    lds_byte_offset,
                                          site_id     site)
         {
-            (void)lds_byte_offset;
+            if(record_exact_shadow_access(ptr, byte_count, kind, lds_byte_offset, site))
+            {
+                return;
+            }
+
+            record_access_without_shadow(ptr, byte_count, kind, site);
+        }
+
+        __device__ void record_access_without_shadow(const void* ptr,
+                                                     uint32_t    byte_count,
+                                                     access_kind kind,
+                                                     site_id     site)
+        {
             access_record record           = make_access_record(ptr, byte_count, kind, site);
             bool          wants_coalescing = site.allows_coalescing();
             if(wants_coalescing && record_coalescing_access(record))
@@ -495,6 +508,57 @@ namespace hip_moi
             }
 
             record_exact_access(record);
+        }
+
+        __device__ bool record_exact_shadow_access(const void* ptr,
+                                                   uint32_t    byte_count,
+                                                   access_kind kind,
+                                                   uint32_t    lds_byte_offset,
+                                                   site_id     site) const
+        {
+            if(!storage_.exact_shadow_entries || storage_.exact_shadow_entry_capacity <= 0
+               || byte_count == 0)
+            {
+                return false;
+            }
+
+            uint64_t last_byte_offset
+                = static_cast<uint64_t>(lds_byte_offset) + static_cast<uint64_t>(byte_count) - 1u;
+            uint32_t first_cell = lds_byte_offset >> detail::exact_shadow::granule_shift;
+            uint64_t last_cell  = last_byte_offset >> detail::exact_shadow::granule_shift;
+            if(last_cell >= static_cast<uint64_t>(storage_.exact_shadow_entry_capacity))
+            {
+                emit_shadow_metadata_full(ptr, byte_count, lds_byte_offset, site);
+                return true;
+            }
+
+            uint32_t subgroup = subgroup_id();
+            uint32_t epoch    = detail::current_epoch(storage_, subgroup);
+            uint64_t packed
+                = detail::pack_exact_shadow_entry(detail::shadow_kind_from_access_kind(kind),
+                                                  subgroup,
+                                                  epoch,
+                                                  static_cast<uint32_t>(storage_.generation),
+                                                  site.value());
+
+            for(uint32_t cell = first_cell; cell <= static_cast<uint32_t>(last_cell); ++cell)
+            {
+                uint64_t prior_value
+                    = atomic_exchange_shadow_entry(&storage_.exact_shadow_entries[cell], packed);
+                detail::exact_shadow_entry prior   = detail::decode_exact_shadow_entry(prior_value);
+                detail::exact_shadow_entry current = detail::decode_exact_shadow_entry(packed);
+                if(detail::exact_shadow_entries_conflict(current, prior))
+                {
+                    emit_shadow_conflict(prior, current, byte_count, lds_byte_offset, cell);
+                }
+            }
+            return true;
+        }
+
+        __device__ uint64_t atomic_exchange_shadow_entry(uint64_t* address, uint64_t value) const
+        {
+            return static_cast<uint64_t>(atomicExch(reinterpret_cast<unsigned long long*>(address),
+                                                    static_cast<unsigned long long>(value)));
         }
 
         __device__ void record_exact_access(const access_record& record) const
@@ -1589,6 +1653,28 @@ namespace hip_moi
                                     });
         }
 
+        __device__ void emit_shadow_conflict(const detail::exact_shadow_entry& prior,
+                                             const detail::exact_shadow_entry& current,
+                                             uint32_t                          current_byte_count,
+                                             uint32_t                          current_lds_offset,
+                                             uint32_t                          cell) const
+        {
+            uint32_t prior_lds_offset = cell << detail::exact_shadow::granule_shift;
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::access_conflict),
+                                        current.epoch,
+                                        prior.owner_id,
+                                        current.owner_id,
+                                        static_cast<uintptr_t>(prior_lds_offset),
+                                        static_cast<uintptr_t>(current_lds_offset),
+                                        detail::exact_shadow::granule_bytes,
+                                        current_byte_count,
+                                        prior.site_id,
+                                        current.site_id,
+                                    });
+        }
+
         __device__ void emit_metadata_full(const access_record& record) const
         {
             detail::emit_diagnostic(storage_,
@@ -1603,6 +1689,27 @@ namespace hip_moi
                                         record.byte_count,
                                         record.site_id,
                                         record.site_id,
+                                    });
+        }
+
+        __device__ void emit_shadow_metadata_full(const void* ptr,
+                                                  uint32_t    byte_count,
+                                                  uint32_t    lds_byte_offset,
+                                                  site_id     site) const
+        {
+            uint32_t subgroup = subgroup_id();
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::metadata_full),
+                                        detail::current_epoch(storage_, subgroup),
+                                        subgroup,
+                                        subgroup,
+                                        reinterpret_cast<uintptr_t>(ptr),
+                                        static_cast<uintptr_t>(lds_byte_offset),
+                                        byte_count,
+                                        byte_count,
+                                        site.value(),
+                                        site.value(),
                                     });
         }
 

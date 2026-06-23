@@ -434,6 +434,12 @@ explicit LDS byte offsets at the hip-moi helper sites.
 
 ### Session 4: Exact Shadow Backend
 
+Status: implemented for explicit-offset accesses. `lds_load_at` and
+`lds_store_at` now use the exact shadow table when exact-shadow storage is
+present, emit immediate diagnostics for same-epoch cross-subgroup conflicts, and
+report metadata saturation for out-of-range LDS offsets. Calls without explicit
+LDS offsets still use the existing record/log backend.
+
 Implement the exact subgroup-level shadow path:
 
 * compute shadow entry address from LDS byte offset,
