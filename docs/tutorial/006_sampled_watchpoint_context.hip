@@ -22,9 +22,9 @@ namespace
     constexpr hip_moi::site_id kStoreSite(0x601);
     constexpr hip_moi::site_id kLoadSite(0x602);
 
-    // Publish-only uses publish as a verb: selected lanes publish compact
-    // watchpoint metadata, but this fast path does not report diagnostics to
-    // the host. That is why ReportConflicts is false.
+    // Publish-only means selected lanes write compact watchpoint metadata, but
+    // this fast path does not report diagnostics to the host. That is why
+    // ReportConflicts is false.
     using publish_only_policy = hip_moi::sampled_watchpoint_policy<
         /*SampleSkip=*/32,
         /*ProbeCount=*/1,
