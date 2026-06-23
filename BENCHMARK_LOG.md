@@ -530,3 +530,72 @@ fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18
 fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.015 ms      0.07 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.050 ms  iters=6668  warmup= 100.494 ms  warmup_iters=6644
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint            0.011 ms      0.10 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.482 ms  iters=9268  warmup= 100.098 ms  warmup_iters=9246
 ```
+
+## 2026-06-23 after cached hip-moi benchmark context
+
+hip-moi commit measured: `822635a` (`Specialize sampled backend hot path`)
+sanitizer-strategy benchmark commit: `14027b7`
+
+No hip-moi source changed for this entry. The benchmark harness now constructs
+the hip-moi context once near kernel entry and passes it through the access
+helpers, instead of rebuilding the context inside each instrumented LDS wrapper.
+This better matches the intended hand-instrumented source shape.
+
+Codegen audit on the extracted 2-wave benchmark:
+
+```text
+sampled Loom:      69 VGPR, codeLenInByte=7208,  ScratchSize=0, uses_flat_scratch=0
+hip-moi exact:     61 VGPR, codeLenInByte=15916, ScratchSize=0, uses_flat_scratch=1
+hip-moi sampled:   63 VGPR, codeLenInByte=11448, ScratchSize=0, uses_flat_scratch=1
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=32 N=64 K=16 waves=2 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w2_2x4_noop                                   0.003 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.046 ms  iters=34603  warmup= 100.093 ms  warmup_iters=34635
+fp16_wmma_tiled_w2_2x4_sampled_loom_tsan                      0.005 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.135 ms  iters=21194  warmup= 100.062 ms  warmup_iters=20937
+fp16_wmma_tiled_w2_2x4_hip_moi_exact_shadow                   0.009 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.067 ms  iters=11212  warmup= 100.294 ms  warmup_iters=11177
+fp16_wmma_tiled_w2_2x4_hip_moi_sampled_watchpoint             0.006 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.153 ms  iters=16760  warmup= 100.120 ms  warmup_iters=16686
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=64 N=256 K=16 waves=4 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w4_4x16_noop                                  0.003 ms      0.17 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.080 ms  iters=31795  warmup= 100.087 ms  warmup_iters=31786
+fp16_wmma_tiled_w4_4x16_sampled_loom_tsan                     0.006 ms      0.09 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.011 ms  iters=16917  warmup= 100.010 ms  warmup_iters=16918
+fp16_wmma_tiled_w4_4x16_hip_moi_exact_shadow                  0.014 ms      0.04 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.010 ms  iters=7300  warmup= 100.038 ms  warmup_iters=7299
+fp16_wmma_tiled_w4_4x16_hip_moi_sampled_watchpoint            0.009 ms      0.06 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.789 ms  iters=11179  warmup= 100.014 ms  warmup_iters=11180
+```
+
+Command:
+
+```bash
+./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=256 N=128 K=16 waves=8 min_ms=100.0 warmup_ms=100.0
+fp16_wmma_tiled_w8_16x8_noop                                  0.003 ms      0.33 TFLOP/s    0.2% of 191 TFLOP/s  total= 100.058 ms  iters=31256  warmup= 100.015 ms  warmup_iters=30904
+fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 102.151 ms  iters=17143  warmup= 100.134 ms  warmup_iters=17165
+fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.013 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.067 ms  iters=7752  warmup= 100.161 ms  warmup_iters=7674
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint            0.009 ms      0.12 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.116 ms  iters=11195  warmup= 100.230 ms  warmup_iters=11150
+```

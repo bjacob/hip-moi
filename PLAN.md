@@ -340,6 +340,11 @@ derived from `rdna4_matmul/rdna4_matmul.hip`. It compares:
 * hip-moi exact shadow through explicit LDS-offset APIs,
 * hip-moi sampled watchpoints through explicit LDS-offset APIs.
 
+The benchmark now constructs the hip-moi device context once near kernel entry
+and passes it through the instrumented access helpers. That better matches the
+intended source-instrumentation shape than rebuilding a context inside every
+instrumented access wrapper.
+
 The current go-to shapes are:
 
 ```bash
@@ -516,6 +521,13 @@ watchpoint lane/slot selection with cheaper 32-bit mixing and masking. On the
 cleanup to roughly 0.007 ms, while sampled Loom remains roughly 0.005 ms. The
 same pass made the 4-wave and 8-wave sampled rows roughly 0.011 ms.
 
+The benchmark harness was then changed to create the hip-moi context once per
+kernel and pass it through the helper calls. This reduced sampled hip-moi again
+to roughly 0.006 ms on 2-wave and 0.009 ms on 4/8-wave. Code size dropped, but
+VGPR use rose to 63 for the sampled row, so this is not a free lunch; it mostly
+confirms that repeated context lookup was real overhead and that context live
+range is now a central tuning problem.
+
 Use the 2/4/8-wave benchmark set to tune:
 
 * watchpoint count,
@@ -532,6 +544,10 @@ can dominate the actual sanitizer work.
 Next likely target: remove repeated benchmark helper overhead around
 `make_hip_moi_context()` and context construction, or add a slimmer sampled
 hot-path wrapper, while preserving the ordinary user-facing `host_context` API.
+After the benchmark harness change, the likely library-side version of this is
+a smaller sampled hot-path context/view that carries only the fields needed by
+the sampled backend, so caching the context does not keep exact-shadow and
+diagnostic-heavy state live across the whole kernel.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 
