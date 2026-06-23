@@ -640,13 +640,65 @@ Inspect generated code when benchmark movement is surprising. The main danger is
 spilling caused by instrumentation VGPR usage; global-memory traffic from spills
 can dominate the actual sanitizer work.
 
-Next likely target: inspect generated code for the production static sampled
-row and compare it to Jakub's sampled Loom row. The tiny benchmark gap is now
-small enough that local changes there could be noise; the production extraction
-has a visible 2x gap. If generated code confirms excess live state in hip-moi,
-the likely library-side direction is a smaller sampled hot-path context/view
-that carries only the fields needed by the sampled backend, while preserving
-the ordinary user-facing `host_context` API.
+The first generated-code audit on the focused production extraction confirmed
+that the new goal is not to invent a different sampling algorithm first. The
+goal is to make hip-moi's sampled hot path compile into something much closer
+to Jakub's sampled Loom path:
+
+```text
+row                  private bytes  VGPR spills  SGPRs  code size
+noop                            0            0     23   0x01a28
+sampled Loom                  320          244     57   0x0f528
+hip-moi static sampled       1024          751     50   0x1d340
+hip-moi runtime sampled      1456         1203    107   0x44328
+```
+
+The disassembly tells the same story. The sampled Loom row is about 11.8k
+assembly lines, while the hip-moi static sampled row is about 21.8k. The hip-moi
+static row has roughly 354 scratch loads and 221 scratch stores versus 75 and
+72 for sampled Loom. It also has 2624 `s_nop` occurrences because the
+compile-time delay policy unrolled the 32-iteration delay at every hot call
+site. That is the first low-risk fix.
+
+Production sampled roadmap:
+
+1. Stop unrolling the sampled delay. Keep the default static publish-only policy
+   values, but lower the delay to a compact counted loop or a small noinline
+   helper so the compiler does not replicate 32 `s_nop`s at every access site.
+   This should reduce code size and may reduce spills by shortening hot blocks.
+2. Introduce a sampled hot-path device view separate from the full public
+   `context`. The public `host_context` / `context` API can remain stable, but
+   benchmark-sensitive kernels should be able to carry a tiny sampled view with
+   only the watchpoint pointer, generation, epoch/header pointer, and static
+   policy facts needed by `lds_load_at` / `lds_store_at`. It should not keep
+   diagnostic buffers, exact-shadow pointers, generic options, or barrier-test
+   state live in the production sampled access path.
+3. Add a full-workgroup-barrier sampled epoch path. In the production benchmark,
+   every `ctx.syncthreads()` is a full workgroup barrier, and sampled Loom uses
+   one per-workgroup epoch header. hip-moi still carries the more general
+   subgroup-epoch machinery from earlier designs. For this sampled fast path,
+   use the Loom-shaped sequence: barrier, one workgroup epoch increment by one
+   thread, barrier. Keep subgroup-specific epochs out of the hot sampled path
+   unless a later benchmark requires them.
+4. Specialize hot-path constants that are fixed in the production row:
+   32 threads per subgroup, power-of-two watchpoint capacity, one probe,
+   publish-only reporting, and known access sizes. Avoid generic range loops,
+   division/modulo, and policy loads in the static sampled path.
+5. Isolate cold diagnostics and storage validation. Publish-only mode should not
+   inline reporting, metadata-full diagnostics, or slow validation branches into
+   every instrumented access. If those paths are still required for safety,
+   move them behind cold noinline helpers or an explicitly checked setup phase.
+6. Only after the generated code resembles sampled Loom should we revisit more
+   ambitious regular-pattern or coalescing-style ideas. The present 2x
+   production gap is explained well enough by code shape, private memory, and
+   spills that algorithmic complexity would be premature.
+
+For each performance-sensitive step, record both latency and generated-code
+metrics. The important codegen gates are private segment size, VGPR spill count,
+SGPR pressure, approximate code size, and whether the hot kernel uses flat
+scratch. The win condition for this phase is sampled hip-moi publish-only below
+sampled Loom publish-only on `prod_16x8_benchmark.hip` with the fair default
+knobs.
 
 ### Possible Later Work: Online Regular-Pattern Summaries
 

@@ -807,3 +807,41 @@ fp16_wmma_tiled_w8_16x8_noop                                    1.17 ms    117.9
 fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only               8.63 ms     15.93 TFLOP/s    8.3% of 191 TFLOP/s  total= 103.543 ms  iters=12  warmup= 103.996 ms  warmup_iters=12
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only      17.6 ms      7.81 TFLOP/s    4.1% of 191 TFLOP/s  total= 105.628 ms  iters=6  warmup= 106.477 ms  warmup_iters=6
 ```
+
+## 2026-06-23 production sampled codegen audit
+
+hip-moi commit measured: `b30c9fa` (`Track production matmul benchmark baseline`)
+sanitizer-strategy benchmark commit: `3c6da04`
+
+This is a planning/codegen entry, not a new latency run. No hip-moi source code
+changed before this measurement, so the production latency baseline remains the
+previous entry: noop `1.17 ms`, sampled Loom `8.63 ms`, hip-moi sampled
+`17.6 ms`.
+
+The code object was extracted from
+`sanitizer-strategy/rdna4_matmul/prod_16x8_benchmark.hip` after building the
+focused benchmark. The sampled rows use the same fair publish-only knobs:
+`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`.
+
+Resource metadata:
+
+```text
+row                         private bytes  SGPRs  VGPRs  VGPR spills  code size
+noop                                    0     23    225            0   0x01a28
+sampled Loom                          320     57    256          244   0x0f528
+hip-moi static sampled               1024     50    256          751   0x1d340
+hip-moi runtime sampled              1456    107    256         1203   0x44328
+```
+
+Assembly-size and rough instruction-count signals:
+
+```text
+row                   asm lines  scratch_load  scratch_store  delay s_nop
+sampled Loom             11756            75             72          82
+hip-moi static sampled   21805           354            221        2624
+```
+
+Takeaway: hip-moi's current production gap is primarily a generated-code and
+live-state problem. The next optimizations should shrink the sampled hot path,
+starting with the unrolled delay, a smaller sampled context/view, a Loom-shaped
+full-workgroup epoch path, and cold-path isolation.
