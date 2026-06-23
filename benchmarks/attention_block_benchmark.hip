@@ -6,8 +6,8 @@
 // This grows tests/instrumented/010_rdna4_wmma_attention_block_test.hip into a
 // benchmark-sized workload. Each workgroup computes a 32-query block with two
 // subgroups. K/V fragments are staged through LDS, QK and PV are computed with
-// RDNA4 WMMA, and the benchmark compares noop execution with hip-moi's sampled
-// watchpoint paths.
+// RDNA4 WMMA, and the benchmark compares noop execution, sampled Loom-style
+// instrumentation, and hip-moi's sampled watchpoint paths.
 
 #include <hip/hip_runtime.h>
 
@@ -54,6 +54,43 @@ using StaticFastPolicy = hip_moi::sampled_watchpoint_policy<
     /*DelayIters=*/32,
     /*ReportConflicts=*/false,
     /*StaticWatchpointCapacity=*/1>;
+
+static constexpr uint32_t kTsanShadowAccessRead       = 1;
+static constexpr uint32_t kTsanShadowAccessWrite      = 2;
+static constexpr uint32_t kTsanSampledGranuleShift    = 2;
+static constexpr uint32_t kTsanSampledGranuleBytes    = 1u << kTsanSampledGranuleShift;
+static constexpr uint32_t kTsanSampledValidShift      = 0;
+static constexpr uint32_t kTsanSampledConsumedShift   = 1;
+static constexpr uint32_t kTsanSampledKindShift       = 2;
+static constexpr uint32_t kTsanSampledKindBits        = 3;
+static constexpr uint32_t kTsanSampledWorkitemShift   = 5;
+static constexpr uint32_t kTsanSampledWorkitemBits    = 10;
+static constexpr uint32_t kTsanSampledEpochShift      = 15;
+static constexpr uint32_t kTsanSampledEpochBits       = 10;
+static constexpr uint32_t kTsanSampledGenerationShift = 25;
+static constexpr uint32_t kTsanSampledGenerationBits  = 20;
+static constexpr uint32_t kTsanSampledAddrShift       = 45;
+static constexpr uint32_t kTsanSampledAddrBits        = 14;
+static constexpr uint32_t kTsanSampledCountShift      = 59;
+static constexpr uint32_t kTsanSampledCountBits       = 5;
+static constexpr uint64_t kTsanSampledValid           = 1ull << kTsanSampledValidShift;
+static constexpr uint64_t kTsanSampledConsumed        = 1ull << kTsanSampledConsumedShift;
+static constexpr uint64_t kTsanSampledKindMask        = ((1ull << kTsanSampledKindBits) - 1)
+                                                 << kTsanSampledKindShift;
+static constexpr uint64_t kTsanSampledWorkitemMask = ((1ull << kTsanSampledWorkitemBits) - 1)
+                                                     << kTsanSampledWorkitemShift;
+static constexpr uint64_t kTsanSampledEpochMask = ((1ull << kTsanSampledEpochBits) - 1)
+                                                  << kTsanSampledEpochShift;
+static constexpr uint64_t kTsanSampledGenerationMask = ((1ull << kTsanSampledGenerationBits) - 1)
+                                                       << kTsanSampledGenerationShift;
+static constexpr uint64_t kTsanSampledEpochGenerationMask
+    = kTsanSampledEpochMask | kTsanSampledGenerationMask;
+static constexpr uint64_t kTsanSampledAddrMask = ((1ull << kTsanSampledAddrBits) - 1)
+                                                 << kTsanSampledAddrShift;
+static constexpr uint64_t kTsanSampledCountMask = ((1ull << kTsanSampledCountBits) - 1)
+                                                  << kTsanSampledCountShift;
+static constexpr uint32_t kTsanSampledMaxAddr  = (1u << kTsanSampledAddrBits) - 1;
+static constexpr uint32_t kTsanSampledMaxCount = 1u << kTsanSampledCountBits;
 
 static void hip_check_impl(hipError_t err, const char* expr, const char* file, int line)
 {
@@ -147,10 +184,21 @@ __device__ __forceinline__ static f32x8 zero_f32x8()
 
 struct Runtime
 {
+    uint64_t*                      shadow;
+    unsigned long long*            report_count;
+    uint32_t                       workgroup_stride_entries;
     hip_moi::context::storage_ref* storage_refs;
     uint64_t                       storage_count;
     uint32_t                       generation;
+    uint32_t                       sample_skip;
+    uint32_t                       delay_iters;
+    uint32_t                       probe_count;
 };
+
+__device__ __forceinline__ static uint32_t flat_workitem_id()
+{
+    return threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+}
 
 __device__ __forceinline__ static uint64_t flat_workgroup_id()
 {
@@ -170,6 +218,264 @@ __device__ __forceinline__ static hip_moi::context::storage_ref workgroup_storag
     }
     storage.generation = runtime.generation;
     return storage;
+}
+
+__device__ __forceinline__ static uint64_t* workgroup_shadow_base(Runtime runtime)
+{
+    return runtime.shadow + flat_workgroup_id() * runtime.workgroup_stride_entries;
+}
+
+__device__ __forceinline__ static uint32_t mix32(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
+
+__device__ __forceinline__ static bool conflicting_access(uint32_t current_kind,
+                                                          uint32_t prior_kind)
+{
+    return current_kind == kTsanShadowAccessRead ? prior_kind != kTsanShadowAccessRead : true;
+}
+
+__device__ __forceinline__ static void delay(uint32_t iterations)
+{
+    for(uint32_t i = 0; i < iterations; ++i)
+    {
+        asm volatile("s_nop 0" ::: "memory");
+    }
+}
+
+__device__ __forceinline__ static uint32_t lds_cell_start(uint32_t byte_offset)
+{
+    return byte_offset >> kTsanSampledGranuleShift;
+}
+
+__device__ __forceinline__ static uint32_t sampled_watchpoint_count(Runtime runtime)
+{
+    return runtime.workgroup_stride_entries == 0 ? 0 : runtime.workgroup_stride_entries - 1;
+}
+
+__device__ __forceinline__ static uint32_t sampled_watchpoint_mask(Runtime runtime)
+{
+    return sampled_watchpoint_count(runtime) - 1;
+}
+
+__device__ __forceinline__ static uint32_t
+    wave_selection_seed(Runtime runtime, uint32_t wave, uint32_t site_id)
+{
+    uint32_t seed = runtime.generation * 0x9e3779b9U;
+    seed ^= static_cast<uint32_t>(flat_workgroup_id() + 1) * 0x85ebca6bU;
+    seed ^= (wave + 1) * 0xc2b2ae35U;
+    seed ^= site_id * 0x27d4eb2dU;
+    return mix32(seed);
+}
+
+__device__ __forceinline__ static uint64_t pack_sampled_watchpoint(
+    Runtime runtime, uint32_t start, uint32_t count, uint32_t access_kind, uint64_t epoch)
+{
+    return kTsanSampledValid
+           | ((static_cast<uint64_t>(access_kind) & ((1ull << kTsanSampledKindBits) - 1))
+              << kTsanSampledKindShift)
+           | ((static_cast<uint64_t>(flat_workitem_id()) & ((1ull << kTsanSampledWorkitemBits) - 1))
+              << kTsanSampledWorkitemShift)
+           | ((epoch & ((1ull << kTsanSampledEpochBits) - 1)) << kTsanSampledEpochShift)
+           | ((static_cast<uint64_t>(runtime.generation)
+               & ((1ull << kTsanSampledGenerationBits) - 1))
+              << kTsanSampledGenerationShift)
+           | ((static_cast<uint64_t>(start) & ((1ull << kTsanSampledAddrBits) - 1))
+              << kTsanSampledAddrShift)
+           | ((static_cast<uint64_t>(count - 1) & ((1ull << kTsanSampledCountBits) - 1))
+              << kTsanSampledCountShift);
+}
+
+__device__ __forceinline__ static uint32_t sampled_kind(uint64_t entry)
+{
+    return static_cast<uint32_t>((entry & kTsanSampledKindMask) >> kTsanSampledKindShift);
+}
+
+__device__ __forceinline__ static uint32_t sampled_workitem(uint64_t entry)
+{
+    return static_cast<uint32_t>((entry & kTsanSampledWorkitemMask) >> kTsanSampledWorkitemShift);
+}
+
+__device__ __forceinline__ static uint32_t sampled_start(uint64_t entry)
+{
+    return static_cast<uint32_t>((entry & kTsanSampledAddrMask) >> kTsanSampledAddrShift);
+}
+
+__device__ __forceinline__ static uint32_t sampled_count(uint64_t entry)
+{
+    return static_cast<uint32_t>((entry & kTsanSampledCountMask) >> kTsanSampledCountShift) + 1;
+}
+
+__device__ __forceinline__ static bool sampled_range_overlaps(uint32_t lhs_start,
+                                                              uint32_t lhs_count,
+                                                              uint32_t rhs_start,
+                                                              uint32_t rhs_count)
+{
+    return lhs_start < rhs_start + rhs_count && rhs_start < lhs_start + lhs_count;
+}
+
+__device__ __forceinline__ static bool sampled_conflicts(
+    uint64_t prior, uint64_t current, uint32_t start, uint32_t count, uint32_t access_kind)
+{
+    if((prior & kTsanSampledValid) == 0 || (prior & kTsanSampledConsumed) != 0)
+    {
+        return false;
+    }
+    if(((prior ^ current) & kTsanSampledEpochGenerationMask) != 0)
+    {
+        return false;
+    }
+    if(sampled_workitem(prior) == flat_workitem_id())
+    {
+        return false;
+    }
+    if(!conflicting_access(access_kind, sampled_kind(prior)))
+    {
+        return false;
+    }
+    return sampled_range_overlaps(start, count, sampled_start(prior), sampled_count(prior));
+}
+
+__device__ __attribute__((noinline)) static void sampled_scan_reports(Runtime   runtime,
+                                                                      uint64_t* base,
+                                                                      uint64_t  current,
+                                                                      uint32_t  start,
+                                                                      uint32_t  count,
+                                                                      uint32_t  access_kind,
+                                                                      uint32_t  site_id,
+                                                                      uint32_t  publish_index,
+                                                                      uint32_t  selection_seed)
+{
+    uint32_t watchpoints = sampled_watchpoint_count(runtime);
+    uint32_t probe_count = runtime.probe_count == 0 ? watchpoints : runtime.probe_count;
+    if(probe_count > watchpoints)
+    {
+        probe_count = watchpoints;
+    }
+    uint32_t probe_step = (mix32(selection_seed ^ start ^ (site_id * 0x94d049bbU)) | 1u)
+                          & sampled_watchpoint_mask(runtime);
+#pragma unroll 1
+    for(uint32_t probe = 0; probe < probe_count; ++probe)
+    {
+        uint32_t index
+            = 1 + ((publish_index - 1 + probe * probe_step) & sampled_watchpoint_mask(runtime));
+        uint64_t* entry64 = base + index;
+        uint64_t  prior   = *reinterpret_cast<volatile uint64_t*>(entry64);
+        if(sampled_conflicts(prior, current, start, count, access_kind))
+        {
+            uint64_t consumed = prior | kTsanSampledConsumed;
+            auto*    entry    = reinterpret_cast<unsigned long long*>(entry64);
+            if(atomicCAS(entry,
+                         static_cast<unsigned long long>(prior),
+                         static_cast<unsigned long long>(consumed))
+                   == prior
+               && runtime.report_count)
+            {
+                atomicAdd(runtime.report_count, 1ull);
+            }
+        }
+    }
+}
+
+__device__ __forceinline__ static bool
+    sampled_should_publish(Runtime runtime, uint32_t seed, uint32_t lane)
+{
+    uint32_t skip = runtime.sample_skip == 0 ? 1 : runtime.sample_skip;
+    if(skip > 1)
+    {
+        bool     power_of_two = (skip & (skip - 1)) == 0;
+        uint32_t remainder    = power_of_two ? (seed & (skip - 1)) : (seed % skip);
+        if(remainder != 0)
+        {
+            return false;
+        }
+    }
+    return lane == ((seed >> 16) & (kWaveSize - 1));
+}
+
+__device__ __forceinline__ static uint32_t sampled_publish_index(
+    Runtime runtime, uint32_t site_id, uint64_t epoch, uint32_t wave, uint32_t start)
+{
+    uint32_t seed = site_id * 0x9e3779b9U;
+    seed ^= static_cast<uint32_t>(epoch) * 0x85ebca6bU;
+    seed ^= runtime.generation * 0xc2b2ae35U;
+    seed ^= wave * 0x27d4eb2dU;
+    seed ^= start * 0x165667b1U;
+    return 1 + (mix32(seed) & sampled_watchpoint_mask(runtime));
+}
+
+__device__ __forceinline__ static void observe_sampled_range(Runtime  runtime,
+                                                             uint32_t start,
+                                                             uint32_t count,
+                                                             uint32_t access_kind,
+                                                             uint32_t site_id,
+                                                             uint32_t wave,
+                                                             uint32_t lane,
+                                                             uint32_t selection_seed)
+{
+    if(!runtime.shadow || runtime.workgroup_stride_entries <= 1 || count == 0
+       || start > kTsanSampledMaxAddr)
+    {
+        return;
+    }
+    uint32_t max_count_for_addr = kTsanSampledMaxAddr - start + 1;
+    if(count > max_count_for_addr)
+    {
+        count = max_count_for_addr;
+    }
+
+    if(!sampled_should_publish(runtime, selection_seed, lane))
+    {
+        return;
+    }
+    uint64_t* base          = workgroup_shadow_base(runtime);
+    uint64_t  epoch         = base[0] & ((1ull << kTsanSampledEpochBits) - 1);
+    uint64_t  current       = pack_sampled_watchpoint(runtime, start, count, access_kind, epoch);
+    uint32_t  publish_index = sampled_publish_index(runtime, site_id, epoch, wave, start);
+
+    if(runtime.report_count)
+    {
+        sampled_scan_reports(runtime,
+                             base,
+                             current,
+                             start,
+                             count,
+                             access_kind,
+                             site_id,
+                             publish_index,
+                             selection_seed);
+    }
+
+    auto* entry = reinterpret_cast<unsigned long long*>(base + publish_index);
+    atomicExch(entry, static_cast<unsigned long long>(current));
+    delay(runtime.delay_iters);
+}
+
+template <uint32_t AccessSize>
+__device__ __forceinline__ static void observe_sampled_loom_access(Runtime  runtime,
+                                                                   uint32_t byte_offset,
+                                                                   uint32_t access_kind,
+                                                                   uint32_t site_id,
+                                                                   uint32_t wave,
+                                                                   uint32_t lane,
+                                                                   uint32_t selection_seed)
+{
+    uint32_t start = lds_cell_start(byte_offset);
+    uint32_t end
+        = (byte_offset + AccessSize + kTsanSampledGranuleBytes - 1) >> kTsanSampledGranuleShift;
+    while(start < end)
+    {
+        uint32_t chunk = end - start < kTsanSampledMaxCount ? end - start : kTsanSampledMaxCount;
+        observe_sampled_range(
+            runtime, start, chunk, access_kind, site_id, wave, lane, selection_seed);
+        start += chunk;
+    }
 }
 
 struct NoopPolicy
@@ -199,6 +505,60 @@ struct NoopPolicy
     template <typename T>
     __device__ static T load(context_type&, const T* ptr, uint32_t, hip_moi::site_id)
     {
+        return *ptr;
+    }
+};
+
+struct SampledLoomPolicy
+{
+    struct context_type
+    {
+        Runtime runtime;
+    };
+
+    __device__ static context_type make_context(Runtime runtime)
+    {
+        return context_type{runtime};
+    }
+
+    __device__ static void init_workgroup(context_type&) {}
+
+    __device__ static void syncthreads(context_type& ctx)
+    {
+        __syncthreads();
+        if(flat_workitem_id() == 0 && ctx.runtime.shadow && ctx.runtime.workgroup_stride_entries)
+        {
+            atomicAdd(reinterpret_cast<unsigned long long*>(workgroup_shadow_base(ctx.runtime)),
+                      1ull);
+        }
+        __syncthreads();
+    }
+
+    template <typename T>
+    __device__ static void
+        store(context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+    {
+        uint32_t flat      = flat_workitem_id();
+        uint32_t wave      = flat / kWaveSize;
+        uint32_t lane      = flat & (kWaveSize - 1);
+        uint32_t site_bits = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
+        uint32_t seed      = wave_selection_seed(ctx.runtime, wave, site_bits);
+        observe_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
+            ctx.runtime, offset, kTsanShadowAccessWrite, site_bits, wave, lane, seed);
+        *ptr = value;
+    }
+
+    template <typename T>
+    __device__ static T
+        load(context_type& ctx, const T* ptr, uint32_t offset, hip_moi::site_id site)
+    {
+        uint32_t flat      = flat_workitem_id();
+        uint32_t wave      = flat / kWaveSize;
+        uint32_t lane      = flat & (kWaveSize - 1);
+        uint32_t site_bits = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
+        uint32_t seed      = wave_selection_seed(ctx.runtime, wave, site_bits);
+        observe_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
+            ctx.runtime, offset, kTsanShadowAccessRead, site_bits, wave, lane, seed);
         return *ptr;
     }
 };
@@ -434,13 +794,15 @@ static T* gpu_alloc(std::size_t count)
 enum class Mode
 {
     Noop,
+    SampledLoom,
     HipMoiContextSampledWatchpoint,
     HipMoiSampledWatchpointContext,
 };
 
 static bool is_hip_moi_mode(Mode mode)
 {
-    return mode != Mode::Noop;
+    return mode == Mode::HipMoiContextSampledWatchpoint
+           || mode == Mode::HipMoiSampledWatchpointContext;
 }
 
 struct SampledKnobs
@@ -490,17 +852,49 @@ static bool uses_default_static_sampled_policy(SampledKnobs knobs)
 
 struct Allocation
 {
+    uint64_t*                           shadow       = nullptr;
+    unsigned long long*                 report_count = nullptr;
     std::vector<hip_moi::host_context*> contexts;
-    hip_moi::context::storage_ref*      device_storage_refs = nullptr;
-    uint64_t                            storage_count       = 0;
-    uint32_t                            generation          = 1;
+    hip_moi::context::storage_ref*      device_storage_refs      = nullptr;
+    uint64_t                            storage_count            = 0;
+    uint32_t                            generation               = 1;
+    uint32_t                            sampled_watchpoints      = 1;
+    uint32_t                            workgroup_stride_entries = 0;
+    uint32_t                            sample_skip              = 32;
+    uint32_t                            delay_iters              = 32;
+    uint32_t                            probe_count              = 1;
+    bool                                sampled_reports          = false;
 };
 
 static Allocation make_allocation(Mode mode, int sequence_length, SampledKnobs sampled_knobs)
 {
     Allocation allocation;
-    uint64_t   workgroups    = static_cast<uint64_t>(sequence_length / kQueriesPerBlock);
-    allocation.storage_count = workgroups;
+    uint64_t   workgroups          = static_cast<uint64_t>(sequence_length / kQueriesPerBlock);
+    allocation.storage_count       = workgroups;
+    allocation.sampled_watchpoints = sampled_knobs.watchpoints;
+    allocation.sample_skip         = sampled_knobs.sample_skip;
+    allocation.delay_iters         = sampled_knobs.delay_iters;
+    allocation.probe_count         = sampled_knobs.probe_count;
+    allocation.sampled_reports     = sampled_knobs.reports;
+
+    if(mode == Mode::SampledLoom)
+    {
+        allocation.workgroup_stride_entries
+            = 1 + static_cast<uint32_t>(allocation.sampled_watchpoints);
+        HIP_CHECK(hipMalloc(&allocation.shadow,
+                            workgroups * allocation.workgroup_stride_entries * sizeof(uint64_t)));
+        HIP_CHECK(hipMemset(allocation.shadow,
+                            0,
+                            workgroups * allocation.workgroup_stride_entries * sizeof(uint64_t)));
+        if(allocation.sampled_reports)
+        {
+            HIP_CHECK(
+                hipMalloc(&allocation.report_count, workgroups * sizeof(*allocation.report_count)));
+            HIP_CHECK(hipMemset(
+                allocation.report_count, 0, workgroups * sizeof(*allocation.report_count)));
+        }
+        return allocation;
+    }
 
     if(!is_hip_moi_mode(mode))
     {
@@ -544,9 +938,15 @@ static Allocation make_allocation(Mode mode, int sequence_length, SampledKnobs s
 static Runtime next_runtime(Allocation& allocation)
 {
     Runtime runtime{
+        allocation.shadow,
+        allocation.report_count,
+        allocation.workgroup_stride_entries,
         allocation.device_storage_refs,
         allocation.storage_count,
         allocation.generation,
+        allocation.sample_skip,
+        allocation.delay_iters,
+        allocation.probe_count,
     };
     ++allocation.generation;
     return runtime;
@@ -561,6 +961,14 @@ static void free_allocation(Allocation& allocation)
     for(auto* context : allocation.contexts)
     {
         delete context;
+    }
+    if(allocation.shadow)
+    {
+        HIP_CHECK(hipFree(allocation.shadow));
+    }
+    if(allocation.report_count)
+    {
+        HIP_CHECK(hipFree(allocation.report_count));
     }
     allocation = {};
 }
@@ -674,7 +1082,18 @@ static double run_one(const char*  name,
     HIP_CHECK(hipEventDestroy(stop));
 
     uint64_t reports = 0;
-    if(is_hip_moi_mode(mode))
+    if(mode == Mode::SampledLoom && allocation.report_count)
+    {
+        HIP_CHECK(
+            hipMemcpy(&reports, allocation.report_count, sizeof(reports), hipMemcpyDeviceToHost));
+        if(reports != 0)
+        {
+            std::printf("%-68s benchmark_tsan_reports=%llu\n",
+                        name,
+                        static_cast<unsigned long long>(reports));
+        }
+    }
+    else if(is_hip_moi_mode(mode))
     {
         for(auto* context : allocation.contexts)
         {
@@ -804,6 +1223,16 @@ int main()
                         sampled_knobs,
                         min_ms,
                         warmup_ms);
+    run_one<SampledLoomPolicy>((prefix + "_sampled_loom" + sampled_mode_suffix).c_str(),
+                               Mode::SampledLoom,
+                               q,
+                               k,
+                               v,
+                               out,
+                               sequence_length,
+                               sampled_knobs,
+                               min_ms,
+                               warmup_ms);
     run_one<ContextSampledPolicy>(
         (prefix + "_hip_moi_context_sampled_watchpoint" + sampled_mode_suffix).c_str(),
         Mode::HipMoiContextSampledWatchpoint,

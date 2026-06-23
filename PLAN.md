@@ -881,9 +881,8 @@ that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
 `010` correctness test, scales to one workgroup per 32-query block, defaults to
 `seq=12288` so that its fast-path latency is roughly 2x the current
 `prod_16x8` fast-path latency, and compares noop execution with both the general
-`context + sampled_watchpoint` path and the fast `sampled_watchpoint_context`
-path. It does not yet include a sampled-Loom row; that can be added later if we
-need a direct Loom comparison on the same attention workload.
+`context + sampled_watchpoint` path, the fast `sampled_watchpoint_context`
+path, and a sampled-Loom row ported from the matmul benchmark.
 
 Future benchmark rows should keep the row structure familiar:
 

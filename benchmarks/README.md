@@ -18,8 +18,6 @@ row as a correctness/performance reference. In both benchmark families,
 `context + sampled_watchpoint` means the full diagnostic-capable
 `hip_moi::context` running its sampled backend, while
 `sampled_watchpoint_context` means the dedicated publish-only fast-view class.
-The attention benchmark currently compares only hip-moi rows against a noop
-baseline; it does not yet include a sampled-Loom attention row.
 
 The benchmarks intentionally focus on subgroup-level, full-workgroup-barrier
 LDS instrumentation. They are not the correctness test suite and they do not
@@ -107,6 +105,6 @@ subgroups per workgroup, one workgroup per 32-query block, and K/V fragment
 staging through LDS. Its reported TFLOP/s is an effective QK+PV matmul-rate
 proxy; softmax and scalar phase work are intentionally not modeled as FLOPs.
 
-| Shape | noop | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
-| --- | ---: | ---: | ---: |
-| seq=12288, head_dim=16, value_dim=16 | 6.87 ms | 7.78 ms | 6.97 ms |
+| Shape | noop | sampled Loom | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: | ---: |
+| seq=12288, head_dim=16, value_dim=16 | 6.89 ms | 7.28 ms | 7.73 ms | 6.94 ms |
