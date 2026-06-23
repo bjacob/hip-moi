@@ -455,6 +455,18 @@ Expect correctness progress more than performance parity.
 
 ### Session 5: Sampled Watchpoint Backend
 
+Status: first cut implemented. `host_context_options::backend` can select
+`backend_kind::sampled_watchpoint`, and the device context records selected-lane
+sampled watchpoints for explicit-offset accesses. Focused tests cover
+synchronized non-diagnostics and racy selected-access diagnostics. The extracted
+benchmark now prints both `hip_moi_exact_shadow` and
+`hip_moi_sampled_watchpoint` rows.
+
+Current benchmark result: sampled-watchpoint correctness plumbing exists, but it
+does not yet improve latency relative to exact shadow. This says the next
+optimization should attack per-lane wrapper work, selected-lane calculation,
+context creation, and register pressure, not merely metadata write count.
+
 Implement the sampled-Loom-style backend:
 
 * dword-cell range normalization,

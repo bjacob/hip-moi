@@ -115,6 +115,20 @@ namespace hip_moi::test
                      /*sampled_watchpoint_capacity=*/0);
         }
 
+        void allocate_with_sampled_watchpoints(int access_capacity,
+                                               int diagnostic_capacity,
+                                               int subgroup_capacity,
+                                               int sampled_watchpoint_capacity)
+        {
+            allocate(access_capacity,
+                     diagnostic_capacity,
+                     subgroup_capacity,
+                     /*coalescing_access_capacity=*/0,
+                     /*coalescing_group_capacity=*/0,
+                     /*exact_shadow_entry_capacity=*/0,
+                     sampled_watchpoint_capacity);
+        }
+
         void allocate(int access_capacity,
                       int diagnostic_capacity,
                       int subgroup_capacity,

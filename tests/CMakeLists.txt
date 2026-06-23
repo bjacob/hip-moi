@@ -111,3 +111,5 @@ hip_moi_add_gtest(hip_moi_instrumented_lds_offset_api_test
                   instrumented/026_lds_offset_api_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_exact_shadow_backend_test
                   instrumented/027_exact_shadow_backend_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_sampled_watchpoint_backend_test
+                  instrumented/028_sampled_watchpoint_backend_test.hip)

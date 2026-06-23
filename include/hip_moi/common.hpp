@@ -55,6 +55,12 @@ namespace hip_moi
         barrier_divergence = 3,
     };
 
+    enum class backend_kind : uint32_t
+    {
+        exact_shadow       = 0,
+        sampled_watchpoint = 1,
+    };
+
     struct subgroup_state
     {
         uint32_t epoch;

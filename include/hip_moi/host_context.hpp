@@ -37,6 +37,8 @@ namespace hip_moi
         // Number of subgroups represented in this context.
         int subgroup_capacity = 64;
 
+        backend_kind backend = backend_kind::exact_shadow;
+
         bool destructor_reports = true;
         bool destructor_aborts  = true;
 
@@ -188,6 +190,7 @@ namespace hip_moi
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
                     ref.generation                      = generation;
+                    ref.backend                         = static_cast<uint32_t>(options_.backend);
                     return ref;
                 }
                 else if constexpr(has_coalesced_access_records)
@@ -213,6 +216,7 @@ namespace hip_moi
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
                     ref.generation                      = generation;
+                    ref.backend                         = static_cast<uint32_t>(options_.backend);
                     return ref;
                 }
                 else
@@ -235,6 +239,7 @@ namespace hip_moi
                     ref.sampled_watchpoints             = sampled_watchpoints_;
                     ref.sampled_watchpoint_capacity     = sampled_watchpoint_capacity_;
                     ref.generation                      = generation;
+                    ref.backend                         = static_cast<uint32_t>(options_.backend);
                     return ref;
                 }
             }
