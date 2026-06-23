@@ -9,7 +9,7 @@ They compare the main rows needed for the current Loom-parity work:
 
 * noop LDS matmul,
 * Jakub's sampled-Loom publish-only instrumentation,
-* hip-moi sampled-watchpoint instrumentation through the general `context`,
+* hip-moi general `context` with the `sampled_watchpoint` backend,
 * hip-moi sampled-watchpoint instrumentation through the narrower
   `sampled_watchpoint_context` fast view.
 
@@ -73,7 +73,7 @@ All rows used the default fair sampled knobs printed by the benchmarks:
 
 The compact rows are useful for quick iteration and wave-count scaling:
 
-| Shape | noop | sampled Loom | hip-moi exact shadow | hip-moi `context` sampled | hip-moi `sampled_watchpoint_context` |
+| Shape | noop | sampled Loom | hip-moi exact shadow | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | w2 2x4, M=32 N=64 K=16 | 0.00285 ms | 0.00477 ms | 0.00902 ms | 0.00481 ms | 0.00434 ms |
 | w4 4x16, M=64 N=256 K=16 | 0.00312 ms | 0.00589 ms | 0.0138 ms | 0.00746 ms | 0.00572 ms |
@@ -81,6 +81,6 @@ The compact rows are useful for quick iteration and wave-count scaling:
 
 The production-shaped row is the current main performance signal:
 
-| Shape | noop | sampled Loom | hip-moi `context` sampled | hip-moi `sampled_watchpoint_context` |
+| Shape | noop | sampled Loom | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
 | w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.64 ms | 26.1 ms | 3.43 ms |

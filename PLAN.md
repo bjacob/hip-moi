@@ -405,7 +405,7 @@ The small `w2_2x4_benchmark.hip` family compares:
 * noop,
 * sampled Loom,
 * hip-moi exact shadow through explicit LDS-offset APIs,
-* hip-moi sampled watchpoints through the general `context`,
+* hip-moi general `context` with the `sampled_watchpoint` backend,
 * hip-moi sampled watchpoints through the narrower
   `sampled_watchpoint_context` fast view when the default publish-only sampled
   knobs make that comparison valid.
@@ -418,7 +418,8 @@ current Loom-parity loop:
 
 * noop,
 * sampled Loom publish-only,
-* hip-moi sampled watchpoints publish-only through the general `context`,
+* hip-moi publish-only through the general `context` with the
+  `sampled_watchpoint` backend,
 * hip-moi sampled watchpoints publish-only through
   `sampled_watchpoint_context`.
 
@@ -466,7 +467,7 @@ performance-sensitive code changed. The current focused baseline at
 ```text
 noop                                      1.16 ms
 sampled Loom                              8.64 ms
-hip-moi context sampled                  26.1 ms
+hip-moi context + sampled_watchpoint     26.1 ms
 hip-moi sampled_watchpoint_context        3.43 ms
 ```
 
@@ -477,7 +478,7 @@ state in this plan, and include fresh benchmark numbers in commit messages or
 review notes when performance-sensitive code changes.
 
 The current hip-moi rows exercise the explicit-offset exact-shadow path, the
-general `context` sampled-watchpoint path, and the narrow
+general `context` with the `sampled_watchpoint` backend, and the narrow
 `sampled_watchpoint_context` sampled fast path. Under the fair publish-only
 production default, the narrow sampled view is now substantially faster than
 the sampled-Loom row on the vendored 16x8 benchmark, while the general
