@@ -107,3 +107,5 @@ hip_moi_add_gtest(hip_moi_instrumented_hard_synchronization_negative_test
                   instrumented/024_hard_synchronization_negative_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_shadow_abi_test
                   instrumented/025_shadow_abi_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_lds_offset_api_test
+                  instrumented/026_lds_offset_api_test.hip)

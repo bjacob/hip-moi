@@ -273,12 +273,33 @@ namespace hip_moi
         }
 
         template <typename T>
+        __device__ T lds_load_at(const T* ptr, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_load_at requires a trivially "
+                          "copyable type");
+            record_access_at(ptr, sizeof(T), access_kind::load, lds_byte_offset, site);
+            return *ptr;
+        }
+
+        template <typename T>
         __device__ void lds_store(T* ptr, T value, site_id site = no_site_id)
         {
             static_assert(std::is_trivially_copyable<T>::value,
                           "hip_moi::context::lds_store requires a trivially "
                           "copyable type");
             record_access(ptr, sizeof(T), access_kind::store, site);
+            *ptr = value;
+        }
+
+        template <typename T>
+        __device__ void
+            lds_store_at(T* ptr, T value, uint32_t lds_byte_offset, site_id site = no_site_id)
+        {
+            static_assert(std::is_trivially_copyable<T>::value,
+                          "hip_moi::context::lds_store_at requires a trivially "
+                          "copyable type");
+            record_access_at(ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
             *ptr = value;
         }
 
@@ -452,6 +473,16 @@ namespace hip_moi
         __device__ void
             record_access(const void* ptr, uint32_t byte_count, access_kind kind, site_id site)
         {
+            record_access_at(ptr, byte_count, kind, /*lds_byte_offset=*/0, site);
+        }
+
+        __device__ void record_access_at(const void* ptr,
+                                         uint32_t    byte_count,
+                                         access_kind kind,
+                                         uint32_t    lds_byte_offset,
+                                         site_id     site)
+        {
+            (void)lds_byte_offset;
             access_record record           = make_access_record(ptr, byte_count, kind, site);
             bool          wants_coalescing = site.allows_coalescing();
             if(wants_coalescing && record_coalescing_access(record))

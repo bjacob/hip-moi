@@ -420,6 +420,12 @@ the new storage layout able to represent:
 
 ### Session 3: Explicit LDS-Offset APIs
 
+Status: implemented. `context` now provides `lds_load_at` and `lds_store_at`
+overloads that accept an explicit LDS byte offset. They currently route through
+the existing record/log backend for compatibility while preserving site ids and
+safe/racy behavior; the offset is now available as the API hook that the
+Loom-like shadow backend will consume.
+
 Add `lds_load_at` and `lds_store_at` overloads. Initially they may route through
 the current backend for compatibility. Then wire them to the exact shadow path.
 
