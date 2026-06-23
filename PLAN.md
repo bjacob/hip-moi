@@ -851,7 +851,7 @@ the fair default knobs; that has been achieved.
 
 ### Session 8: Broaden End-To-End Workloads
 
-Status: not started.
+Status: first correctness test in progress.
 
 The next non-negotiable scope increase is an end-to-end workload beyond one
 isolated matmul. The likely first candidate is an attention block. This should
@@ -859,8 +859,16 @@ stress whether hip-moi's current fast path handles realistic phase structure,
 LDS reuse, and multiple cooperating tiled kernels, rather than merely one
 production matmul shape.
 
-The first version should be a benchmark/reference workload before it is a new
-detector feature. Keep the row structure familiar:
+Before adding a benchmark row, keep one smaller instrumented correctness test in
+the active suite. `tests/instrumented/009_attention_block_test.hip` is that
+first rung: one workgroup runs a scalar Q/K/V attention block, stages K/V tiles
+through LDS, performs online softmax accumulation, compares against a host
+reference, and exercises both the diagnostic-capable exact context and the
+publish-only sampled fast context. It is intentionally scalar and audit-friendly;
+the benchmark version should be WMMA-heavy and more production-shaped.
+
+The first benchmark version should be a benchmark/reference workload before it
+is a new detector feature. Keep the row structure familiar:
 
 * noop baseline,
 * sampled Loom-style comparison when feasible,

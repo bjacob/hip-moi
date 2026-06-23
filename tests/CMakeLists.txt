@@ -101,3 +101,5 @@ hip_moi_add_gtest(hip_moi_instrumented_exact_shadow_backend_test
                   instrumented/007_exact_shadow_backend_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_sampled_watchpoint_backend_test
                   instrumented/008_sampled_watchpoint_backend_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_attention_block_test
+                  instrumented/009_attention_block_test.hip)
