@@ -137,7 +137,11 @@ namespace
         ASSERT_GT(observed.diagnostic_count, 0);
         EXPECT_EQ(observed.diagnostics[0].kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
-        EXPECT_EQ(observed.diagnostics[0].first_site_id, kProducerSite.value());
-        EXPECT_EQ(observed.diagnostics[0].second_site_id, kConsumerSite.value());
+        uint64_t first_site  = observed.diagnostics[0].first_site_id;
+        uint64_t second_site = observed.diagnostics[0].second_site_id;
+        EXPECT_TRUE((first_site == kProducerSite.value() && second_site == kConsumerSite.value())
+                    || (first_site == kConsumerSite.value()
+                        && second_site == kProducerSite.value()))
+            << "first_site=" << first_site << " second_site=" << second_site;
     }
 } // namespace

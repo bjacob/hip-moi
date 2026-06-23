@@ -599,3 +599,89 @@ fp16_wmma_tiled_w8_16x8_sampled_loom_tsan                     0.006 ms      0.18
 fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.013 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.067 ms  iters=7752  warmup= 100.161 ms  warmup_iters=7674
 fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint            0.009 ms      0.12 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.116 ms  iters=11195  warmup= 100.230 ms  warmup_iters=11150
 ```
+
+## 2026-06-23 after sampled fairness pass
+
+hip-moi commit measured: this commit
+sanitizer-strategy benchmark commit: `0bd939d`
+
+This pass made the sampled benchmark rows more apples-to-apples:
+
+* both sampled rows use `SAMPLED_WATCHPOINTS`, `SAMPLED_SKIP`,
+  `SAMPLED_PROBES`, `SAMPLED_DELAY`, and `SAMPLED_REPORTS`;
+* the default sampled knobs are `watchpoints=1`, `skip=32`, `probes=1`,
+  `delay=32`, `reports=off`;
+* row names now say `publish_only` or `reporting`;
+* hip-moi generation is overridden from the per-launch runtime generation in
+  the benchmark, matching Loom's per-launch generation behavior.
+* sampled watchpoint reporting now publishes first and checks the displaced
+  watchpoint entry; the watchpoint slot is keyed by watched LDS range, epoch,
+  and generation rather than by subgroup or source site.
+
+2-wave calibration matrix, with `probes=1` and `delay=32`:
+
+```text
+watchpoints  skip  reports  sampled_loom  hip_moi_sampled
+1            1     off      0.007 ms      0.009 ms
+1            32    off      0.005 ms      0.005 ms
+64           1     off      0.007 ms      0.009 ms
+64           32    off      0.005 ms      0.005 ms
+1            1     on       0.010 ms      0.012 ms
+1            32    on       0.005 ms      0.005 ms
+64           1     on       0.009 ms      0.012 ms
+64           32    on       0.005 ms      0.005 ms
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=32 N=64 K=16 waves=2 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+fp16_wmma_tiled_w2_2x4_noop                                   0.003 ms      0.02 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.083 ms  iters=35606  warmup= 100.034 ms  warmup_iters=34606
+fp16_wmma_tiled_w2_2x4_sampled_loom_publish_only              0.005 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.486 ms  iters=21298  warmup= 100.294 ms  warmup_iters=21360
+fp16_wmma_tiled_w2_2x4_hip_moi_exact_shadow                   0.009 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.009 ms  iters=11172  warmup= 100.094 ms  warmup_iters=11166
+fp16_wmma_tiled_w2_2x4_hip_moi_sampled_watchpoint_publish_only    0.005 ms      0.01 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.135 ms  iters=20746  warmup= 100.175 ms  warmup_iters=20705
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh w4_4x16
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=64 N=256 K=16 waves=4 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+fp16_wmma_tiled_w4_4x16_noop                                  0.003 ms      0.17 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.020 ms  iters=31762  warmup= 100.010 ms  warmup_iters=31765
+fp16_wmma_tiled_w4_4x16_sampled_loom_publish_only             0.006 ms      0.09 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.155 ms  iters=16904  warmup= 100.010 ms  warmup_iters=16815
+fp16_wmma_tiled_w4_4x16_hip_moi_exact_shadow                  0.014 ms      0.04 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.243 ms  iters=7211  warmup= 100.594 ms  warmup_iters=7253
+fp16_wmma_tiled_w4_4x16_hip_moi_sampled_watchpoint_publish_only    0.008 ms      0.07 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.219 ms  iters=13152  warmup= 100.022 ms  warmup_iters=13129
+```
+
+Command:
+
+```bash
+HIP_MOI_ROOT=/home/benoit/workspace/hip-moi ./rdna4_matmul/build_w2_2x4_benchmark.sh w8_16x8
+```
+
+Output:
+
+```text
+device 0: AMD Radeon RX 9070, gcnArch=gfx1201, CUs=28
+bench shape: M=256 N=128 K=16 waves=8 min_ms=100.0 warmup_ms=100.0
+sampled knobs: watchpoints=1 skip=32 probes=1 delay=32 reports=off
+fp16_wmma_tiled_w8_16x8_noop                                  0.003 ms      0.32 TFLOP/s    0.2% of 191 TFLOP/s  total= 100.017 ms  iters=30853  warmup= 100.102 ms  warmup_iters=30884
+fp16_wmma_tiled_w8_16x8_sampled_loom_publish_only             0.006 ms      0.18 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.202 ms  iters=17304  warmup= 100.039 ms  warmup_iters=17072
+fp16_wmma_tiled_w8_16x8_hip_moi_exact_shadow                  0.013 ms      0.08 TFLOP/s    0.0% of 191 TFLOP/s  total= 100.013 ms  iters=7767  warmup= 100.065 ms  warmup_iters=7772
+fp16_wmma_tiled_w8_16x8_hip_moi_sampled_watchpoint_publish_only    0.008 ms      0.13 TFLOP/s    0.1% of 191 TFLOP/s  total= 100.261 ms  iters=12608  warmup= 100.141 ms  warmup_iters=12608
+```

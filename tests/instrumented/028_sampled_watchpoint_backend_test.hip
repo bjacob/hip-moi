@@ -96,6 +96,9 @@ namespace
     {
         hip_moi::context::storage_ref ref = storage.ref();
         ref.backend = static_cast<uint32_t>(hip_moi::backend_kind::sampled_watchpoint);
+        ref.sampled_watchpoint_sample_skip = 1;
+        ref.sampled_watchpoint_probe_count = 0;
+        ref.sampled_watchpoint_report_conflicts = 1;
         return ref;
     }
 

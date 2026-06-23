@@ -204,16 +204,28 @@ Each watchpoint entry represents an exact LDS dword-cell range:
 {start_cell, cell_count, access_kind, subgroup_id, epoch, generation}
 ```
 
-Only selected lanes publish and check watchpoints. The selection should be
+Only selected lanes publish and check watchpoints. The selection is
 deterministic for a launch and mixed from generation, workgroup id, subgroup id,
-site id, and possibly the access range. Knobs such as watchpoint count, probe
-count, and sample skip should mirror Jakub's benchmark enough that we can make
-meaningful comparisons.
+and site id. The sampled backend now exposes the same basic tuning axes as
+Jakub's sampled Loom HIP prototype:
 
-The current sampled selector is intentionally cheap: it uses 32-bit mixing and
-power-of-two masks rather than 64-bit modulo arithmetic. This is part of the
-hot-path contract; sampled capacities should be chosen as powers of two for
-good distribution.
+* watchpoint count,
+* sample skip,
+* probe count,
+* delay iterations,
+* publish-only versus reporting mode.
+
+The sampled selector uses 32-bit mixing and power-of-two masks rather than
+64-bit modulo arithmetic on the hot path. Sampled capacities should be chosen
+as powers of two for good distribution and for fair comparison with the Loom
+benchmark row.
+
+Selection is site-aware, but conflict rendezvous is range-aware: the watchpoint
+slot is keyed by the watched LDS range, epoch, and generation, not by source
+site or subgroup. Reporting mode publishes first, checks the displaced
+watchpoint entry, and then optionally probes additional slots. That keeps the
+one-probe path meaningful for common same-range conflicts while still allowing
+larger probe counts or full-table scans for tests and diagnostic-heavy runs.
 
 This path deliberately permits false negatives from sampling, limited probes, or
 table overwrites. It must not create false positives for the represented
@@ -345,6 +357,18 @@ and passes it through the instrumented access helpers. That better matches the
 intended source-instrumentation shape than rebuilding a context inside every
 instrumented access wrapper.
 
+The sampled rows now share one fair knob set:
+
+```text
+SAMPLED_WATCHPOINTS, SAMPLED_SKIP, SAMPLED_PROBES, SAMPLED_DELAY,
+SAMPLED_REPORTS
+```
+
+By default this is `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
+`reports=off`, matching Jakub's sampled-Loom publish-only configuration. The
+benchmark prints these effective knobs and names sampled rows as
+`publish_only` or `reporting`.
+
 The current go-to shapes are:
 
 ```bash
@@ -361,11 +385,12 @@ commit. For doc-only commits, either append a fresh run or explicitly note that
 the commit is performance-equivalent to the previous logged entry.
 
 The current hip-moi rows exercise the explicit-offset exact-shadow and
-sampled-watchpoint paths. The sampled path is not yet competitive with Jakub's
-sampled Loom row; the next benchmark goal is to shrink hot-path helper work,
-VGPR pressure, and selected-lane overhead.
+sampled-watchpoint paths. Under the fair publish-only default, sampled hip-moi
+is close to sampled Loom on the 2-wave shape and somewhat slower on the 4/8-wave
+shapes. Dense sampling and reporting-on rows expose the remaining overhead.
 
-Latest codegen audit on the extracted 2-wave benchmark:
+Historical codegen audits after backend specialization on the extracted 2-wave
+benchmark showed the main pressure points:
 
 * before backend specialization, hip-moi exact and sampled both compiled to the
   same 79-VGPR, 37.6-KB-code kernel because runtime backend dispatch kept both
@@ -376,6 +401,12 @@ Latest codegen audit on the extracted 2-wave benchmark:
   watchpoints to 57 VGPR and 15.2 KB of code;
 * the generated metadata still reports `uses_flat_scratch=1`, although
   `ScratchSize` is 0 for the hot kernels.
+
+After adding fair sampled knobs, a codegen audit before the latest sampled
+reporting-slot fix showed sampled hip-moi at 71 VGPR and 18.5 KB of code on the
+same extracted 2-wave benchmark. Refresh the audit before relying on exact
+VGPR/code-size numbers; `BENCHMARK_LOG.md` is the source of truth for current
+latency numbers.
 
 ## Test Corpus
 
@@ -527,6 +558,17 @@ to roughly 0.006 ms on 2-wave and 0.009 ms on 4/8-wave. Code size dropped, but
 VGPR use rose to 63 for the sampled row, so this is not a free lunch; it mostly
 confirms that repeated context lookup was real overhead and that context live
 range is now a central tuning problem.
+
+The fairness pass then aligned sampled knobs between sampled Loom and hip-moi,
+fixed per-launch hip-moi generation in the benchmark, and split sampled row
+names into publish-only versus reporting. With fair default knobs
+(`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`), sampled
+hip-moi is now approximately tied with sampled Loom on 2-wave and trails it by
+about 0.002 ms on the 4/8-wave rows. Dense sampling (`skip=1`) and reporting
+mode show hip-moi still has avoidable policy/checking overhead. The same pass
+also fixed sampled reporting rendezvous so same-range conflicts meet in the
+same watchpoint slot instead of depending on source-site or subgroup hash
+collisions.
 
 Use the 2/4/8-wave benchmark set to tune:
 

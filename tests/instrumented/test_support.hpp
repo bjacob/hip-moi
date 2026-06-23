@@ -120,6 +120,10 @@ namespace hip_moi::test
                 sampled_watchpoint_capacity_,
                 1,
                 static_cast<uint32_t>(backend_),
+                1,
+                1,
+                0,
+                1,
             };
         }
 

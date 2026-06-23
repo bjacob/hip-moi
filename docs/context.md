@@ -59,6 +59,24 @@ options.sampled_watchpoint_capacity = -1; // fill remaining byte budget
 options.exact_shadow_entry_capacity = 0;  // no exact-shadow table
 ```
 
+Sampled watchpoints also expose policy knobs:
+
+```c++
+options.sampled_watchpoint_sample_skip = 32;
+options.sampled_watchpoint_probe_count = 1;
+options.sampled_watchpoint_delay_iters = 32;
+options.sampled_watchpoint_reports = false;
+```
+
+`sample_skip` thins static site/subgroup instances after the deterministic
+selection seed has been mixed; `1` means no thinning. Reporting mode always
+checks the watchpoint entry displaced by the current publish. `probe_count`
+controls how many additional watchpoint slots are scanned; `0` means scan the
+whole table. `delay_iters` is a benchmark knob matching Jakub's sampled Loom
+prototype. `sampled_watchpoint_reports=false` makes the sampled backend publish
+watchpoints without scanning for conflicts, which is useful for apples-to-apples
+publish-only benchmark rows.
+
 ## Inspecting The Layout
 
 Host contexts expose the computed layout:

@@ -56,6 +56,10 @@ namespace hip_moi
             int             sampled_watchpoint_capacity     = 0;
             uint64_t        generation                      = 0;
             uint32_t        backend                         = 0;
+            uint32_t        sampled_watchpoint_sample_skip      = 1;
+            uint32_t        sampled_watchpoint_probe_count      = 1;
+            uint32_t        sampled_watchpoint_delay_iters      = 0;
+            uint32_t        sampled_watchpoint_report_conflicts = 1;
         };
 
         template <int DiagnosticCapacity,
@@ -88,6 +92,10 @@ namespace hip_moi
                     SampledWatchpointCapacity,
                     1,
                     static_cast<uint32_t>(backend),
+                    1,
+                    1,
+                    0,
+                    1,
                 };
             }
         };
@@ -364,7 +372,8 @@ namespace hip_moi
                 return;
             }
 
-            if(lane_in_subgroup() != sampled_selected_lane(site))
+            uint32_t selection_seed = sampled_selection_seed(site);
+            if(!sampled_should_publish(selection_seed))
             {
                 return;
             }
@@ -388,20 +397,53 @@ namespace hip_moi
                                          ? detail::sampled_watchpoint::max_count
                                          : static_cast<uint32_t>(remaining);
                 record_sampled_watchpoint_range(
-                    kind, start_cell, chunk, lds_byte_offset, byte_count, site);
+                    kind, start_cell, chunk, lds_byte_offset, byte_count, site, selection_seed);
                 start_cell += chunk;
             }
         }
 
-        __device__ uint32_t sampled_selected_lane(site_id site) const
+        __device__ uint32_t flat_workgroup_id() const
+        {
+            return static_cast<uint32_t>(
+                blockIdx.x
+                + gridDim.x * (blockIdx.y + gridDim.y * static_cast<uint32_t>(blockIdx.z)));
+        }
+
+        __device__ uint32_t sampled_site_seed(site_id site) const
+        {
+            return static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
+        }
+
+        __device__ uint32_t sampled_selection_seed(site_id site) const
+        {
+            uint32_t seed = static_cast<uint32_t>(storage_.generation) * 0x9e3779b9u;
+            seed ^= (flat_workgroup_id() + 1u) * 0x85ebca6bu;
+            seed ^= (subgroup_id() + 1u) * 0xc2b2ae35u;
+            seed ^= sampled_site_seed(site) * 0x27d4eb2du;
+            return detail::mix32(seed);
+        }
+
+        __device__ bool sampled_should_publish(uint32_t selection_seed) const
         {
             uint32_t subgroup_threads = cfg_.threads_per_subgroup > 0
                                             ? static_cast<uint32_t>(cfg_.threads_per_subgroup)
                                             : 1u;
-            uint32_t seed             = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
-            seed ^= (subgroup_id() + 1u) * 0xc2b2ae35u;
-            seed ^= static_cast<uint32_t>(storage_.generation) * 0x9e3779b9u;
-            return detail::mix32(seed) & (subgroup_threads - 1u);
+            uint32_t skip             = storage_.sampled_watchpoint_sample_skip == 0
+                                            ? 1u
+                                            : storage_.sampled_watchpoint_sample_skip;
+            if(skip > 1u)
+            {
+                bool     power_of_two = (skip & (skip - 1u)) == 0;
+                uint32_t remainder
+                    = power_of_two ? (selection_seed & (skip - 1u)) : (selection_seed % skip);
+                if(remainder != 0)
+                {
+                    return false;
+                }
+            }
+
+            uint32_t selected_lane = map_sampled_index(selection_seed >> 16, subgroup_threads);
+            return lane_in_subgroup() == selected_lane;
         }
 
         __device__ void record_sampled_watchpoint_range(access_kind kind,
@@ -409,7 +451,8 @@ namespace hip_moi
                                                         uint32_t    cell_count,
                                                         uint32_t    lds_byte_offset,
                                                         uint32_t    byte_count,
-                                                        site_id     site) const
+                                                        site_id     site,
+                                                        uint32_t    selection_seed) const
         {
             uint32_t subgroup = subgroup_id();
             uint32_t epoch    = detail::current_epoch(storage_, subgroup);
@@ -420,25 +463,96 @@ namespace hip_moi
                                                         static_cast<uint32_t>(storage_.generation),
                                                         start_cell,
                                                         cell_count);
-            uint32_t slot = sampled_watchpoint_slot(start_cell);
-            uint64_t prior_value
-                = atomic_exchange_shadow_entry(&storage_.sampled_watchpoints[slot], packed);
-            detail::sampled_watchpoint_entry prior
-                = detail::decode_sampled_watchpoint_entry(prior_value);
+            uint32_t                         slot = sampled_watchpoint_slot(start_cell, epoch);
             detail::sampled_watchpoint_entry current
                 = detail::decode_sampled_watchpoint_entry(packed);
-            if(detail::sampled_watchpoints_conflict(current, prior))
+            uint64_t prior_value
+                = atomic_exchange_shadow_entry(&storage_.sampled_watchpoints[slot], packed);
+            if(storage_.sampled_watchpoint_report_conflicts)
             {
-                emit_sampled_watchpoint_conflict(prior, current, lds_byte_offset, byte_count, site);
+                detail::sampled_watchpoint_entry prior
+                    = detail::decode_sampled_watchpoint_entry(prior_value);
+                if(detail::sampled_watchpoints_conflict(current, prior))
+                {
+                    emit_sampled_watchpoint_conflict(
+                        prior, current, lds_byte_offset, byte_count, site);
+                }
+                scan_sampled_watchpoint_conflicts(
+                    current, slot, start_cell, lds_byte_offset, byte_count, site, selection_seed);
+            }
+            sampled_delay();
+        }
+
+        __device__ uint32_t map_sampled_index(uint32_t value, uint32_t count) const
+        {
+            if(count == 0)
+            {
+                return 0;
+            }
+            bool power_of_two = (count & (count - 1u)) == 0;
+            return power_of_two ? (value & (count - 1u)) : (value % count);
+        }
+
+        __device__ uint32_t sampled_watchpoint_slot(uint32_t start_cell, uint32_t epoch) const
+        {
+            uint32_t seed = epoch * 0x85ebca6bu;
+            seed ^= static_cast<uint32_t>(storage_.generation) * 0xc2b2ae35u;
+            seed ^= start_cell * 0x165667b1u;
+            return map_sampled_index(detail::mix32(seed),
+                                     static_cast<uint32_t>(storage_.sampled_watchpoint_capacity));
+        }
+
+        __device__ uint32_t sampled_probe_step(uint32_t selection_seed, uint32_t start_cell) const
+        {
+            uint32_t capacity = static_cast<uint32_t>(storage_.sampled_watchpoint_capacity);
+            if(capacity <= 1)
+            {
+                return 0;
+            }
+            uint32_t seed = selection_seed ^ (start_cell * 0x94d049bbu);
+            uint32_t step = detail::mix32(seed) | 1u;
+            return map_sampled_index(step, capacity);
+        }
+
+        __device__ void
+            scan_sampled_watchpoint_conflicts(const detail::sampled_watchpoint_entry& current,
+                                              uint32_t                                slot,
+                                              uint32_t                                start_cell,
+                                              uint32_t lds_byte_offset,
+                                              uint32_t byte_count,
+                                              site_id  site,
+                                              uint32_t selection_seed) const
+        {
+            uint32_t capacity = static_cast<uint32_t>(storage_.sampled_watchpoint_capacity);
+            uint32_t probes   = storage_.sampled_watchpoint_probe_count == 0
+                                    ? capacity
+                                    : storage_.sampled_watchpoint_probe_count;
+            if(probes > capacity)
+            {
+                probes = capacity;
+            }
+            uint32_t step = sampled_probe_step(selection_seed, start_cell);
+            for(uint32_t probe = 0; probe < probes; ++probe)
+            {
+                uint32_t index = map_sampled_index(slot + probe * step, capacity);
+                uint64_t prior_value
+                    = *reinterpret_cast<volatile uint64_t*>(&storage_.sampled_watchpoints[index]);
+                detail::sampled_watchpoint_entry prior
+                    = detail::decode_sampled_watchpoint_entry(prior_value);
+                if(detail::sampled_watchpoints_conflict(current, prior))
+                {
+                    emit_sampled_watchpoint_conflict(
+                        prior, current, lds_byte_offset, byte_count, site);
+                }
             }
         }
 
-        __device__ uint32_t sampled_watchpoint_slot(uint32_t start_cell) const
+        __device__ void sampled_delay() const
         {
-            uint32_t seed = start_cell * 0x94d049bbu;
-            seed ^= static_cast<uint32_t>(storage_.generation) * 0x9e3779b9u;
-            return detail::mix32(seed)
-                   & (static_cast<uint32_t>(storage_.sampled_watchpoint_capacity) - 1u);
+            for(uint32_t i = 0; i < storage_.sampled_watchpoint_delay_iters; ++i)
+            {
+                asm volatile("s_nop 0" ::: "memory");
+            }
         }
 
         __device__ uint64_t atomic_exchange_shadow_entry(uint64_t* address, uint64_t value) const

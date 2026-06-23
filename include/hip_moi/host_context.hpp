@@ -29,6 +29,14 @@ namespace hip_moi
         int sampled_watchpoint_capacity = -1;
         int diagnostic_capacity         = -1;
 
+        // Sampled-watchpoint tuning. A skip of 1 samples every selected static
+        // site/subgroup instance; larger values randomly thin those instances.
+        // A probe count of 0 scans the whole watchpoint table.
+        uint32_t sampled_watchpoint_sample_skip = 1;
+        uint32_t sampled_watchpoint_probe_count = 1;
+        uint32_t sampled_watchpoint_delay_iters = 0;
+        bool     sampled_watchpoint_reports     = true;
+
         // Number of subgroups represented in this context.
         int subgroup_capacity = 64;
 
@@ -99,6 +107,10 @@ namespace hip_moi
                 sampled_watchpoint_capacity_,
                 generation,
                 static_cast<uint32_t>(options_.backend),
+                options_.sampled_watchpoint_sample_skip,
+                options_.sampled_watchpoint_probe_count,
+                options_.sampled_watchpoint_delay_iters,
+                options_.sampled_watchpoint_reports ? 1u : 0u,
             };
         }
 
