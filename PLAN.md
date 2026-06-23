@@ -465,7 +465,9 @@ SAMPLED_REPORTS
 By default this is `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
 `reports=off`, matching Jakub's sampled-Loom publish-only configuration. The
 benchmark prints these effective knobs and names sampled rows as
-`publish_only` or `reporting`.
+`publish_only` or `reporting`. The headline per-iteration latency prints in
+microseconds for values below 1 ms and in milliseconds otherwise; elapsed
+measurement windows remain in milliseconds.
 
 The current tiny go-to shapes are:
 
@@ -490,18 +492,18 @@ performance-sensitive code changed. The current focused baseline at
 
 ```text
 noop                                      1.16 ms
-sampled Loom                              8.63 ms
-hip-moi context + sampled_watchpoint     26.1 ms
-hip-moi sampled_watchpoint_context        3.41 ms
+sampled Loom                              8.65 ms
+hip-moi context + sampled_watchpoint     25.9 ms
+hip-moi sampled_watchpoint_context        3.38 ms
 ```
 
 The current corrected compact baselines are:
 
 ```text
 shape      noop       sampled Loom  exact shadow  context+sampled  sampled_context
-w2 2x4     0.00283 ms 0.00467 ms    0.00886 ms    0.00481 ms       0.00345 ms
-w4 4x16    0.00313 ms 0.00590 ms    0.0138 ms     0.00746 ms       0.00430 ms
-w8 16x8    0.00325 ms 0.00578 ms    0.0129 ms     0.00774 ms       0.00462 ms
+w2 2x4     2.80 µs   4.69 µs       8.91 µs       4.85 µs          3.49 µs
+w4 4x16    3.15 µs   5.91 µs       14.0 µs       7.45 µs          4.31 µs
+w8 16x8    3.20 µs   5.79 µs       13.0 µs       7.74 µs          4.62 µs
 ```
 
 The old append-only `BENCHMARK_LOG.md` has been removed. It was useful while we

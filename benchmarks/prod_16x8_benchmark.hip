@@ -127,6 +127,18 @@ static double get_double_env(const char *name, double default_value) {
   return value ? std::strtod(value, nullptr) : default_value;
 }
 
+struct DisplayLatency {
+  double value;
+  const char *unit;
+};
+
+static DisplayLatency display_latency(double ms) {
+  if (ms < 1.0) {
+    return DisplayLatency{/*value=*/ms * 1000.0, /*unit=*/"µs"};
+  }
+  return DisplayLatency{/*value=*/ms, /*unit=*/"ms"};
+}
+
 static int ceil_div(int a, int b) { return (a + b - 1) / b; }
 
 __device__ hip_moi::context::storage_ref *g_hip_moi_context_storages = nullptr;
@@ -1142,11 +1154,13 @@ static double run_one(const char *name, Mode mode, half_t *a, half_t *b,
   double ops = 2.0 * static_cast<double>(M) * static_cast<double>(N) *
                static_cast<double>(K);
   double achieved = ops / (ms * 1.0e9);
-  std::printf("%-58s %#9.3g ms  %8.2f TFLOP/s  %5.1f%% of 191 TFLOP/s"
+  DisplayLatency latency = display_latency(ms);
+  std::printf("%-58s %#9.3g %s  %8.2f TFLOP/s  %5.1f%% of 191 TFLOP/s"
               "  total=%8.3f ms  iters=%d  warmup=%8.3f ms"
               "  warmup_iters=%d\n",
-              name, ms, achieved, 100.0 * achieved / kFp16TargetTflops,
-              elapsed_ms, iterations, warmup_elapsed_ms, warmup_iterations);
+              name, latency.value, latency.unit, achieved,
+              100.0 * achieved / kFp16TargetTflops, elapsed_ms, iterations,
+              warmup_elapsed_ms, warmup_iterations);
   return ms;
 }
 

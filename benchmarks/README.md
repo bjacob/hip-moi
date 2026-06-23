@@ -71,18 +71,20 @@ They are RDNA4-only and are skipped unless `CMAKE_HIP_ARCHITECTURES` names a
 Measured on 2026-06-23 on device 0, AMD Radeon RX 9070, `gfx1201`, 28 CUs.
 All rows used the default fair sampled knobs printed by the benchmarks:
 `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`, with
-`min_ms=100` and `warmup_ms=100`.
+`min_ms=100` and `warmup_ms=100`. The headline per-iteration latency is printed
+in microseconds for values below 1 ms and milliseconds otherwise; elapsed
+measurement windows such as `total=` and `warmup=` remain in milliseconds.
 
 The compact rows are useful for quick iteration and wave-count scaling:
 
 | Shape | noop | sampled Loom | hip-moi exact shadow | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| w2 2x4, M=32 N=64 K=16 | 0.00283 ms | 0.00467 ms | 0.00886 ms | 0.00481 ms | 0.00345 ms |
-| w4 4x16, M=64 N=256 K=16 | 0.00313 ms | 0.00590 ms | 0.0138 ms | 0.00746 ms | 0.00430 ms |
-| w8 16x8, M=256 N=128 K=16 | 0.00325 ms | 0.00578 ms | 0.0129 ms | 0.00774 ms | 0.00462 ms |
+| w2 2x4, M=32 N=64 K=16 | 2.80 µs | 4.69 µs | 8.91 µs | 4.85 µs | 3.49 µs |
+| w4 4x16, M=64 N=256 K=16 | 3.15 µs | 5.91 µs | 14.0 µs | 7.45 µs | 4.31 µs |
+| w8 16x8, M=256 N=128 K=16 | 3.20 µs | 5.79 µs | 13.0 µs | 7.74 µs | 4.62 µs |
 
 The production-shaped row is the current main performance signal:
 
 | Shape | noop | sampled Loom | hip-moi `context` + `sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.63 ms | 26.1 ms | 3.41 ms |
+| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.65 ms | 25.9 ms | 3.38 ms |
