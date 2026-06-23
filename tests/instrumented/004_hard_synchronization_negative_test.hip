@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/024_hard_synchronization_negative_test.hip
+// tests/instrumented/004_hard_synchronization_negative_test.hip
 //
 // Non-hanging tests for synchronization patterns that would be hard to exercise
 // with a real divergent __syncthreads().

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/003_host_context_test.hip
+// tests/instrumented/002_host_context_test.hip
 //
 // User-facing host_context and HIP_MOI_CHECK tests.
 #include "test_support.hpp"

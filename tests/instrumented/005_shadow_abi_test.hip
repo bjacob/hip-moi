@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/025_shadow_abi_test.hip
+// tests/instrumented/005_shadow_abi_test.hip
 //
 // Tests for Loom-style compact shadow/watchpoint metadata helpers.
 #include "hip_moi/hip_moi.hpp"

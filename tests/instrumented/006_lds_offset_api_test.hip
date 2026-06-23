@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/027_exact_shadow_backend_test.hip
+// tests/instrumented/006_lds_offset_api_test.hip
 //
-// Tests for the explicit-offset exact-shadow backend.
+// Tests for explicit LDS-byte-offset access APIs.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -21,7 +21,6 @@ namespace
     constexpr int              kExactShadowEntries = 1;
     constexpr hip_moi::site_id kProducerSite(0x101);
     constexpr hip_moi::site_id kConsumerSite(0x202);
-    constexpr hip_moi::site_id kOverflowSite(0x303);
 
     struct observed_metadata
     {
@@ -39,7 +38,7 @@ namespace
         return hip_moi::context(storage, cfg);
     }
 
-    __global__ void exact_shadow_safe_kernel(int* out, hip_moi::context::storage_ref storage)
+    __global__ void offset_safe_kernel(int* out, hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -48,19 +47,17 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
-                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         ctx.syncthreads();
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            out[0] = ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
-                &value, /*lds_byte_offset=*/0, kConsumerSite);
+            out[0] = ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
 
-    __global__ void exact_shadow_race_kernel(hip_moi::context::storage_ref storage)
+    __global__ void offset_race_kernel(hip_moi::context::storage_ref storage)
     {
         __shared__ int value;
 
@@ -69,28 +66,11 @@ namespace
 
         if(ctx.thread_id() == 0)
         {
-            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
-                &value, 77, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.lds_store_at(&value, 77, /*lds_byte_offset=*/0, kProducerSite);
         }
         if(ctx.thread_id() == kThreadsPerSubgroup)
         {
-            (void)ctx.lds_load_at<hip_moi::backend_kind::exact_shadow>(
-                &value, /*lds_byte_offset=*/0, kConsumerSite);
-        }
-        ctx.finish();
-    }
-
-    __global__ void exact_shadow_capacity_kernel(hip_moi::context::storage_ref storage)
-    {
-        __shared__ int values[3];
-
-        hip_moi::context ctx = make_context(storage);
-        ctx.init_workgroup();
-
-        if(ctx.thread_id() == 0)
-        {
-            ctx.lds_store_at<hip_moi::backend_kind::exact_shadow>(
-                &values[2], 99, /*lds_byte_offset=*/8, kOverflowSite);
+            (void)ctx.lds_load_at(&value, /*lds_byte_offset=*/0, kConsumerSite);
         }
         ctx.finish();
     }
@@ -108,15 +88,7 @@ namespace
                                           hipMemcpyDeviceToHost));
     }
 
-    bool diagnostic_sites_match(const hip_moi::context::diagnostic& diagnostic,
-                                uint64_t                            first,
-                                uint64_t                            second)
-    {
-        return (diagnostic.first_site_id == first && diagnostic.second_site_id == second)
-               || (diagnostic.first_site_id == second && diagnostic.second_site_id == first);
-    }
-
-    TEST(HipMoiExactShadowBackend, SynchronizedOffsetAccessesDoNotReport)
+    TEST(HipMoiLdsOffsetApi, OffsetAccessesPreserveCurrentSafeBehavior)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
@@ -130,13 +102,8 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(
             hipMemcpy(device_output, &initial, sizeof(initial), hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(exact_shadow_safe_kernel,
-                           dim3(1),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           device_output,
-                           storage.ref());
+        hipLaunchKernelGGL(
+            offset_safe_kernel, dim3(1), dim3(kThreadCount), 0, 0, device_output, storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
@@ -152,7 +119,7 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
     }
 
-    TEST(HipMoiExactShadowBackend, RacyOffsetAccessesDiagnose)
+    TEST(HipMoiLdsOffsetApi, OffsetAccessesPreserveCurrentDiagnosticBehavior)
     {
         hip_moi::test::device_context_storage storage;
         ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
@@ -160,8 +127,7 @@ namespace
             /*subgroup_capacity=*/kSubgroupCount,
             /*exact_shadow_entry_capacity=*/kExactShadowEntries));
 
-        hipLaunchKernelGGL(
-            exact_shadow_race_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
+        hipLaunchKernelGGL(offset_race_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
@@ -171,29 +137,11 @@ namespace
         ASSERT_GT(observed.diagnostic_count, 0);
         EXPECT_EQ(observed.diagnostics[0].kind,
                   static_cast<uint32_t>(hip_moi::diagnostic_kind::access_conflict));
-        EXPECT_TRUE(diagnostic_sites_match(
-            observed.diagnostics[0], kProducerSite.value(), kConsumerSite.value()));
-    }
-
-    TEST(HipMoiExactShadowBackend, OutOfRangeOffsetsReportMetadataSaturation)
-    {
-        hip_moi::test::device_context_storage storage;
-        ASSERT_NO_FATAL_FAILURE(storage.allocate_with_exact_shadow(
-            /*diagnostic_capacity=*/kDiagnosticCapacity,
-            /*subgroup_capacity=*/kSubgroupCount,
-            /*exact_shadow_entry_capacity=*/kExactShadowEntries));
-
-        hipLaunchKernelGGL(
-            exact_shadow_capacity_kernel, dim3(1), dim3(kThreadCount), 0, 0, storage.ref());
-        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
-        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
-
-        observed_metadata observed = {};
-        ASSERT_NO_FATAL_FAILURE(copy_observed_metadata(storage, &observed));
-
-        ASSERT_GT(observed.diagnostic_count, 0);
-        EXPECT_EQ(observed.diagnostics[0].kind,
-                  static_cast<uint32_t>(hip_moi::diagnostic_kind::metadata_full));
-        EXPECT_EQ(observed.diagnostics[0].first_site_id, kOverflowSite.value());
+        uint64_t first_site  = observed.diagnostics[0].first_site_id;
+        uint64_t second_site = observed.diagnostics[0].second_site_id;
+        EXPECT_TRUE((first_site == kProducerSite.value() && second_site == kConsumerSite.value())
+                    || (first_site == kConsumerSite.value()
+                        && second_site == kProducerSite.value()))
+            << "first_site=" << first_site << " second_site=" << second_site;
     }
 } // namespace

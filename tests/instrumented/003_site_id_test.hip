@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/020_site_id_test.hip
+// tests/instrumented/003_site_id_test.hip
 //
 // Tests for source-site ids carried by shadow instrumentation diagnostics.
 #include "test_support.hpp"

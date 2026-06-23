@@ -88,16 +88,16 @@ endif()
 hip_moi_add_gtest(hip_moi_instrumented_single_subgroup_safe_mvp_test
                   instrumented/001_single_subgroup_safe_mvp_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_host_context_test
-                  instrumented/003_host_context_test.hip)
+                  instrumented/002_host_context_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_site_id_test
-                  instrumented/020_site_id_test.hip)
+                  instrumented/003_site_id_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_hard_synchronization_negative_test
-                  instrumented/024_hard_synchronization_negative_test.hip)
+                  instrumented/004_hard_synchronization_negative_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_shadow_abi_test
-                  instrumented/025_shadow_abi_test.hip)
+                  instrumented/005_shadow_abi_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_lds_offset_api_test
-                  instrumented/026_lds_offset_api_test.hip)
+                  instrumented/006_lds_offset_api_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_exact_shadow_backend_test
-                  instrumented/027_exact_shadow_backend_test.hip)
+                  instrumented/007_exact_shadow_backend_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_sampled_watchpoint_backend_test
-                  instrumented/028_sampled_watchpoint_backend_test.hip)
+                  instrumented/008_sampled_watchpoint_backend_test.hip)

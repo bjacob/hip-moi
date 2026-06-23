@@ -541,7 +541,9 @@ files can be stale after header-only changes.
 ## Test Corpus
 
 The active instrumented suite is intentionally smaller after dropping
-thread-level mode.
+thread-level mode. Its filenames use contiguous three-digit prefixes so the
+directory order reflects the intended progression through the active API and
+backend tests.
 
 Kept:
 

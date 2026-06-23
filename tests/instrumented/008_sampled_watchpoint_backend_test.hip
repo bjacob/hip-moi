@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/028_sampled_watchpoint_backend_test.hip
+// tests/instrumented/008_sampled_watchpoint_backend_test.hip
 //
 // Tests for the sampled-watchpoint backend.
 #include "test_support.hpp"

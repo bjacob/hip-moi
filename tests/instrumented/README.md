@@ -16,16 +16,16 @@ Loom-style instrumentation.
 Current files:
 
 * `001_single_subgroup_safe_mvp_test.hip`: one diagnostic-free API smoke test.
-* `003_host_context_test.hip`: `hip_moi::host_context`, `HIP_MOI_CHECK`,
+* `002_host_context_test.hip`: `hip_moi::host_context`, `HIP_MOI_CHECK`,
   destructor reporting/aborting, byte-budget allocation, and diagnostic text.
-* `020_site_id_test.hip`: source-site ids in diagnostics.
-* `024_hard_synchronization_negative_test.hip`: non-hanging simulated barrier
+* `003_site_id_test.hip`: source-site ids in diagnostics.
+* `004_hard_synchronization_negative_test.hip`: non-hanging simulated barrier
   divergence diagnostics.
-* `025_shadow_abi_test.hip`: host/device shadow-packing ABI checks.
-* `026_lds_offset_api_test.hip`: explicit LDS byte-offset instrumentation.
-* `027_exact_shadow_backend_test.hip`: deterministic exact-shadow conflict
+* `005_shadow_abi_test.hip`: host/device shadow-packing ABI checks.
+* `006_lds_offset_api_test.hip`: explicit LDS byte-offset instrumentation.
+* `007_exact_shadow_backend_test.hip`: deterministic exact-shadow conflict
   diagnostics.
-* `028_sampled_watchpoint_backend_test.hip`: sampled watchpoint diagnostics.
+* `008_sampled_watchpoint_backend_test.hip`: sampled watchpoint diagnostics.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the
