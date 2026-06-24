@@ -38,6 +38,9 @@ Current files:
 * `011_rdna4_d128_attention_block_test.hip`: RDNA4-only D128/V128 attention
   correctness test shaped by the AITER/llama.cpp source-mined production
   signal, used as the rung before the next attention benchmark.
+* `012_rdna4_d128_attention_pressure_test.hip`: RDNA4-only D128/V128 attention
+  pressure correctness tests for full K/V double-buffering at about 19.25 KiB
+  of LDS and a wider 32-key pressure tile at about 38.25 KiB of LDS.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the

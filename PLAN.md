@@ -965,6 +965,18 @@ access remains instrumented, and both the exact context and sampled fast context
 must match the host reference. This is the required correctness step before a
 new D128 attention benchmark.
 
+The source-mined D128 LDS-pressure correctness rung is
+`tests/instrumented/012_rdna4_d128_attention_pressure_test.hip`. It keeps the
+same D128/V128, two-subgroup shape, extends the key sequence to 64 rows so the
+double-buffered paths exercise multiple key tiles, and checks two candidate
+layouts before they become benchmarks:
+
+* full K/V double-buffering with a 16-key tile, targeting 19712 bytes of LDS;
+* a 32-key double-buffer pressure tile, targeting 39168 bytes of LDS.
+
+Both variants route all LDS accesses through hip-moi and compare exact-context
+and sampled-fast-context kernels against a host attention reference.
+
 The D128 benchmark rung now exists as
 `benchmarks/attention_d128_benchmark.hip`, with script
 `benchmarks/build_attention_d128_benchmark.sh` and CMake target
@@ -1082,17 +1094,13 @@ variant, not another optimization pass over the current scalar-scratch kernel
 and not merely another D128 representative rung. The detailed extraction lives
 in `benchmarks/attention_source_mining.md`. The right workflow is:
 
-1. compile/probe a few llama-inspired RDNA4 candidates and record LDS/VGPR/spill
-   metadata before adding instrumentation;
-2. first try a D128/V128 full-K/V double-buffer candidate: for a 16-key tile,
-   stage the complete K and V head-dimension tiles in LDS, double-buffer the
-   K/V staging, and retain score/weight/row scratch. This should target about
-   19.25 KiB of LDS, close to the llama.cpp RDNA D128 fallback estimate and far
-   more realistic than artificial padding;
-3. if that still does not create enough resource pressure, try a D128/V128
-   32-key double-buffer pressure row. This should target about 38.25 KiB of LDS
-   before alignment, mask, or float-accumulator scratch. Label it explicitly as
-   a production-pressure variant rather than a literal source clone;
+1. use `012_rdna4_d128_attention_pressure_test.hip` as the correctness source
+   for the two source-mined LDS-pressure candidates;
+2. extract the 16-key full-K/V double-buffer candidate into a benchmark and
+   record LDS/VGPR/spill metadata before performance comparisons;
+3. extract the 32-key double-buffer pressure row into a benchmark and record the
+   same metadata. Label it explicitly as a production-pressure variant rather
+   than a literal source clone;
 4. compare those candidates against the existing D128/V128 representative rung,
    then decide from measured LDS/VGPR pressure whether a still larger
    production-derived pressure variant is needed;
