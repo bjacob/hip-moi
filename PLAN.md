@@ -977,6 +977,22 @@ triage pass added the reusable codegen probe. The third pass tried the obvious
 per-site sampled-selection hoisting shapes and rejected them as insufficiently
 stable for the hot benchmark path.
 
+The attention optimization foray should now be treated as a fork in priorities,
+not an open-ended obligation to optimize this exact kernel shape. The current
+benchmark is production-like in its RDNA4 WMMA QK/PV structure, multi-subgroup
+workgroup, K/V LDS staging, and online softmax state. It is also intentionally a
+scalar-scratch stress case: it materializes score and softmax-weight tiles in
+LDS to keep the QK-to-softmax-to-PV handoff simple and auditable. A masked
+K/V+row-state proxy (`HIP_MOI_ATTENTION_SITE_MASK=0x9`) measured
+`sampled_watchpoint_context` at `2.17 ms` on `seq=4096`, versus `24.6 ms` for
+the all-sites stress row. If a more production attention implementation avoids
+most score/weight LDS materialization, the current fast path is probably good
+enough and attention should not block the atomics/finer-synchronization work. If
+Jakub or a target workload confirms that dense scalar score/weight LDS scratch
+is representative, then the next attention-specific optimization needs a deeper
+sampling model for repeated scalar sites, not another source-level rewrite of
+the existing prepared-site idea.
+
 Future benchmark rows should keep the row structure familiar:
 
 * noop baseline,

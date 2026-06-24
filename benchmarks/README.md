@@ -197,6 +197,7 @@ For attribution, a `seq=4096`, `min_ms=300`, `warmup_ms=300` pass on
 | `0x4` | weights only | 1.19 ms | 19.7 ms | 17.4 ms | 13.1 ms |
 | `0x6` | scores and weights | 1.20 ms | 36.6 ms | 37.8 ms | 23.1 ms |
 | `0x8` | row scratch only | 1.19 ms | 3.18 ms | 3.24 ms | 2.11 ms |
+| `0x9` | K/V and row scratch | 1.19 ms | 3.33 ms | 3.33 ms | 2.17 ms |
 | `0xe` | scores, weights, rows | 1.19 ms | 37.3 ms | 41.7 ms | 23.5 ms |
 
 The masked builds change the generated kernel shape and are not headline
@@ -211,7 +212,7 @@ and 512 more loads for the weight pass. The weight class performs 1024 scalar
 half LDS accesses: 512 stores and 512 loads. Row scratch is smaller: 576 scalar
 float accesses per key tile plus one final 512-load epilogue per workgroup.
 
-The codegen probe for masks `0x2`, `0x4`, and `0x6` showed that
+The codegen probe for masks `0x2`, `0x4`, `0x6`, and `0x9` showed that
 `sampled_watchpoint_context` remains spill-free and far smaller than both
 comparison rows:
 
@@ -226,13 +227,32 @@ comparison rows:
 | `0x6` | sampled Loom | 2731 | 23 | 164 | 0 | 0 B |
 | `0x6` | `context + sampled_watchpoint` | 10279 | 77 | 252 | 0 | 0 B |
 | `0x6` | `sampled_watchpoint_context` | 1415 | 20 | 124 | 0 | 0 B |
+| `0x9` | sampled Loom | 3391 | 26 | 172 | 0 | 0 B |
+| `0x9` | `context + sampled_watchpoint` | 12592 | 89 | 235 | 0 | 0 B |
+| `0x9` | `sampled_watchpoint_context` | 1709 | 22 | 122 | 0 | 0 B |
 
-The next attention optimization is therefore not reducing K/V fragment
-instrumentation. The obvious source-level attempt is to hoist or cache the
-per-site sampled selection decision for dense scalar score/weight loops, so
-losing sampled sites can bypass repeated seed/lane/range setup. A first
-implementation session tried two versions and deliberately did not keep either
-in the hot benchmark path:
+The attention optimization foray leaves a narrow, useful conclusion. The current
+benchmark is production-like in that it uses RDNA4 WMMA for QK and PV, multiple
+subgroups, K/V LDS staging, and online softmax state. It is also deliberately a
+scalar-scratch stress benchmark: it materializes the score tile and the softmax
+weights in LDS so that the QK-to-softmax-to-PV handoff stays simple and
+auditable. A more production attention kernel might use wave-level softmax
+machinery, different fragment layouts, or register/shuffle handoff paths to
+avoid some or all of that dense score/weight LDS scratch.
+
+That distinction matters for prioritization. If a future attention benchmark
+mostly instruments K/V staging plus row state, the `0x9` proxy suggests the
+current `sampled_watchpoint_context` path is close enough to move on. If a
+target kernel really does materialize dense scalar score/weight scratch in LDS,
+then this benchmark is the right stress signal and the next optimization cannot
+be about WMMA fragment staging. It has to reduce repeated scalar
+score/weight-site cost.
+
+The obvious source-level attempt was to hoist or cache the per-site sampled
+selection decision for dense scalar score/weight loops, so losing sampled sites
+could bypass repeated seed/lane/range setup. A first implementation session
+tried two versions and deliberately did not keep either in the hot benchmark
+path:
 
 * a branch-out version that duplicated raw and instrumented loop bodies. It
   created private memory and scratch traffic in `sampled_watchpoint_context` and
