@@ -13,6 +13,11 @@ The suite keeps one single-subgroup smoke test so the basic API stays exercised,
 then focuses on the cross-subgroup behavior that matters for comparison with
 Loom-style instrumentation.
 
+Instrumented tests should route every LDS access in the instrumented kernel
+through hip-moi. Reference kernels and plain tutorial kernels may remain
+uninstrumented, but once a test case is exercising the instrumentation API, raw
+`__shared__` reads or writes are not part of the intended test shape.
+
 Current files:
 
 * `001_single_subgroup_safe_mvp_test.hip`: one diagnostic-free API smoke test.

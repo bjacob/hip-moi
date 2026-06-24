@@ -50,7 +50,7 @@ namespace
     }
 
     __device__ hip_moi::sampled_watchpoint_context
-        make_fast_context(hip_moi::context::storage_ref storage)
+               make_fast_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::sampled_watchpoint_context::config cfg{
             /*threads_per_subgroup=*/kThreadsPerSubgroup,
@@ -97,7 +97,11 @@ namespace
             &values[index], /*lds_byte_offset=*/index * sizeof(int), kConsumerSite);
         if(index == 0)
         {
-            out[0] = loaded + values[kThreadCount - 1];
+            int tail = ctx.lds_load_at<FastPublishOnlyPolicy>(&values[kThreadCount - 1],
+                                                              /*lds_byte_offset=*/(kThreadCount - 1)
+                                                                  * sizeof(int),
+                                                              kConsumerSite);
+            out[0]   = loaded + tail;
         }
     }
 
@@ -137,8 +141,8 @@ namespace
     {
         hip_moi::context::storage_ref ref = storage.ref();
         ref.backend = static_cast<uint32_t>(hip_moi::backend_kind::sampled_watchpoint);
-        ref.sampled_watchpoint_sample_skip = 1;
-        ref.sampled_watchpoint_probe_count = 0;
+        ref.sampled_watchpoint_sample_skip      = 1;
+        ref.sampled_watchpoint_probe_count      = 0;
         ref.sampled_watchpoint_report_conflicts = 1;
         return ref;
     }
@@ -206,7 +210,8 @@ namespace
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
 
         int output = 0;
-        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
         EXPECT_EQ(output, kThreadCount - 1);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));

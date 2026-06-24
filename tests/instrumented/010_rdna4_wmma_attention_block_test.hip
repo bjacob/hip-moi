@@ -5,9 +5,10 @@
 //
 // RDNA4-only WMMA-heavy attention-shaped correctness tests. This grows the
 // scalar attention test into the layout we want for a later benchmark: two
-// subgroups compute a 32-query attention block, K/V are staged through LDS, QK
-// and PV both use RDNA4 WMMA, and the results are compared with a host reference
-// that mirrors the FP16 softmax-tile conversion used by the second WMMA.
+// subgroups compute a 32-query attention block, K/V and scalar softmax scratch
+// live in LDS, QK and PV both use RDNA4 WMMA, and every LDS access is
+// instrumented before comparing against a host reference that mirrors the FP16
+// softmax-tile conversion used by the second WMMA.
 #include "test_support.hpp"
 
 #include "hip_moi/hip_moi.hpp"
@@ -57,9 +58,17 @@ namespace
     constexpr std::size_t kVBytes      = kVFragmentCount * sizeof(f16x8_t);
     constexpr std::size_t kOutputBytes = kOutputCount * sizeof(float);
 
-    constexpr uint32_t kKSharedByteOffset = 0;
-    constexpr uint32_t kVSharedByteOffset = kWaveSize * sizeof(f16x8_t);
-    constexpr int kSharedBytes = static_cast<int>(kVSharedByteOffset + kWaveSize * sizeof(f16x8_t));
+    constexpr uint32_t kKSharedByteOffset      = 0;
+    constexpr uint32_t kVSharedByteOffset      = kWaveSize * sizeof(f16x8_t);
+    constexpr uint32_t kScoresSharedByteOffset = kVSharedByteOffset + kWaveSize * sizeof(f16x8_t);
+    constexpr uint32_t kWeightsSharedByteOffset
+        = kScoresSharedByteOffset + kSubgroupCount * kQueryTile * kKeyTile * sizeof(float);
+    constexpr uint32_t kRowOldScaleSharedByteOffset
+        = kWeightsSharedByteOffset + kSubgroupCount * kQueryTile * kKeyTile * sizeof(half_t);
+    constexpr uint32_t kRowSumSharedByteOffset
+        = kRowOldScaleSharedByteOffset + kSubgroupCount * kQueryTile * sizeof(float);
+    constexpr int kSharedBytes
+        = static_cast<int>(kRowSumSharedByteOffset + kSubgroupCount * kQueryTile * sizeof(float));
     constexpr int kExactShadowEntries
         = (kSharedBytes + static_cast<int>(hip_moi::detail::exact_shadow::granule_bytes) - 1)
           / static_cast<int>(hip_moi::detail::exact_shadow::granule_bytes);
@@ -68,6 +77,15 @@ namespace
     constexpr hip_moi::site_id kVStoreSite(0xa02);
     constexpr hip_moi::site_id kKLoadSite(0xa03);
     constexpr hip_moi::site_id kVLoadSite(0xa04);
+    constexpr hip_moi::site_id kScoreStoreSite(0xa05);
+    constexpr hip_moi::site_id kScoreLoadMaxSite(0xa06);
+    constexpr hip_moi::site_id kScoreLoadWeightSite(0xa07);
+    constexpr hip_moi::site_id kWeightStoreSite(0xa08);
+    constexpr hip_moi::site_id kWeightLoadSite(0xa09);
+    constexpr hip_moi::site_id kRowOldScaleStoreSite(0xa0a);
+    constexpr hip_moi::site_id kRowOldScaleLoadSite(0xa0b);
+    constexpr hip_moi::site_id kRowSumStoreSite(0xa0c);
+    constexpr hip_moi::site_id kRowSumLoadSite(0xa0d);
 
     using FastPublishOnlyPolicy = hip_moi::sampled_watchpoint_policy<
         /*SampleSkip=*/1,
@@ -101,6 +119,32 @@ namespace
     __host__ __device__ uint32_t v_fragment_offset(int lane)
     {
         return kVSharedByteOffset + static_cast<uint32_t>(lane * sizeof(f16x8_t));
+    }
+
+    __host__ __device__ uint32_t score_offset(int subgroup, int query_row, int key)
+    {
+        return kScoresSharedByteOffset
+               + static_cast<uint32_t>(((subgroup * kQueryTile + query_row) * kKeyTile + key)
+                                       * sizeof(float));
+    }
+
+    __host__ __device__ uint32_t weight_offset(int subgroup, int query_row, int key)
+    {
+        return kWeightsSharedByteOffset
+               + static_cast<uint32_t>(((subgroup * kQueryTile + query_row) * kKeyTile + key)
+                                       * sizeof(half_t));
+    }
+
+    __host__ __device__ uint32_t row_old_scale_offset(int subgroup, int query_row)
+    {
+        return kRowOldScaleSharedByteOffset
+               + static_cast<uint32_t>((subgroup * kQueryTile + query_row) * sizeof(float));
+    }
+
+    __host__ __device__ uint32_t row_sum_offset(int subgroup, int query_row)
+    {
+        return kRowSumSharedByteOffset
+               + static_cast<uint32_t>((subgroup * kQueryTile + query_row) * sizeof(float));
     }
 
     __device__ f32x8_t zero_f32x8()
@@ -233,8 +277,12 @@ namespace
 #pragma unroll
             for(int elem = 0; elem < kFragmentElements; ++elem)
             {
-                int query_row                           = rdna4_wmma_acc_m(lane, elem);
-                scores[subgroup][query_row][key_column] = qk_acc[elem] * 0.25f;
+                int query_row = rdna4_wmma_acc_m(lane, elem);
+                InstrumentationPolicy::store(ctx,
+                                             &scores[subgroup][query_row][key_column],
+                                             qk_acc[elem] * 0.25f,
+                                             score_offset(subgroup, query_row, key_column),
+                                             kScoreStoreSite);
             }
 
             ctx.syncthreads();
@@ -246,27 +294,49 @@ namespace
                     float tile_max = -3.402823466e38f;
                     for(int key = 0; key < kKeyTile; ++key)
                     {
-                        tile_max = fmaxf(tile_max, scores[subgroup][query_row][key]);
+                        float score
+                            = InstrumentationPolicy::load(ctx,
+                                                          &scores[subgroup][query_row][key],
+                                                          score_offset(subgroup, query_row, key),
+                                                          kScoreLoadMaxSite);
+                        tile_max = fmaxf(tile_max, score);
                     }
 
-                    float new_max                      = fmaxf(running_max[query_row], tile_max);
-                    float old_scale                    = running_sum[query_row] == 0.0f
-                                                             ? 0.0f
-                                                             : expf(running_max[query_row] - new_max);
-                    row_old_scale[subgroup][query_row] = old_scale;
+                    float new_max   = fmaxf(running_max[query_row], tile_max);
+                    float old_scale = running_sum[query_row] == 0.0f
+                                          ? 0.0f
+                                          : expf(running_max[query_row] - new_max);
+                    InstrumentationPolicy::store(ctx,
+                                                 &row_old_scale[subgroup][query_row],
+                                                 old_scale,
+                                                 row_old_scale_offset(subgroup, query_row),
+                                                 kRowOldScaleStoreSite);
 
                     float tile_sum = 0.0f;
                     for(int key = 0; key < kKeyTile; ++key)
                     {
-                        float  weight      = expf(scores[subgroup][query_row][key] - new_max);
+                        float score
+                            = InstrumentationPolicy::load(ctx,
+                                                          &scores[subgroup][query_row][key],
+                                                          score_offset(subgroup, query_row, key),
+                                                          kScoreLoadWeightSite);
+                        float  weight      = expf(score - new_max);
                         half_t weight_half = static_cast<half_t>(weight);
-                        weights[subgroup][query_row][key] = weight_half;
+                        InstrumentationPolicy::store(ctx,
+                                                     &weights[subgroup][query_row][key],
+                                                     weight_half,
+                                                     weight_offset(subgroup, query_row, key),
+                                                     kWeightStoreSite);
                         tile_sum += static_cast<float>(weight_half);
                     }
 
-                    running_sum[query_row]       = running_sum[query_row] * old_scale + tile_sum;
-                    running_max[query_row]       = new_max;
-                    row_sum[subgroup][query_row] = running_sum[query_row];
+                    running_sum[query_row] = running_sum[query_row] * old_scale + tile_sum;
+                    running_max[query_row] = new_max;
+                    InstrumentationPolicy::store(ctx,
+                                                 &row_sum[subgroup][query_row],
+                                                 running_sum[query_row],
+                                                 row_sum_offset(subgroup, query_row),
+                                                 kRowSumStoreSite);
                 }
             }
 
@@ -275,17 +345,26 @@ namespace
 #pragma unroll
             for(int elem = 0; elem < kFragmentElements; ++elem)
             {
-                int query_row = rdna4_wmma_acc_m(lane, elem);
-                out_acc[elem] *= row_old_scale[subgroup][query_row];
+                int   query_row = rdna4_wmma_acc_m(lane, elem);
+                float old_scale
+                    = InstrumentationPolicy::load(ctx,
+                                                  &row_old_scale[subgroup][query_row],
+                                                  row_old_scale_offset(subgroup, query_row),
+                                                  kRowOldScaleLoadSite);
+                out_acc[elem] *= old_scale;
             }
 
             f16x8_t p_fragment;
 #pragma unroll
             for(int elem = 0; elem < kFragmentElements; ++elem)
             {
-                int query_row    = lane & 15;
-                int key          = rdna4_wmma_f16_k(lane, elem);
-                p_fragment[elem] = weights[subgroup][query_row][key];
+                int query_row = lane & 15;
+                int key       = rdna4_wmma_f16_k(lane, elem);
+                p_fragment[elem]
+                    = InstrumentationPolicy::load(ctx,
+                                                  &weights[subgroup][query_row][key],
+                                                  weight_offset(subgroup, query_row, key),
+                                                  kWeightLoadSite);
             }
 
             f16x8_t v_fragment = InstrumentationPolicy::load(
@@ -307,10 +386,13 @@ namespace
 #pragma unroll
         for(int elem = 0; elem < kFragmentElements; ++elem)
         {
-            int query_row    = rdna4_wmma_acc_m(lane, elem);
-            int global_query = subgroup * kQueryTile + query_row;
-            out[global_query * kValueDim + value_column]
-                = out_acc[elem] / row_sum[subgroup][query_row];
+            int   query_row                              = rdna4_wmma_acc_m(lane, elem);
+            int   global_query                           = subgroup * kQueryTile + query_row;
+            float normalizer                             = InstrumentationPolicy::load(ctx,
+                                                           &row_sum[subgroup][query_row],
+                                                           row_sum_offset(subgroup, query_row),
+                                                           kRowSumLoadSite);
+            out[global_query * kValueDim + value_column] = out_acc[elem] / normalizer;
         }
     }
 

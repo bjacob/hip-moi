@@ -426,6 +426,12 @@ attention correctness tests. The benchmark README is organized by explicit
 benchmark names: RDNA4 WMMA matmul wave-scaling, RDNA4 WMMA matmul production
 16x8, and RDNA4 WMMA attention block.
 
+Important invariant: instrumented tests and benchmark rows must route every LDS
+access in the instrumented kernel through the instrumentation path. It is fine
+for explicit reference kernels or tutorial plain-HIP comparison kernels to be
+uninstrumented, but mixed instrumented/raw LDS access inside the same
+instrumented kernel gives misleading correctness and performance signals.
+
 The small `w2_2x4_benchmark.hip` family compares:
 
 * noop,
@@ -882,10 +888,14 @@ The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now
 that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
 `010` correctness test, scales to one workgroup per 32-query block, defaults to
-`seq=12288` so that its fast-path latency is roughly 2x the current
-`prod_16x8` fast-path latency, and compares noop execution with both the general
+`seq=12288`, and compares noop execution with both the general
 `context + sampled_watchpoint` path, the fast `sampled_watchpoint_context`
-path, and a sampled-Loom row ported from the matmul benchmark.
+path, and a sampled-Loom row ported from the matmul benchmark. Status update:
+the initial attention benchmark accidentally instrumented only K/V LDS staging;
+it now instruments K/V staging plus the LDS score, softmax-weight, row-scale,
+and row-sum scratch. With full LDS instrumentation, this benchmark is no longer
+near-noop and should be treated as the current stress signal for attention-like
+LDS instrumentation.
 
 Future benchmark rows should keep the row structure familiar:
 

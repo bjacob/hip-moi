@@ -7,6 +7,9 @@ a hip-moi-native workload grown from the instrumented attention tests.
 
 All current benchmarks focus on subgroup-level, full-workgroup-barrier LDS
 instrumentation. They do not exercise atomics or finer-grained synchronization.
+Instrumented benchmark rows are expected to route every LDS access in the
+benchmarked kernel through the selected instrumentation path; the `noop` rows
+are the only uninstrumented rows.
 
 The common comparison rows are:
 
@@ -101,7 +104,8 @@ The benchmark targets are RDNA4-only and are skipped unless
 Measured on 2026-06-23 on device 0, AMD Radeon RX 9070, `gfx1201`, 28 CUs.
 All rows used the default fair sampled knobs printed by the benchmarks:
 `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`, with
-`min_ms=100` and `warmup_ms=100`.
+`min_ms=100` and `warmup_ms=100`, except where a benchmark subsection says
+otherwise.
 
 The headline per-iteration latency is printed in microseconds for values below
 1 ms and milliseconds otherwise. Elapsed measurement windows such as `total=`
@@ -132,13 +136,17 @@ It keeps Jakub's fp16 production 16x8 row shape: 8 waves, 16x8 WMMA tiles,
 
 `hip_moi_benchmark_attention_block` is the first larger end-to-end workload
 beyond isolated matmul. It defaults to `seq=12288`, intentionally larger than
-the production matmul benchmark and near 2x its `sampled_watchpoint_context`
-latency. It uses RDNA4 WMMA for both QK and PV, two subgroups per workgroup,
-one workgroup per 32-query block, and K/V fragment staging through LDS.
+the production matmul benchmark. It uses RDNA4 WMMA for both QK and PV, two
+subgroups per workgroup, one workgroup per 32-query block, K/V fragment staging
+through LDS, and instrumented LDS scratch for scores, softmax weights, row
+scales, and row sums.
 
 The reported TFLOP/s is an effective QK+PV matmul-rate proxy; softmax and
 scalar phase work are intentionally not modeled as FLOPs.
+These rows were refreshed with `min_ms=500` and `warmup_ms=500` because full
+LDS instrumentation makes the instrumented rows substantially slower than the
+matmul benchmarks.
 
 | Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| seq=12288, head_dim=16, value_dim=16 | 6.89 ms | 7.28 ms | 7.73 ms | 6.94 ms |
+| seq=12288, head_dim=16, value_dim=16 | 6.66 ms | 121 ms | 158 ms | 71.7 ms |
