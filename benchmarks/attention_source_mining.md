@@ -153,12 +153,18 @@ large attention benchmark, isolate the RDNA4 WMMA register-handoff problem:
   subgroup-level register transpose, likely through lane permutation/shuffle
   operations.
 
-The next test should therefore be small and surgical: a RDNA4-only WMMA
-register-transpose correctness test. Once that is correct, grow it into a
-no-score/weight-LDS attention correctness test, and only then extract the next
-benchmark. The existing D128 dense-score benchmarks remain valuable as scalar
-LDS instrumentation stress cases, but they should no longer be treated as the
-most production-faithful attention endpoint.
+The first small surgical test is now
+`tests/instrumented/013_rdna4_wmma_register_handoff_test.hip`. It proves the
+register handoff directly, then feeds the reshaped fragment to a second PV WMMA,
+with both exact-context and sampled-fast-context launches. The working lane
+exchange uses `ds_bpermute`; a temporary `readlane` probe was not sufficient for
+the dynamic cross-half permutation.
+
+The next step is to grow that primitive into a no-score/weight-LDS attention
+correctness test, and only then extract the next benchmark. The existing D128
+dense-score benchmarks remain valuable as scalar LDS instrumentation stress
+cases, but they should no longer be treated as the most production-faithful
+attention endpoint.
 
 ## Implications For hip-moi
 

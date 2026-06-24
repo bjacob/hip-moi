@@ -1023,14 +1023,19 @@ VKQ/PV MMA step. It does not look like the dense LDS `scores` and `weights`
 scratch used by hip-moi's current attention stress benchmarks. That means the
 D128 dense-score rows are still useful scalar-LDS stressors, but the next
 production-faithful attention rung should first solve the RDNA4 WMMA
-register-handoff problem. Concretely, add a small RDNA4-only test that transposes
-the QK accumulator layout
+register-handoff problem. That isolated test now exists as
+`tests/instrumented/013_rdna4_wmma_register_handoff_test.hip`: it transposes the
+QK accumulator layout
 `qk_acc[elem] -> (query_row=rdna4_wmma_acc_m(lane, elem), key_col=lane & 15)`
 into the PV B-fragment layout
 `p_fragment[elem] -> (query_row=lane & 15, key=rdna4_wmma_f16_k(lane, elem))`
-without materializing dense score/weight LDS. Only after that isolated test
-passes should we build a no-score/weight-LDS attention correctness test and then
-extract a new benchmark.
+without materializing dense score/weight LDS. The test first checks the reshaped
+fragment directly, then feeds it to a second PV WMMA and compares both modes
+against host references through exact-context and sampled-fast-context launches.
+The handoff uses `ds_bpermute` for dynamic lane reads; a temporary `readlane`
+probe was rejected because it produced the wrong cross-half exchange. The next
+step is to build a no-score/weight-LDS attention correctness test from this
+primitive and then extract a new benchmark.
 
 The immediate reading is that `full_kv16` is the better production-inspired
 next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
@@ -1195,7 +1200,8 @@ row max/sum state is carried separately. The hip-moi next-step ladder is
 therefore:
 
 1. add an isolated RDNA4 WMMA register-transpose correctness test for the
-   QK-accumulator to PV-B-fragment handoff;
+   QK-accumulator to PV-B-fragment handoff; done in
+   `013_rdna4_wmma_register_handoff_test.hip`;
 2. grow that into a no-score/weight-LDS attention correctness test that still
    instruments all remaining LDS traffic, especially K/V staging and any row
    state that is truly stored in LDS;

@@ -41,6 +41,9 @@ Current files:
 * `012_rdna4_d128_attention_pressure_test.hip`: RDNA4-only D128/V128 attention
   pressure correctness tests for full K/V double-buffering at about 19.25 KiB
   of LDS and a wider 32-key pressure tile at about 38.25 KiB of LDS.
+* `013_rdna4_wmma_register_handoff_test.hip`: RDNA4-only QK-to-PV register
+  handoff test that reshapes WMMA accumulator fragments into the next WMMA
+  operand without dense score/weight LDS scratch.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the

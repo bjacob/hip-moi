@@ -110,4 +110,6 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/011_rdna4_d128_attention_block_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_d128_attention_pressure_test
                     instrumented/012_rdna4_d128_attention_pressure_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_register_handoff_test
+                    instrumented/013_rdna4_wmma_register_handoff_test.hip)
 endif()
