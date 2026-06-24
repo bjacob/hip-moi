@@ -141,7 +141,7 @@ The benchmark targets are RDNA4-only and are skipped unless
 
 ## Current RDNA4 Measurements
 
-Measured on 2026-06-23 on device 0, AMD Radeon RX 9070, `gfx1201`, 28 CUs.
+Measured on 2026-06-24 on device 0, AMD Radeon RX 9070, `gfx1201`, 28 CUs.
 All rows used the default fair sampled knobs printed by the benchmarks:
 `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`, with
 `min_ms=100` and `warmup_ms=100`, except where a benchmark subsection says
@@ -170,7 +170,7 @@ It keeps Jakub's fp16 production 16x8 row shape: 8 waves, 16x8 WMMA tiles,
 
 | Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.65 ms | 25.9 ms | 3.38 ms |
+| w8 16x8, M=4096 N=4096 K=4096 | 1.16 ms | 8.70 ms | 26.2 ms | 3.35 ms |
 
 ### RDNA4 WMMA Attention Block Benchmark
 
@@ -360,7 +360,7 @@ Measured on 2026-06-24 with `min_ms=100` and `warmup_ms=100`:
 
 | Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=128, value_dim=128 | 4.21 ms | 101 ms | 105 ms | 59.3 ms |
+| seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=128, value_dim=128 | 4.25 ms | 102 ms | 105 ms | 38.8 ms |
 
 The D128 version changes the register story much more than the LDS story. Source
 shared storage is still 4352 B because only one K or V fragment is staged at a
@@ -372,14 +372,15 @@ reported:
 | noop | 1042 | 0 | 17 | 218 | 0 | 0 B |
 | sampled Loom | 21942 | 215 global | 95 | 256 | 105 | 352 B |
 | hip-moi `context + sampled_watchpoint` | 61047 | 469 flat | 100 | 256 | 337 | 992 B |
-| hip-moi `sampled_watchpoint_context` | 9490 | 182 flat | 46 | 256 | 8 | 36 B |
+| hip-moi `sampled_watchpoint_context` | 6205 | 198 flat | 39 | 250 | 0 | 0 B |
 
 The fast hip-moi row is still substantially smaller than sampled Loom in static
-instruction count and remains faster in the headline timing, but D128 puts all
-instrumented all-sites rows at the VGPR ceiling. Even the publish-only fast row
-now has a tiny spill, so later pressure-oriented attention work should treat
-VGPR pressure as a first-class concern rather than only counting dynamic
-instrumented LDS operations.
+instruction count and remains faster in the headline timing. The current
+publish-only fast row is also spill-free again: scalar-sized LDS accesses use a
+compile-time range path, while vector accesses keep the older runtime-shaped
+path to avoid regressing vector-heavy matmul kernels. Later pressure-oriented
+attention work should still treat VGPR pressure as a first-class concern rather
+than only counting dynamic instrumented LDS operations.
 
 The site-mask timing pass shows that dense scalar scratch remains the main
 dynamic cost center, while D128 makes K/V fragment staging and row-state scratch
@@ -387,14 +388,18 @@ less negligible:
 
 | Mask | Sites instrumented | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `0xf` | all | 4.21 ms | 101 ms | 105 ms | 59.3 ms |
-| `0x1` | K/V only | 4.18 ms | 8.79 ms | 14.1 ms | 6.07 ms |
-| `0x2` | scores only | 4.20 ms | 62.9 ms | 63.0 ms | 43.0 ms |
-| `0x4` | weights only | 4.20 ms | 61.8 ms | 65.7 ms | 37.4 ms |
-| `0x6` | scores and weights | 4.19 ms | 96.6 ms | 94.5 ms | 57.9 ms |
-| `0x8` | row scratch only | 4.24 ms | 24.7 ms | 32.0 ms | 21.4 ms |
-| `0x9` | K/V and row scratch | 4.21 ms | 25.8 ms | 34.1 ms | 21.6 ms |
-| `0xe` | scores, weights, rows | 4.20 ms | 102 ms | 101 ms | 59.0 ms |
+| `0xf` | all | 4.25 ms | 102 ms | 105 ms | 38.8 ms |
+| `0x1` | K/V only | 4.22 ms | 8.87 ms | 14.1 ms | 6.04 ms |
+| `0x2` | scores only | 4.22 ms | 63.7 ms | 63.9 ms | 40.4 ms |
+| `0x4` | weights only | 4.17 ms | 61.1 ms | 64.7 ms | 25.9 ms |
+| `0x6` | scores and weights | 4.25 ms | 96.3 ms | 93.8 ms | 51.9 ms |
+| `0x8` | row scratch only | 4.19 ms | 24.7 ms | 32.2 ms | 19.9 ms |
+| `0x9` | K/V and row scratch | 4.23 ms | 26.7 ms | 34.4 ms | 20.1 ms |
+| `0xe` | scores, weights, rows | 4.26 ms | 101 ms | 102 ms | 51.8 ms |
+
+As with the smaller attention benchmark, masked builds change the generated
+kernel shape and are not additive decompositions. They are useful for locating
+the expensive site classes, not for predicting the exact all-sites latency.
 
 Per key tile and workgroup, the K/V class performs 1536 vector `f16x8` LDS
 accesses: eight D128 head fragments for QK and eight D128 value fragments for
@@ -404,12 +409,14 @@ scratch becomes more important: scaling the eight value-fragment accumulators
 per key tile creates 4096 scalar old-scale loads, and the final output epilogue
 adds 4096 scalar row-sum loads per workgroup.
 
-Two takeaways fall out of this pass. First, the full D128 all-sites cost is
-almost entirely reproduced by `0xe`, so removing K/V staging from the
-instrumented set barely moves the all-sites row. Second, the fast row's
-advantage comes from a much smaller publish-only implementation, not from
-escaping the core score/weight/row dynamic access problem. A future
-production-pressure variant should therefore probe whether a mature attention
-kernel avoids this dense LDS score/weight materialization; if it does not, the
-next optimization target is repeated scalar-site instrumentation cost under high
-VGPR pressure.
+Two takeaways fall out of this pass. First, specializing scalar-sized
+publish-only accesses cut the all-sites fast row from the previous `59.3 ms` to
+`38.8 ms` and removed its private segment use. The deliberately rejected broader
+variant also specialized vector accesses; it preserved the D128 attention win
+but regressed the production matmul fast row, so vector LDS accesses stay on the
+runtime-shaped path for now. Second, the score/weight/row masks remain the
+expensive site classes, but the masked rows are no longer a reliable additive
+model of the all-sites fast row. A future production-pressure variant should
+therefore probe whether a mature attention kernel avoids this dense LDS
+score/weight materialization; if it does not, the next optimization target is
+still repeated scalar-site instrumentation cost under high VGPR pressure.

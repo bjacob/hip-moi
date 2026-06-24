@@ -986,26 +986,31 @@ near-saturation of LDS and VGPRs rather than D128 shape coverage.
 
 The first D128 performance-analysis pass is complete. The companion
 `benchmarks/inspect_attention_d128_codegen.sh` probe shows the D128 kernel is
-already register-heavy before instrumentation: noop uses 218 VGPRs. All
-instrumented all-sites rows hit the 256 VGPR ceiling. Sampled Loom spills 105
-VGPRs, the general `context + sampled_watchpoint` path spills 337, and the fast
-`sampled_watchpoint_context` row spills only 8. That explains the headline
-ordering: the fast row is still much smaller and faster than sampled Loom, but
-the D128 shape leaves little register headroom.
+already register-heavy before instrumentation: noop uses 218 VGPRs. Sampled
+Loom and the general `context + sampled_watchpoint` path both hit the 256 VGPR
+ceiling and spill. The fast `sampled_watchpoint_context` row now uses 250 VGPRs
+with no spills after the scalar-sized fast-path specialization described below.
+That explains the headline ordering: the fast row is much smaller and faster
+than sampled Loom, but the D128 shape leaves little register headroom.
 
 Masked timing on `seq=8192` says the dynamic cost center remains dense scalar
-scratch, not K/V fragment staging. The fast row measured `6.07 ms` for K/V-only
-instrumentation, `43.0 ms` for scores-only, `37.4 ms` for weights-only,
-`21.4 ms` for row-scratch-only, `57.9 ms` for scores+weights, and `59.3 ms` for
-all sites. The `0xe` score+weight+row mask essentially reproduces all-sites
-runtime. D128 does make K/V and row-state instrumentation less negligible than
-in the D16 benchmark: per key tile, K/V staging grows to 1536 vector `f16x8`
-LDS accesses, and row-state scaling now performs 4096 scalar old-scale loads
-per key tile plus 4096 row-sum epilogue loads per workgroup. Still, if a future
-production attention kernel materializes dense LDS score/weight scratch, the
-next optimization problem is repeated scalar-site cost under high VGPR pressure.
-If it avoids that scratch, the existing fast path may already be close enough
-for K/V staging and row-state instrumentation.
+scratch, not K/V fragment staging. After specializing scalar-sized publish-only
+accesses, the fast row measured `6.04 ms` for K/V-only instrumentation,
+`40.4 ms` for scores-only, `25.9 ms` for weights-only, `19.9 ms` for
+row-scratch-only, `51.9 ms` for scores+weights, and `38.8 ms` for all sites.
+The scalar-sized specialization keeps vector LDS accesses on the older runtime
+path because a broader all-access-size specialization preserved the D128
+attention win but regressed the production matmul fast row. Masked builds are
+not additive decompositions because each mask changes the generated kernel
+shape; use them for site-class attribution only. D128 does make K/V and
+row-state instrumentation less negligible than in the D16 benchmark: per key
+tile, K/V staging grows to 1536 vector `f16x8` LDS accesses, and row-state
+scaling now performs 4096 scalar old-scale loads per key tile plus 4096 row-sum
+epilogue loads per workgroup. Still, if a future production attention kernel
+materializes dense LDS score/weight scratch, the next optimization problem is
+repeated scalar-site cost under high VGPR pressure. If it avoids that scratch,
+the existing fast path may already be close enough for K/V staging and
+row-state instrumentation.
 
 The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now

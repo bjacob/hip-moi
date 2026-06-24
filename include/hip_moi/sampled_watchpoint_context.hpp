@@ -56,7 +56,19 @@ namespace hip_moi
             static_assert(std::is_trivially_copyable<T>::value,
                           "hip_moi::sampled_watchpoint_context::lds_load_at "
                           "requires a trivially copyable type");
-            record_access_at<SampledPolicy>(sizeof(T), access_kind::load, lds_byte_offset, site);
+            // Scalar LDS scratch is the current high-pressure fast-path case.
+            // Keep vector accesses on the runtime-shaped path to avoid
+            // regressing vector-heavy matmul kernels.
+            if constexpr(sizeof(T) <= detail::sampled_watchpoint::granule_bytes)
+            {
+                record_access_at<SampledPolicy, sizeof(T)>(
+                    access_kind::load, lds_byte_offset, site);
+            }
+            else
+            {
+                record_access_at<SampledPolicy>(
+                    sizeof(T), access_kind::load, lds_byte_offset, site);
+            }
             return *ptr;
         }
 
@@ -67,7 +79,18 @@ namespace hip_moi
             static_assert(std::is_trivially_copyable<T>::value,
                           "hip_moi::sampled_watchpoint_context::lds_store_at "
                           "requires a trivially copyable type");
-            record_access_at<SampledPolicy>(sizeof(T), access_kind::store, lds_byte_offset, site);
+            // Match lds_load_at: scalar accesses get compile-time range
+            // simplification, vector accesses keep the older code shape.
+            if constexpr(sizeof(T) <= detail::sampled_watchpoint::granule_bytes)
+            {
+                record_access_at<SampledPolicy, sizeof(T)>(
+                    access_kind::store, lds_byte_offset, site);
+            }
+            else
+            {
+                record_access_at<SampledPolicy>(
+                    sizeof(T), access_kind::store, lds_byte_offset, site);
+            }
             *ptr = value;
         }
 
@@ -169,8 +192,17 @@ namespace hip_moi
             uint32_t seed = epoch * 0x85ebca6bu;
             seed ^= static_cast<uint32_t>(storage_.generation) * 0xc2b2ae35u;
             seed ^= start_cell * 0x165667b1u;
-            return map_sampled_index(detail::mix32(seed),
-                                     static_cast<uint32_t>(storage_.sampled_watchpoint_capacity));
+            if constexpr(SampledPolicy::static_watchpoint_capacity > 1)
+            {
+                return map_sampled_index(detail::mix32(seed),
+                                         SampledPolicy::static_watchpoint_capacity);
+            }
+            else
+            {
+                return map_sampled_index(
+                    detail::mix32(seed),
+                    static_cast<uint32_t>(storage_.sampled_watchpoint_capacity));
+            }
         }
 
         template <typename SampledPolicy>
@@ -187,6 +219,44 @@ namespace hip_moi
         }
 
         template <typename SampledPolicy>
+        __device__ bool sampled_storage_available() const
+        {
+            if constexpr(SampledPolicy::static_watchpoint_capacity > 0)
+            {
+                // Static capacity is an opt-in promise from the policy, so the
+                // hot path only needs to guard the storage pointer.
+                return storage_.sampled_watchpoints != nullptr;
+            }
+            else
+            {
+                return storage_.sampled_watchpoints && storage_.sampled_watchpoint_capacity > 0;
+            }
+        }
+
+        template <uint32_t ByteCount>
+        static __host__ __device__ constexpr uint32_t max_spanned_sampled_cells()
+        {
+            return (ByteCount + 2u * detail::sampled_watchpoint::granule_bytes - 2u)
+                   >> detail::sampled_watchpoint::granule_shift;
+        }
+
+        template <uint32_t ByteCount>
+        static __host__ __device__ constexpr uint32_t max_valid_sampled_start_byte()
+        {
+            return ((detail::sampled_watchpoint::max_start + 1u)
+                    << detail::sampled_watchpoint::granule_shift)
+                   - ByteCount;
+        }
+
+        template <uint32_t ByteCount>
+        static __host__ __device__ constexpr bool fits_sampled_encoding()
+        {
+            return ByteCount > 0
+                   && ByteCount <= ((detail::sampled_watchpoint::max_start + 1u)
+                                    << detail::sampled_watchpoint::granule_shift);
+        }
+
+        template <typename SampledPolicy>
         __device__ void record_access_at(uint32_t    byte_count,
                                          access_kind kind,
                                          uint32_t    lds_byte_offset,
@@ -195,8 +265,7 @@ namespace hip_moi
             static_assert(!SampledPolicy::report_conflicts,
                           "hip_moi::sampled_watchpoint_context currently supports only "
                           "publish-only sampled policies");
-            if(byte_count == 0 || !storage_.sampled_watchpoints
-               || storage_.sampled_watchpoint_capacity <= 0)
+            if(byte_count == 0 || !sampled_storage_available<SampledPolicy>())
             {
                 return;
             }
@@ -226,6 +295,70 @@ namespace hip_moi
                                          : static_cast<uint32_t>(remaining);
                 record_range<SampledPolicy>(kind, start_cell, chunk);
                 start_cell += chunk;
+            }
+        }
+
+        template <typename SampledPolicy, uint32_t ByteCount>
+        __device__ void
+            record_access_at(access_kind kind, uint32_t lds_byte_offset, site_id site) const
+        {
+            static_assert(!SampledPolicy::report_conflicts,
+                          "hip_moi::sampled_watchpoint_context currently supports only "
+                          "publish-only sampled policies");
+            static_assert(ByteCount > 0,
+                          "hip_moi::sampled_watchpoint_context requires non-empty accesses");
+            if(!sampled_storage_available<SampledPolicy>())
+            {
+                return;
+            }
+
+            uint32_t selection_seed = sampled_selection_seed(site);
+            if(!sampled_should_publish<SampledPolicy>(selection_seed))
+            {
+                return;
+            }
+
+            if constexpr(!fits_sampled_encoding<ByteCount>())
+            {
+                return;
+            }
+            else if constexpr(max_spanned_sampled_cells<ByteCount>()
+                              <= detail::sampled_watchpoint::max_count)
+            {
+                if(lds_byte_offset > max_valid_sampled_start_byte<ByteCount>())
+                {
+                    return;
+                }
+
+                uint32_t start_cell = lds_byte_offset >> detail::sampled_watchpoint::granule_shift;
+                uint32_t cell_count
+                    = ((lds_byte_offset & (detail::sampled_watchpoint::granule_bytes - 1u))
+                       + ByteCount + detail::sampled_watchpoint::granule_bytes - 1u)
+                      >> detail::sampled_watchpoint::granule_shift;
+                record_range<SampledPolicy>(kind, start_cell, cell_count);
+            }
+            else
+            {
+                uint64_t last_byte_offset = static_cast<uint64_t>(lds_byte_offset)
+                                            + static_cast<uint64_t>(ByteCount) - 1u;
+                uint32_t start_cell = lds_byte_offset >> detail::sampled_watchpoint::granule_shift;
+                uint64_t end_cell
+                    = (last_byte_offset >> detail::sampled_watchpoint::granule_shift) + 1u;
+                if(start_cell > detail::sampled_watchpoint::max_start
+                   || end_cell > static_cast<uint64_t>(detail::sampled_watchpoint::max_start) + 1u)
+                {
+                    return;
+                }
+
+                while(static_cast<uint64_t>(start_cell) < end_cell)
+                {
+                    uint64_t remaining = end_cell - static_cast<uint64_t>(start_cell);
+                    uint32_t chunk     = remaining > detail::sampled_watchpoint::max_count
+                                             ? detail::sampled_watchpoint::max_count
+                                             : static_cast<uint32_t>(remaining);
+                    record_range<SampledPolicy>(kind, start_cell, chunk);
+                    start_cell += chunk;
+                }
             }
         }
 
