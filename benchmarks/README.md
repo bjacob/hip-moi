@@ -490,3 +490,14 @@ matmul guardrail also stayed at about `3.4 ms`. These were not kept in the API
 or implementation. The next credible optimization target is larger-grain:
 reduce repeated per-site sampled-selection setup in dense score/weight/row
 scratch without introducing private memory or spills.
+
+A follow-up session tested that larger-grain idea directly. The first variant
+prepared selected-site state for all dense score/weight/row accesses and
+regressed the fast pressure rows to about `103 ms` / `215 ms`. A narrower
+lane-0 softmax-only variant still regressed them to about `64 ms` / `204 ms`.
+Both prototypes were removed. The practical lesson is that source-level
+prepared-site state is too expensive for this benchmark shape, even when its
+semantic intent is attractive. The next performance direction should be either
+a different compiler-friendly representation of static-site decisions, or a
+kernel/workload study that determines whether production attention avoids dense
+LDS score/weight materialization altogether.

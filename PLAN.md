@@ -1004,6 +1004,17 @@ the static-site level: avoid recomputing the sampled selection setup for dense
 score/weight/row scratch sites, while preserving the no-private-memory,
 spill-free property of `sampled_watchpoint_context`.
 
+A follow-up session tested that static-site idea directly in the D128 pressure
+benchmark. Preparing selected-site state for all dense score/weight/row accesses
+regressed the fast rows to about `103 ms` for `full_kv16` and `215 ms` for
+`wide_k32`. Restricting prepared state to only the lane-0 softmax block still
+regressed them to about `64 ms` and `204 ms`. Both prototypes were removed.
+This makes source-level prepared-site state a rejected immediate path. If we
+return to this idea, it needs a more compiler-friendly representation than
+ordinary live local state; otherwise the better next question is whether a more
+production-faithful attention kernel avoids dense LDS score/weight scratch in
+the first place.
+
 The immediate reading is that `full_kv16` is the better production-inspired
 next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
 The next analysis pass should inspect generated-code resource metadata for
