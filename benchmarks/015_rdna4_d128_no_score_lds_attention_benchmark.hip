@@ -53,7 +53,7 @@ static constexpr float kQkScale = 0.125f;
 #elif HIP_MOI_BENCH_HEAD_DIM == 128
 static constexpr float kQkScale = 0.08838834764831845f;
 #else
-#error "attention_d128_no_score_lds_benchmark.hip currently supports head_dim 16 or 128"
+#error "015_rdna4_d128_no_score_lds_attention_benchmark.hip currently supports head_dim 16 or 128"
 #endif
 
 static_assert(kHeadDim == kHeadFragments * kFragmentDim);

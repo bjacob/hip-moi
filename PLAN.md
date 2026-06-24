@@ -421,10 +421,14 @@ The top-level `benchmarks/` directory now carries the focused RDNA4 performance
 benchmarks used for day-to-day hip-moi work. The matmul benchmarks are extracted
 from Jakub's `sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; Jakub's
 repository remains the upstream reference for the broader experimental harness.
-The attention benchmark is hip-moi-native and grown from the instrumented
-attention correctness tests. The benchmark README is organized by explicit
-benchmark names: RDNA4 WMMA matmul wave-scaling, RDNA4 WMMA matmul production
-16x8, and RDNA4 WMMA attention block.
+The attention benchmarks are hip-moi-native and grown from the instrumented
+attention correctness tests plus the llama.cpp/AITER source-mining signals. The
+attention benchmark source filenames now mirror the corresponding instrumented
+test filenames, changing only the suffix from `_test.hip` to `_benchmark.hip`
+where possible. The benchmark README is now the canonical lookup document: its
+catalog table records benchmark keys, source/test filenames, provenance, shape,
+LDS usage, and fast-path VGPR usage, and its results table uses the same keys
+for the current RDNA4 timing snapshot.
 
 Important invariant: instrumented tests and benchmark rows must route every LDS
 access in the instrumented kernel through the instrumentation path. It is fine
@@ -978,7 +982,7 @@ Both variants route all LDS accesses through hip-moi and compare exact-context
 and sampled-fast-context kernels against a host attention reference.
 
 The D128 LDS-pressure benchmark now exists as
-`benchmarks/attention_d128_pressure_benchmark.hip`, with script
+`benchmarks/012_rdna4_d128_attention_pressure_benchmark.hip`, with script
 `benchmarks/build_attention_d128_pressure_benchmark.sh` and CMake target
 `hip_moi_benchmark_attention_d128_pressure`. It grows the `012` correctness
 kernel into the familiar benchmark rows for both pressure candidates. A first
@@ -1040,7 +1044,7 @@ key tiles, stages K/V through instrumented LDS, keeps the QK-to-PV handoff in
 registers, deliberately omits softmax so the host reference stays exact and
 audit-friendly, and compares exact-context plus sampled-fast-context launches.
 The benchmark rung now exists as
-`benchmarks/attention_no_score_lds_benchmark.hip`, with standalone script
+`benchmarks/014_rdna4_wmma_no_score_lds_attention_benchmark.hip`, with standalone script
 `benchmarks/build_attention_no_score_lds_benchmark.sh` and CMake target
 `hip_moi_benchmark_attention_no_score_lds`. It keeps the same D16/V16,
 two-subgroup, one-workgroup-per-32-queries shape as the smaller attention block
@@ -1051,7 +1055,7 @@ at `seq=12288`, `min_ms=100`, and `warmup_ms=100` measured `1.06 ms` noop,
 
 The D128/V128 version now exists too:
 `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` and
-`benchmarks/attention_d128_no_score_lds_benchmark.hip`, with standalone script
+`benchmarks/015_rdna4_d128_no_score_lds_attention_benchmark.hip`, with standalone script
 `benchmarks/build_attention_d128_no_score_lds_benchmark.sh` and CMake target
 `hip_moi_benchmark_attention_d128_no_score_lds`. It runs eight QK head
 fragments and eight PV value fragments while still making K/V fragment staging
@@ -1094,7 +1098,7 @@ the better signal only if a production target actually materializes score or
 weight tiles in LDS.
 
 The D128 benchmark rung now exists as
-`benchmarks/attention_d128_benchmark.hip`, with script
+`benchmarks/011_rdna4_d128_attention_block_benchmark.hip`, with script
 `benchmarks/build_attention_d128_benchmark.sh` and CMake target
 `hip_moi_benchmark_attention_d128`. It grows the `011` correctness kernel into
 the familiar benchmark rows: noop, sampled Loom-style publish-only,
@@ -1148,7 +1152,7 @@ the existing fast path may already be close enough for K/V staging and
 row-state instrumentation.
 
 The first benchmark version should be a benchmark/reference workload before it
-is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now
+is a new detector feature. `benchmarks/010_rdna4_wmma_attention_block_benchmark.hip` is now
 that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
 `010` correctness test, scales to one workgroup per 32-query block, defaults to
 `seq=12288`, and compares noop execution with both the general
@@ -1258,10 +1262,10 @@ therefore:
    `014_rdna4_wmma_no_score_lds_attention_test.hip`;
 3. extract a new attention benchmark from `014` and compare it with the
    dense-score pressure rows and the K/V-only masked proxy; done in
-   `attention_no_score_lds_benchmark.hip`;
+   `014_rdna4_wmma_no_score_lds_attention_benchmark.hip`;
 4. repeat the register-handoff path at D128/V128; done in
    `015_rdna4_d128_no_score_lds_attention_test.hip` and
-   `attention_d128_no_score_lds_benchmark.hip`;
+   `015_rdna4_d128_no_score_lds_attention_benchmark.hip`;
 5. only return to dense scalar score/weight instrumentation optimization if a
    target production kernel actually materializes those values in LDS.
 

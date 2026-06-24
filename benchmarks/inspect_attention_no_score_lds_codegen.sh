@@ -50,11 +50,11 @@ mkdir -p "${BUILD_DIR}"
 for shape in "$@"; do
   case "${shape}" in
   d16)
-    source="${SCRIPT_DIR}/attention_no_score_lds_benchmark.hip"
+    source="${SCRIPT_DIR}/014_rdna4_wmma_no_score_lds_attention_benchmark.hip"
     kernel_regex="attention_no_score_lds_kernel<"
     ;;
   d128)
-    source="${SCRIPT_DIR}/attention_d128_no_score_lds_benchmark.hip"
+    source="${SCRIPT_DIR}/015_rdna4_d128_no_score_lds_attention_benchmark.hip"
     kernel_regex="attention_no_score_lds_kernel<"
     ;;
   *)

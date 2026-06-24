@@ -68,12 +68,12 @@ target_compile_definitions(hip_moi_benchmark_w8_16x8 PRIVATE
 
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_prod_16x8 prod_16x8_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_block
-                            attention_block_benchmark.hip)
+                            010_rdna4_wmma_attention_block_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128
-                            attention_d128_benchmark.hip)
+                            011_rdna4_d128_attention_block_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128_pressure
-                            attention_d128_pressure_benchmark.hip)
+                            012_rdna4_d128_attention_pressure_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_no_score_lds
-                            attention_no_score_lds_benchmark.hip)
+                            014_rdna4_wmma_no_score_lds_attention_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128_no_score_lds
-                            attention_d128_no_score_lds_benchmark.hip)
+                            015_rdna4_d128_no_score_lds_attention_benchmark.hip)

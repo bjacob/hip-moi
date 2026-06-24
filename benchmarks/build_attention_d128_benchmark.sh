@@ -54,7 +54,7 @@ fi
   -Wno-unused-command-line-argument \
   -I "${HIP_MOI_ROOT}/include" \
   "${EXTRA_DEFINES[@]}" \
-  "${SCRIPT_DIR}/attention_d128_benchmark.hip" \
+  "${SCRIPT_DIR}/011_rdna4_d128_attention_block_benchmark.hip" \
   -o "${OUT}"
 
 HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" "${OUT}" "$@"

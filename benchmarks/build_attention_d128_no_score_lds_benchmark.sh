@@ -48,7 +48,7 @@ mkdir -p "${BUILD_DIR}"
   -Wextra \
   -Wno-unused-command-line-argument \
   -I "${HIP_MOI_ROOT}/include" \
-  "${SCRIPT_DIR}/attention_d128_no_score_lds_benchmark.hip" \
+  "${SCRIPT_DIR}/015_rdna4_d128_no_score_lds_attention_benchmark.hip" \
   -o "${OUT}"
 
 HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" "${OUT}" "$@"

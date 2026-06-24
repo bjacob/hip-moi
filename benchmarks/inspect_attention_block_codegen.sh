@@ -62,7 +62,7 @@ for mask in "$@"; do
     -Wno-unused-command-line-argument \
     -I "${HIP_MOI_ROOT}/include" \
     -DHIP_MOI_ATTENTION_SITE_MASK="${mask}" \
-    "${SCRIPT_DIR}/attention_block_benchmark.hip" \
+    "${SCRIPT_DIR}/010_rdna4_wmma_attention_block_benchmark.hip" \
     -o "${exe}"
 
   "${OBJCOPY}" --dump-section .hip_fatbin="${fatbin}" "${exe}"
