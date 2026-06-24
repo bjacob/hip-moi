@@ -367,6 +367,21 @@ shared storage is still 4352 B because only one K or V fragment is staged at a
 time, but the noop row already uses 218 VGPRs. The all-sites codegen probe
 reported:
 
+| LDS object | Bytes |
+| --- | ---: |
+| K fragment staging | 512 B |
+| V fragment staging | 512 B |
+| score scratch | 2048 B |
+| softmax weight scratch | 1024 B |
+| row-old-scale scratch | 128 B |
+| row-sum scratch | 128 B |
+| total source LDS | 4352 B |
+| bundled RDNA4 `group_segment_fixed_size` | 4352 B |
+
+On the local `gfx1201` test device, workgroup LDS is 64 KiB, so this D128
+benchmark uses about 6.6% of available LDS. Its pressure is primarily register
+and scalar-scratch instrumentation pressure, not LDS-capacity pressure.
+
 | Row | Instructions | Atomics | SGPRs | VGPRs | VGPR spills | Private segment |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | noop | 1042 | 0 | 17 | 218 | 0 | 0 B |

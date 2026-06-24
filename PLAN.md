@@ -984,6 +984,13 @@ accumulator pressure increase through eight QK fragments and eight PV value
 fragments. A later pressure variant may still be needed if Jakub's target is
 near-saturation of LDS and VGPRs rather than D128 shape coverage.
 
+The D128 benchmark README now records the LDS footprint explicitly: 512 B K
+fragment staging, 512 B V fragment staging, 2048 B score scratch, 1024 B
+softmax weight scratch, 128 B row-old-scale scratch, and 128 B row-sum scratch,
+for 4352 B total. The bundled RDNA4 object reports the same
+`group_segment_fixed_size`, which is only about 6.6% of the local `gfx1201`
+device's 64 KiB workgroup LDS.
+
 The first D128 performance-analysis pass is complete. The companion
 `benchmarks/inspect_attention_d128_codegen.sh` probe shows the D128 kernel is
 already register-heavy before instrumentation: noop uses 218 VGPRs. Sampled
