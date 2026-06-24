@@ -1039,13 +1039,29 @@ attention-shaped user of that primitive now exists as
 key tiles, stages K/V through instrumented LDS, keeps the QK-to-PV handoff in
 registers, deliberately omits softmax so the host reference stays exact and
 audit-friendly, and compares exact-context plus sampled-fast-context launches.
-The next step is to extract a benchmark from this no-score/weight-LDS path.
+The benchmark rung now exists as
+`benchmarks/attention_no_score_lds_benchmark.hip`, with standalone script
+`benchmarks/build_attention_no_score_lds_benchmark.sh` and CMake target
+`hip_moi_benchmark_attention_no_score_lds`. It keeps the same D16/V16,
+two-subgroup, one-workgroup-per-32-queries shape as the smaller attention block
+benchmark, but K/V fragment staging is the only LDS payload. A first RDNA4 run
+at `seq=12288`, `min_ms=100`, and `warmup_ms=100` measured `1.06 ms` noop,
+`1.89 ms` sampled Loom, `2.41 ms` general `context + sampled_watchpoint`, and
+`1.49 ms` fast `sampled_watchpoint_context`.
 
-The immediate reading is that `full_kv16` is the better production-inspired
-next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
-The next analysis pass should inspect generated-code resource metadata for
-these rows, especially VGPRs, spills, private segment size, and whether the
-higher LDS allocation changes occupancy enough to alter the optimization target.
+This is the cleanest current signal that K/V fragment staging by itself is not
+the attention bottleneck for hip-moi. The fast publish-only row is close to
+noop and faster than sampled Loom on the no-score path, while the dense-score
+attention rows remain much slower. Treat dense score/weight LDS materialization
+as a scalar-LDS stress case unless a target production kernel proves that it is
+actually representative.
+
+The D128 pressure rows remain useful production-inspired stressors:
+`full_kv16` is the better llama.cpp-scale LDS candidate, while `wide_k32` is an
+explicit high-LDS pressure row. The no-score/weight-LDS benchmark is the better
+signal for the register-handoff direction; the dense-score pressure rows remain
+the better signal only if a production target actually materializes score or
+weight tiles in LDS.
 
 The D128 benchmark rung now exists as
 `benchmarks/attention_d128_benchmark.hip`, with script
@@ -1211,7 +1227,8 @@ therefore:
    state that is truly stored in LDS; done in
    `014_rdna4_wmma_no_score_lds_attention_test.hip`;
 3. extract a new attention benchmark from `014` and compare it with the
-   dense-score pressure rows and the K/V-only masked proxy;
+   dense-score pressure rows and the K/V-only masked proxy; done in
+   `attention_no_score_lds_benchmark.hip`;
 4. only return to dense scalar score/weight instrumentation optimization if a
    target production kernel actually materializes those values in LDS.
 

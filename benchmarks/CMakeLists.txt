@@ -73,3 +73,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128
                             attention_d128_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128_pressure
                             attention_d128_pressure_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_no_score_lds
+                            attention_no_score_lds_benchmark.hip)

@@ -76,6 +76,17 @@ object, and prints register/spill metadata plus coarse instruction-class counts:
 ./benchmarks/inspect_attention_block_codegen.sh 0x2 0x4 0x6
 ```
 
+### RDNA4 WMMA No-Score/Weight-LDS Attention Benchmark
+
+Use this as the register-handoff attention row. It keeps the RDNA4 WMMA QK and
+PV phases, but only stages K/V fragments through LDS. The QK-to-PV handoff stays
+in registers, so there is no dense score or softmax-weight LDS scratch.
+
+```bash
+./benchmarks/build_attention_no_score_lds_benchmark.sh
+BENCH_SEQ=16384 ./benchmarks/build_attention_no_score_lds_benchmark.sh
+```
+
 ### RDNA4 WMMA D128 Attention Benchmark
 
 Use this as the source-mined D128/V128 attention row with AITER-style outer
@@ -141,6 +152,7 @@ The CMake targets are:
 | RDNA4 WMMA matmul wave-scaling, w8 16x8 | `hip_moi_benchmark_w8_16x8` | `w2_2x4_benchmark.hip` |
 | RDNA4 WMMA matmul production 16x8 | `hip_moi_benchmark_prod_16x8` | `prod_16x8_benchmark.hip` |
 | RDNA4 WMMA attention block | `hip_moi_benchmark_attention_block` | `attention_block_benchmark.hip` |
+| RDNA4 WMMA no-score/weight-LDS attention | `hip_moi_benchmark_attention_no_score_lds` | `attention_no_score_lds_benchmark.hip` |
 | RDNA4 WMMA D128 attention | `hip_moi_benchmark_attention_d128` | `attention_d128_benchmark.hip` |
 | RDNA4 WMMA D128 attention LDS-pressure | `hip_moi_benchmark_attention_d128_pressure` | `attention_d128_pressure_benchmark.hip` |
 
@@ -364,6 +376,41 @@ than a source-level prepared-site object, and should be accepted only if the
 full-size all-sites attention row improves without introducing private segment
 usage.
 
+### RDNA4 WMMA No-Score/Weight-LDS Attention Benchmark
+
+`hip_moi_benchmark_attention_no_score_lds` grows
+`014_rdna4_wmma_no_score_lds_attention_test.hip` into a benchmark-sized
+workload. It uses the same D16/V16 outer shape as the smaller attention block
+benchmark and defaults to `seq=12288`, but it removes the dense score and
+softmax-weight LDS scratch. K/V fragments are the only LDS payload, and every
+K/V LDS load/store is routed through the selected instrumentation row.
+
+This benchmark is the first direct performance signal for the production-style
+direction discovered in the source-mining pass: keep QK results in registers,
+reshape them into the PV operand path, and avoid materializing score/weight
+tiles in LDS.
+
+Measured on 2026-06-24 with `min_ms=100`, `warmup_ms=100`, all K/V LDS
+instrumented, and the default sampled knobs:
+
+| Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: | ---: |
+| seq=12288, head_dim=16, value_dim=16 | 1.06 ms | 1.89 ms | 2.41 ms | 1.49 ms |
+
+This is a very different signal from the dense-score attention benchmark. The
+fast hip-moi publish-only row is close to noop and faster than sampled Loom,
+which supports the current hypothesis that dense scalar score/weight LDS
+scratch, not K/V fragment staging, was the dominant attention instrumentation
+cost.
+
+Source-level LDS storage is only the two fragment-staging arrays:
+
+| LDS object | Bytes |
+| --- | ---: |
+| K fragment staging | 512 B |
+| V fragment staging | 512 B |
+| total source LDS | 1024 B |
+
 ### RDNA4 WMMA D128 Attention Benchmark
 
 `hip_moi_benchmark_attention_d128` grows the
@@ -515,6 +562,6 @@ The first concrete coding steps are now in the test suite:
 `013_rdna4_wmma_register_handoff_test.hip` moves from the QK accumulator layout
 to the PV B-fragment layout without storing a dense score/weight tile in LDS,
 and `014_rdna4_wmma_no_score_lds_attention_test.hip` grows that into a
-two-key-tile attention-shaped correctness test. A no-score/weight-LDS attention
-benchmark should grow from `014`, not from another micro-optimization of the
-current score/weight scratch loops.
+two-key-tile attention-shaped correctness test. The
+`hip_moi_benchmark_attention_no_score_lds` benchmark now grows from that test,
+not from another micro-optimization of the current score/weight scratch loops.
