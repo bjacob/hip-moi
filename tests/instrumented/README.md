@@ -35,6 +35,9 @@ Current files:
   correctness test for the exact context and sampled fast context.
 * `010_rdna4_wmma_attention_block_test.hip`: RDNA4-only WMMA-heavy attention
   correctness test, used as the stepping stone toward an attention benchmark.
+* `011_rdna4_d128_attention_block_test.hip`: RDNA4-only D128/V128 attention
+  correctness test shaped by the AITER/llama.cpp source-mined production
+  signal, used as the rung before the next attention benchmark.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the

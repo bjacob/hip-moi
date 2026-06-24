@@ -956,6 +956,15 @@ instrumented kernels against a host reference. This remains a correctness test,
 but its fragment layout and phase structure should be close enough to guide the
 future benchmark extraction.
 
+The source-mined D128 rung is
+`tests/instrumented/011_rdna4_d128_attention_block_test.hip`. It keeps the
+CTest sequence tiny, but switches the per-token shape to D128/V128 and labels
+the intended AITER-style GQA setting (`q_heads=64`, `kv_heads=8`). QK loops over
+eight RDNA4 WMMA fragments, PV loops over eight value fragments, every LDS
+access remains instrumented, and both the exact context and sampled fast context
+must match the host reference. This is the required correctness step before a
+new D128 attention benchmark.
+
 The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now
 that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
