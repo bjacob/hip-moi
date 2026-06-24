@@ -1049,12 +1049,23 @@ at `seq=12288`, `min_ms=100`, and `warmup_ms=100` measured `1.06 ms` noop,
 `1.89 ms` sampled Loom, `2.41 ms` general `context + sampled_watchpoint`, and
 `1.49 ms` fast `sampled_watchpoint_context`.
 
+The D128/V128 version now exists too:
+`tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` and
+`benchmarks/attention_d128_no_score_lds_benchmark.hip`, with standalone script
+`benchmarks/build_attention_d128_no_score_lds_benchmark.sh` and CMake target
+`hip_moi_benchmark_attention_d128_no_score_lds`. It runs eight QK head
+fragments and eight PV value fragments while still making K/V fragment staging
+the only instrumented LDS payload. A first RDNA4 run at `seq=12288`,
+`min_ms=100`, and `warmup_ms=100` measured `3.44 ms` noop, `10.9 ms` sampled
+Loom, `22.0 ms` general `context + sampled_watchpoint`, and `7.29 ms` fast
+`sampled_watchpoint_context`.
+
 This is the cleanest current signal that K/V fragment staging by itself is not
-the attention bottleneck for hip-moi. The fast publish-only row is close to
-noop and faster than sampled Loom on the no-score path, while the dense-score
-attention rows remain much slower. Treat dense score/weight LDS materialization
-as a scalar-LDS stress case unless a target production kernel proves that it is
-actually representative.
+the attention bottleneck for hip-moi, even at D128/V128. The fast publish-only
+row is close to noop and faster than sampled Loom on both no-score paths, while
+the dense-score attention rows remain much slower. Treat dense score/weight LDS
+materialization as a scalar-LDS stress case unless a target production kernel
+proves that it is actually representative.
 
 The D128 pressure rows remain useful production-inspired stressors:
 `full_kv16` is the better llama.cpp-scale LDS candidate, while `wide_k32` is an
@@ -1229,7 +1240,10 @@ therefore:
 3. extract a new attention benchmark from `014` and compare it with the
    dense-score pressure rows and the K/V-only masked proxy; done in
    `attention_no_score_lds_benchmark.hip`;
-4. only return to dense scalar score/weight instrumentation optimization if a
+4. repeat the register-handoff path at D128/V128; done in
+   `015_rdna4_d128_no_score_lds_attention_test.hip` and
+   `attention_d128_no_score_lds_benchmark.hip`;
+5. only return to dense scalar score/weight instrumentation optimization if a
    target production kernel actually materializes those values in LDS.
 
 Future benchmark rows should keep the row structure familiar:

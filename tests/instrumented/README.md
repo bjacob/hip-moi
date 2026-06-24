@@ -47,6 +47,9 @@ Current files:
 * `014_rdna4_wmma_no_score_lds_attention_test.hip`: RDNA4-only two-key-tile
   linear attention-shaped test that uses the register handoff and instruments
   K/V LDS staging without materializing dense score/weight scratch.
+* `015_rdna4_d128_no_score_lds_attention_test.hip`: RDNA4-only D128/V128
+  version of the no-score/weight-LDS attention test, used as the correctness
+  rung for the final register-handoff attention benchmark.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the
