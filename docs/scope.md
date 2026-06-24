@@ -47,6 +47,15 @@ expected: the fast row is intentionally publish-only and omits general
 diagnostic state. The remaining near-term project risk is now workload breadth,
 starting with an attention block, rather than more matmul-only heroics.
 
+The first attention benchmark is not yet the production-pressure endpoint. It
+uses RDNA4 WMMA and instruments all LDS traffic, but its fixed LDS footprint is
+only 4352 B on a device with 64 KiB of workgroup LDS. Source mining points to a
+next attention row shaped by production MHA parameters: head dimension 128,
+query heads 32 or 64, KV heads 4 or 8, long sequences, and causal/no-mask
+variants. The microkernel should be compile-probed for LDS usage, VGPRs, and
+spills before instrumentation, because closeness to the LDS/VGPR limits is now
+the point of the next benchmark.
+
 ## Next Scopes
 
 The next non-negotiable scope increase is workload breadth. The first likely

@@ -977,21 +977,66 @@ triage pass added the reusable codegen probe. The third pass tried the obvious
 per-site sampled-selection hoisting shapes and rejected them as insufficiently
 stable for the hot benchmark path.
 
-The attention optimization foray should now be treated as a fork in priorities,
-not an open-ended obligation to optimize this exact kernel shape. The current
-benchmark is production-like in its RDNA4 WMMA QK/PV structure, multi-subgroup
-workgroup, K/V LDS staging, and online softmax state. It is also intentionally a
-scalar-scratch stress case: it materializes score and softmax-weight tiles in
-LDS to keep the QK-to-softmax-to-PV handoff simple and auditable. A masked
-K/V+row-state proxy (`HIP_MOI_ATTENTION_SITE_MASK=0x9`) measured
-`sampled_watchpoint_context` at `2.17 ms` on `seq=4096`, versus `24.6 ms` for
-the all-sites stress row. If a more production attention implementation avoids
-most score/weight LDS materialization, the current fast path is probably good
-enough and attention should not block the atomics/finer-synchronization work. If
-Jakub or a target workload confirms that dense scalar score/weight LDS scratch
-is representative, then the next attention-specific optimization needs a deeper
-sampling model for repeated scalar sites, not another source-level rewrite of
-the existing prepared-site idea.
+The follow-up source-mining pass changed the attention priority. Jakub's desired
+next rung is not merely "larger than matmul"; it is an attention shape that is
+close to production resource pressure, especially LDS and VGPR pressure. The
+current benchmark is not there:
+
+* source shared storage is 4352 bytes: 512 B K staging, 512 B V staging, 2048 B
+  score scratch, 1024 B weight scratch, and 256 B row scratch;
+* the bundled RDNA4 code object reports `group_segment_fixed_size: 4352`;
+* the local `gfx1201` device reports 64 KiB of workgroup LDS, so the benchmark
+  uses only about 6.6% of available LDS;
+* the fast hip-moi row uses 146 VGPRs and no spills, while sampled Loom uses 205
+  VGPRs and no spills. The general `context + sampled_watchpoint` row spills,
+  but that is already known to be the wrong hot path for publish-only
+  performance work.
+
+The current attention benchmark is therefore useful as a scalar-scratch
+instrumentation stress test, but it is not the production-pressure attention
+benchmark that should decide whether attention is "done".
+
+Source mining gives two concrete shape signals.
+
+* llama.cpp's CUDA/HIP flash-attention implementation has RDNA-relevant WMMA
+  paths for head dimensions up to 128 and broader MMA/template machinery for
+  larger head/value dimensions such as 192/128, 256/256, 320/256, 512/512, and
+  576/512. Its dynamic shared-memory formula can reach roughly 42 KiB for a
+  256/256, 64-column candidate, while 512/512 and 576/512 variants exceed the
+  64 KiB workgroup LDS limit on this local `gfx1201` device. Dispatch details
+  matter: llama.cpp gates MFMA to CDNA and its exact RDNA4 path depends on the
+  WMMA/rocWMMA configuration, so these are candidate shapes to compile/probe,
+  not a copy-paste answer.
+* AITER's MHA tests and benchmark docs provide production inference shapes:
+  bf16/fp16, head dimension 128, query heads 32 or 64, KV heads 4 or 8, sequence
+  lengths from 1024 through 16384, batch sizes 1/4/8, and causal/no-mask
+  variants. AITER's newest hand-written attention ASM is not directly a
+  `gfx1201` RDNA4 target, but its shapes are a strong source of production
+  workload parameters.
+
+The next attention benchmark should be a source-mined production-pressure
+variant, not another optimization pass over the current scalar-scratch kernel.
+The right workflow is:
+
+1. compile/probe a few llama-inspired RDNA4 candidates and record LDS/VGPR/spill
+   metadata before adding instrumentation;
+2. choose a candidate that is close to the 64 KiB LDS limit without exceeding it
+   and already has high VGPR pressure in the noop row;
+3. use AITER-style production dimensions for the outer problem shape
+   (`head_dim=128`, many heads, long sequence, causal and no-mask variants), even
+   if the microkernel remains hip-moi-native;
+4. only then add the familiar benchmark rows: noop, sampled Loom-style,
+   `context + sampled_watchpoint` if it is still informative, and
+   `sampled_watchpoint_context`.
+
+A masked K/V+row-state proxy (`HIP_MOI_ATTENTION_SITE_MASK=0x9`) still matters
+as an interpretation aid: it measured `sampled_watchpoint_context` at `2.17 ms`
+on `seq=4096`, versus `24.6 ms` for the all-sites scalar-scratch stress row. If
+the production-pressure benchmark avoids dense score/weight LDS materialization,
+the current fast path may already be close enough. If it keeps dense scalar
+score/weight scratch, the next optimization needs a deeper sampling model for
+repeated scalar sites, not another source-level rewrite of the rejected
+prepared-site idea.
 
 Future benchmark rows should keep the row structure familiar:
 
