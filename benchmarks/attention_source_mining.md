@@ -160,11 +160,14 @@ with both exact-context and sampled-fast-context launches. The working lane
 exchange uses `ds_bpermute`; a temporary `readlane` probe was not sufficient for
 the dynamic cross-half permutation.
 
-The next step is to grow that primitive into a no-score/weight-LDS attention
-correctness test, and only then extract the next benchmark. The existing D128
-dense-score benchmarks remain valuable as scalar LDS instrumentation stress
-cases, but they should no longer be treated as the most production-faithful
-attention endpoint.
+The first attention-shaped user of that primitive is now
+`tests/instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip`. It runs two
+key tiles, instruments the remaining K/V LDS staging, keeps the QK-to-PV handoff
+in registers, and deliberately omits softmax so the host reference stays small
+and exact. The next step is to extract a benchmark from that no-score/weight-LDS
+path. The existing D128 dense-score benchmarks remain valuable as scalar LDS
+instrumentation stress cases, but they should no longer be treated as the most
+production-faithful attention endpoint.
 
 ## Implications For hip-moi
 

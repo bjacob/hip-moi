@@ -44,6 +44,9 @@ Current files:
 * `013_rdna4_wmma_register_handoff_test.hip`: RDNA4-only QK-to-PV register
   handoff test that reshapes WMMA accumulator fragments into the next WMMA
   operand without dense score/weight LDS scratch.
+* `014_rdna4_wmma_no_score_lds_attention_test.hip`: RDNA4-only two-key-tile
+  linear attention-shaped test that uses the register handoff and instruments
+  K/V LDS staging without materializing dense score/weight scratch.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 thread-level detector. It is deliberately gone from the active corpus so the

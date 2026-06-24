@@ -60,9 +60,10 @@ A later source read sharpened the algorithmic target. Mature RDNA
 flash-attention code can keep QK scores in accumulator fragments and reshape
 those fragments into the PV operand path, rather than materializing dense
 score/weight scratch in LDS. The dense-score hip-moi attention rows remain useful
-scalar-LDS stress tests, but the next production-faithful attention rung should
-start with an isolated RDNA4 WMMA register-transpose correctness test and then
-grow into a no-score/weight-LDS attention benchmark.
+scalar-LDS stress tests. The correctness ladder now has both the isolated RDNA4
+WMMA register-transpose test and a two-key-tile no-score/weight-LDS attention
+test; the remaining production-faithful rung is extracting and measuring the
+corresponding benchmark.
 
 ## Next Scopes
 

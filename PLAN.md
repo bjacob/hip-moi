@@ -1033,9 +1033,13 @@ without materializing dense score/weight LDS. The test first checks the reshaped
 fragment directly, then feeds it to a second PV WMMA and compares both modes
 against host references through exact-context and sampled-fast-context launches.
 The handoff uses `ds_bpermute` for dynamic lane reads; a temporary `readlane`
-probe was rejected because it produced the wrong cross-half exchange. The next
-step is to build a no-score/weight-LDS attention correctness test from this
-primitive and then extract a new benchmark.
+probe was rejected because it produced the wrong cross-half exchange. The first
+attention-shaped user of that primitive now exists as
+`tests/instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip`. It runs two
+key tiles, stages K/V through instrumented LDS, keeps the QK-to-PV handoff in
+registers, deliberately omits softmax so the host reference stays exact and
+audit-friendly, and compares exact-context plus sampled-fast-context launches.
+The next step is to extract a benchmark from this no-score/weight-LDS path.
 
 The immediate reading is that `full_kv16` is the better production-inspired
 next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
@@ -1204,9 +1208,10 @@ therefore:
    `013_rdna4_wmma_register_handoff_test.hip`;
 2. grow that into a no-score/weight-LDS attention correctness test that still
    instruments all remaining LDS traffic, especially K/V staging and any row
-   state that is truly stored in LDS;
-3. extract a new attention benchmark from that test and compare it with the
-   dense-score pressure rows;
+   state that is truly stored in LDS; done in
+   `014_rdna4_wmma_no_score_lds_attention_test.hip`;
+3. extract a new attention benchmark from `014` and compare it with the
+   dense-score pressure rows and the K/V-only masked proxy;
 4. only return to dense scalar score/weight instrumentation optimization if a
    target production kernel actually materializes those values in LDS.
 

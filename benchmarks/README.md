@@ -511,8 +511,10 @@ LDS score/weight materialization altogether.
 
 The source read now favors the second path. Treat `full_kv16` and `wide_k32` as
 dense-score pressure rows, not as the final production-faithful attention model.
-The next concrete coding step is a small RDNA4-only WMMA register-transpose test:
-move from the QK accumulator layout to the PV B-fragment layout without storing a
-dense score/weight tile in LDS. A no-score/weight-LDS attention benchmark should
-grow from that test, not from another micro-optimization of the current
-score/weight scratch loops.
+The first concrete coding steps are now in the test suite:
+`013_rdna4_wmma_register_handoff_test.hip` moves from the QK accumulator layout
+to the PV B-fragment layout without storing a dense score/weight tile in LDS,
+and `014_rdna4_wmma_no_score_lds_attention_test.hip` grows that into a
+two-key-tile attention-shaped correctness test. A no-score/weight-LDS attention
+benchmark should grow from `014`, not from another micro-optimization of the
+current score/weight scratch loops.
