@@ -977,6 +977,26 @@ layouts before they become benchmarks:
 Both variants route all LDS accesses through hip-moi and compare exact-context
 and sampled-fast-context kernels against a host attention reference.
 
+The D128 LDS-pressure benchmark now exists as
+`benchmarks/attention_d128_pressure_benchmark.hip`, with script
+`benchmarks/build_attention_d128_pressure_benchmark.sh` and CMake target
+`hip_moi_benchmark_attention_d128_pressure`. It grows the `012` correctness
+kernel into the familiar benchmark rows for both pressure candidates. A first
+RDNA4 run on `seq=8192` measured:
+
+* `full_kv16`, 19712 B LDS: `5.87 ms` noop, `156 ms` sampled Loom, `132 ms`
+  general `context + sampled_watchpoint`, and `48.4 ms` fast
+  `sampled_watchpoint_context`;
+* `wide_k32`, 39168 B LDS: `8.87 ms` noop, `183 ms` sampled Loom, `162 ms`
+  general `context + sampled_watchpoint`, and `75.5 ms` fast
+  `sampled_watchpoint_context`.
+
+The immediate reading is that `full_kv16` is the better production-inspired
+next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
+The next analysis pass should inspect generated-code resource metadata for
+these rows, especially VGPRs, spills, private segment size, and whether the
+higher LDS allocation changes occupancy enough to alter the optimization target.
+
 The D128 benchmark rung now exists as
 `benchmarks/attention_d128_benchmark.hip`, with script
 `benchmarks/build_attention_d128_benchmark.sh` and CMake target
@@ -1095,21 +1115,20 @@ and not merely another D128 representative rung. The detailed extraction lives
 in `benchmarks/attention_source_mining.md`. The right workflow is:
 
 1. use `012_rdna4_d128_attention_pressure_test.hip` as the correctness source
-   for the two source-mined LDS-pressure candidates;
-2. extract the 16-key full-K/V double-buffer candidate into a benchmark and
-   record LDS/VGPR/spill metadata before performance comparisons;
-3. extract the 32-key double-buffer pressure row into a benchmark and record the
-   same metadata. Label it explicitly as a production-pressure variant rather
-   than a literal source clone;
-4. compare those candidates against the existing D128/V128 representative rung,
+   for the two source-mined LDS-pressure candidates; done;
+2. extract the 16-key full-K/V double-buffer candidate into a benchmark; done;
+3. extract the 32-key double-buffer pressure row into a benchmark; done;
+4. inspect and record generated-code resource metadata for both candidates:
+   VGPRs, SGPRs, spills, private segment size, fixed LDS, and static instruction
+   shape;
+5. compare those candidates against the existing D128/V128 representative rung,
    then decide from measured LDS/VGPR pressure whether a still larger
    production-derived pressure variant is needed;
-5. keep AITER-style production dimensions in the outer problem shape
+6. keep AITER-style production dimensions in the outer problem shape
    (`head_dim=128`, many heads, long sequence, causal and no-mask variants),
    even if the microkernel remains hip-moi-native;
-6. only then add the familiar benchmark rows: noop, sampled Loom-style,
-   `context + sampled_watchpoint` if it is still informative, and
-   `sampled_watchpoint_context`.
+7. keep the familiar benchmark rows: noop, sampled Loom-style,
+   `context + sampled_watchpoint`, and `sampled_watchpoint_context`.
 
 The important correction from source mining is that "production-pressure" does
 not mean filling the whole 64 KiB LDS allocation with inert padding. Mature

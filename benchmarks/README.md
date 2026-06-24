@@ -95,6 +95,20 @@ It also has a companion codegen probe:
 ./benchmarks/inspect_attention_d128_codegen.sh 0x1 0x2 0x4 0x8
 ```
 
+### RDNA4 WMMA D128 Attention LDS-Pressure Benchmark
+
+Use this as the source-mined LDS-pressure attention row. It runs two D128/V128
+candidate layouts in one executable: full K/V double-buffering for a 16-key tile
+and a wider 32-key double-buffer pressure tile.
+
+```bash
+./benchmarks/build_attention_d128_pressure_benchmark.sh
+BENCH_SEQ=16384 ./benchmarks/build_attention_d128_pressure_benchmark.sh
+```
+
+It accepts the same `HIP_MOI_ATTENTION_SITE_MASK` knob as the other attention
+benchmarks, and the headline numbers below use the default all-sites mask.
+
 ### Shared Knobs
 
 Timing knobs:
@@ -128,6 +142,7 @@ The CMake targets are:
 | RDNA4 WMMA matmul production 16x8 | `hip_moi_benchmark_prod_16x8` | `prod_16x8_benchmark.hip` |
 | RDNA4 WMMA attention block | `hip_moi_benchmark_attention_block` | `attention_block_benchmark.hip` |
 | RDNA4 WMMA D128 attention | `hip_moi_benchmark_attention_d128` | `attention_d128_benchmark.hip` |
+| RDNA4 WMMA D128 attention LDS-pressure | `hip_moi_benchmark_attention_d128_pressure` | `attention_d128_pressure_benchmark.hip` |
 
 Example:
 
@@ -435,3 +450,32 @@ model of the all-sites fast row. A future production-pressure variant should
 therefore probe whether a mature attention kernel avoids this dense LDS
 score/weight materialization; if it does not, the next optimization target is
 still repeated scalar-site instrumentation cost under high VGPR pressure.
+
+### RDNA4 WMMA D128 Attention LDS-Pressure Benchmark
+
+`hip_moi_benchmark_attention_d128_pressure` grows
+`012_rdna4_d128_attention_pressure_test.hip` into benchmark rows. It keeps the
+D128/V128, `q_heads=64`, `kv_heads=8`, `gqa=8`, `seq=8192` shape labels, but
+uses larger source shared-memory layouts than the representative D128 benchmark.
+
+| Candidate | Key tile | Source LDS | Approx. 64 KiB LDS use |
+| --- | ---: | ---: | ---: |
+| `full_kv16` | 16 | 19712 B | 30.1% |
+| `wide_k32` | 32 | 39168 B | 59.8% |
+
+Measured on 2026-06-24 with `min_ms=100`, `warmup_ms=100`, all-sites
+instrumentation, and the default sampled knobs:
+
+| Candidate | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: | ---: |
+| `full_kv16`, seq=8192 | 5.87 ms | 156 ms | 132 ms | 48.4 ms |
+| `wide_k32`, seq=8192 | 8.87 ms | 183 ms | 162 ms | 75.5 ms |
+
+The `full_kv16` row is the better immediate benchmark candidate: it matches the
+source-mined llama.cpp D128 LDS scale more closely and is faster in every row.
+The `wide_k32` row remains useful as an explicit high-LDS pressure stressor,
+but it should be read as a pressure variant rather than a literal production
+dispatch clone. In both candidates, the fast hip-moi row remains substantially
+faster than sampled Loom; the general `context + sampled_watchpoint` row also
+beats sampled Loom here, but it remains the larger correctness-oriented path and
+is not the publish-only hot path.
