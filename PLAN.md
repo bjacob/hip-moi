@@ -606,12 +606,20 @@ and 10279 score+weight instructions.
 
 So the next attention-specific performance lever, if we choose one before
 atomics, is not WMMA fragment staging. It is the repeated scalar score/weight
-LDS traffic in the softmax phases. The most plausible first optimization is a
+LDS traffic in the softmax phases. The obvious source-level first idea was a
 publish-only, `sampled_watchpoint_context`-specific way to hoist or cache the
-per-site sampled selection decision, so losing sampled sites can bypass the
-instrumentation call before paying repeated seed/lane/range setup. Any
-optimization here should remain generic enough to apply to attention-like
-scalar scratch patterns rather than baking attention semantics into the API.
+per-site sampled selection decision, so losing sampled sites could bypass
+repeated seed/lane/range setup.
+
+That obvious idea has now been tried and rejected in its first two source-level
+forms. A branch-out version duplicated raw and instrumented loop bodies; it
+introduced private segment usage and scratch instructions in the fast row and
+regressed the quick all-sites benchmark. A lighter prepared-site object with
+force-inlined 32-bit state restored spill-free codegen, but did not produce a
+stable full-size all-sites attention improvement. Do not add this as a public
+API or benchmark pattern without a better representation. A future attempt
+should be accepted only if it improves the full-size all-sites attention row and
+keeps private segment usage at zero.
 
 ## Test Corpus
 
@@ -965,8 +973,9 @@ The first attention triage pass is complete. The benchmark has a compile-time
 site mask for local attribution builds, and that pass showed that score and
 weight scratch dominate the overhead while K/V fragment staging is cheap. The
 default CMake benchmark remains all-sites and should stay that way. The second
-triage pass added the reusable codegen probe and identified per-site sampled
-selection hoisting as the clearest pre-atomics optimization to try.
+triage pass added the reusable codegen probe. The third pass tried the obvious
+per-site sampled-selection hoisting shapes and rejected them as insufficiently
+stable for the hot benchmark path.
 
 Future benchmark rows should keep the row structure familiar:
 

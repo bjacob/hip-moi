@@ -227,8 +227,21 @@ comparison rows:
 | `0x6` | `context + sampled_watchpoint` | 10279 | 77 | 252 | 0 | 0 B |
 | `0x6` | `sampled_watchpoint_context` | 1415 | 20 | 124 | 0 | 0 B |
 
-The next plausible attention optimization is therefore not reducing K/V
-fragment instrumentation. It is hoisting or caching the per-site sampled
-selection decision for dense scalar score/weight loops, so losing sampled sites
-can bypass the instrumentation call before paying repeated seed/lane/range
-setup. That idea is publish-only and `sampled_watchpoint_context`-specific.
+The next attention optimization is therefore not reducing K/V fragment
+instrumentation. The obvious source-level attempt is to hoist or cache the
+per-site sampled selection decision for dense scalar score/weight loops, so
+losing sampled sites can bypass repeated seed/lane/range setup. A first
+implementation session tried two versions and deliberately did not keep either
+in the hot benchmark path:
+
+* a branch-out version that duplicated raw and instrumented loop bodies. It
+  created private memory and scratch traffic in `sampled_watchpoint_context` and
+  regressed the quick all-sites row;
+* a lighter prepared-site object that force-inlined the selection result and
+  avoided scratch. It restored codegen shape but did not produce a stable
+  full-size benchmark win.
+
+A future attempt at this idea needs a more compiler-friendly representation
+than a source-level prepared-site object, and should be accepted only if the
+full-size all-sites attention row improves without introducing private segment
+usage.
