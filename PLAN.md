@@ -164,7 +164,8 @@ Current entry points:
 * `docs/README.md`: documentation index;
 * `docs/instrumentation_model.md`: canonical implementation model;
 * `docs/context.md`: context allocation and usage examples;
-* `docs/tutorial/README.md`: tested tutorial examples;
+* `docs/tutorial/README.md`: tested tutorial sequence with local definitions,
+  per-example intent, and links to deeper model/context docs;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
