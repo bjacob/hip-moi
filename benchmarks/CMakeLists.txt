@@ -69,3 +69,5 @@ target_compile_definitions(hip_moi_benchmark_w8_16x8 PRIVATE
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_prod_16x8 prod_16x8_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_block
                             attention_block_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_attention_d128
+                            attention_d128_benchmark.hip)

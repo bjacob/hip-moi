@@ -965,6 +965,25 @@ access remains instrumented, and both the exact context and sampled fast context
 must match the host reference. This is the required correctness step before a
 new D128 attention benchmark.
 
+The D128 benchmark rung now exists as
+`benchmarks/attention_d128_benchmark.hip`, with script
+`benchmarks/build_attention_d128_benchmark.sh` and CMake target
+`hip_moi_benchmark_attention_d128`. It grows the `011` correctness kernel into
+the familiar benchmark rows: noop, sampled Loom-style publish-only,
+`context + sampled_watchpoint`, and `sampled_watchpoint_context`. The default
+shape is `seq=8192`, `head_dim=128`, `value_dim=128`, and the source-mined
+AITER-style labels are `q_heads=64`, `kv_heads=8`, `gqa=8`. A first RDNA4 run
+measured `4.22 ms` noop, `101 ms` sampled Loom, `105 ms` general
+`context + sampled_watchpoint`, and `59.2 ms` fast
+`sampled_watchpoint_context`.
+
+This is a production-representative D128/V128 rung, not yet the final
+production-pressure attention benchmark. It stages one K or V fragment through
+LDS at a time, so source shared storage remains modest while WMMA and
+accumulator pressure increase through eight QK fragments and eight PV value
+fragments. A later pressure variant may still be needed if Jakub's target is
+near-saturation of LDS and VGPRs rather than D128 shape coverage.
+
 The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. `benchmarks/attention_block_benchmark.hip` is now
 that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
@@ -1023,19 +1042,19 @@ Source mining gives two concrete shape signals.
   `gfx1201` RDNA4 target, but its shapes are a strong source of production
   workload parameters.
 
-The next attention benchmark should be a source-mined production-pressure
-variant, not another optimization pass over the current scalar-scratch kernel.
-The detailed extraction lives in `benchmarks/attention_source_mining.md`.
-The right workflow is:
+The next attention benchmark step should be a source-mined production-pressure
+variant, not another optimization pass over the current scalar-scratch kernel
+and not merely another D128 representative rung. The detailed extraction lives
+in `benchmarks/attention_source_mining.md`. The right workflow is:
 
 1. compile/probe a few llama-inspired RDNA4 candidates and record LDS/VGPR/spill
    metadata before adding instrumentation;
-2. choose a production-representative D128/V128 candidate first, then decide
-   from measured LDS/VGPR pressure whether a separate production-derived
-   pressure variant is needed;
-3. use AITER-style production dimensions for the outer problem shape
-   (`head_dim=128`, many heads, long sequence, causal and no-mask variants), even
-   if the microkernel remains hip-moi-native;
+2. compare those candidates against the existing D128/V128 representative rung,
+   then decide from measured LDS/VGPR pressure whether a separate
+   production-derived pressure variant is needed;
+3. keep AITER-style production dimensions in the outer problem shape
+   (`head_dim=128`, many heads, long sequence, causal and no-mask variants),
+   even if the microkernel remains hip-moi-native;
 4. only then add the familiar benchmark rows: noop, sampled Loom-style,
    `context + sampled_watchpoint` if it is still informative, and
    `sampled_watchpoint_context`.

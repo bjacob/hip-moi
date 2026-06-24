@@ -2,8 +2,8 @@
 
 These RDNA4 benchmarks are the performance-facing companions to the correctness
 tests. The matmul benchmarks are focused extractions from Jakub's
-`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the attention benchmark is
-a hip-moi-native workload grown from the instrumented attention tests.
+`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the attention benchmarks
+are hip-moi-native workloads grown from the instrumented attention tests.
 
 All current benchmarks focus on subgroup-level, full-workgroup-barrier LDS
 instrumentation. They do not exercise atomics or finer-grained synchronization.
@@ -76,6 +76,19 @@ object, and prints register/spill metadata plus coarse instruction-class counts:
 ./benchmarks/inspect_attention_block_codegen.sh 0x2 0x4 0x6
 ```
 
+### RDNA4 WMMA D128 Attention Benchmark
+
+Use this as the source-mined D128/V128 attention row with AITER-style outer
+shape labels.
+
+```bash
+./benchmarks/build_attention_d128_benchmark.sh
+BENCH_SEQ=16384 ./benchmarks/build_attention_d128_benchmark.sh
+```
+
+It accepts the same `HIP_MOI_ATTENTION_SITE_MASK` knob as the smaller attention
+block benchmark, and the headline numbers below use the default all-sites mask.
+
 ### Shared Knobs
 
 Timing knobs:
@@ -108,6 +121,7 @@ The CMake targets are:
 | RDNA4 WMMA matmul wave-scaling, w8 16x8 | `hip_moi_benchmark_w8_16x8` | `w2_2x4_benchmark.hip` |
 | RDNA4 WMMA matmul production 16x8 | `hip_moi_benchmark_prod_16x8` | `prod_16x8_benchmark.hip` |
 | RDNA4 WMMA attention block | `hip_moi_benchmark_attention_block` | `attention_block_benchmark.hip` |
+| RDNA4 WMMA D128 attention | `hip_moi_benchmark_attention_d128` | `attention_d128_benchmark.hip` |
 
 Example:
 
@@ -321,3 +335,23 @@ A future attempt at this idea needs a more compiler-friendly representation
 than a source-level prepared-site object, and should be accepted only if the
 full-size all-sites attention row improves without introducing private segment
 usage.
+
+### RDNA4 WMMA D128 Attention Benchmark
+
+`hip_moi_benchmark_attention_d128` grows the
+`011_rdna4_d128_attention_block_test.hip` correctness rung into a benchmark. It
+uses the production-representative D128/V128 per-token shape mined from
+AITER/llama.cpp signals, labels the intended GQA setting as `q_heads=64`,
+`kv_heads=8`, `gqa=8`, and defaults to `seq=8192`.
+
+The kernel still stages one K or V fragment through LDS at a time, so it is a
+D128 representative workload rather than an LDS-saturation pressure variant.
+The increased head/value dimensions do raise the WMMA and accumulator pressure:
+QK loops over eight head fragments and PV loops over eight value fragments.
+Every LDS access is routed through the selected benchmark row.
+
+Measured on 2026-06-24 with `min_ms=100` and `warmup_ms=100`:
+
+| Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: | ---: |
+| seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=128, value_dim=128 | 4.22 ms | 101 ms | 105 ms | 59.2 ms |
