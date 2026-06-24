@@ -151,6 +151,78 @@ seq_q=seq_kv at least 8192, causal first, no-mask second,
 microkernel compile-probed before instrumentation.
 ```
 
+## Production-Pressure LDS Variant
+
+The latest mining pass sharpened what "production-pressure" should mean. It
+should not mean adding unused padding just to reach 64 KiB of LDS. A realistic
+pressure variant should spend LDS on data that a flash-attention-like kernel
+would plausibly stage or reuse:
+
+* full K/V head-dimension tiles, not one 16-element fragment at a time;
+* enough key columns per block to amortize global reads;
+* double-buffered K/V staging when the kernel is pipelined;
+* score, weight, row max, and row sum scratch only when the algorithm really
+  materializes them.
+
+The current D128 benchmark is intentionally small:
+
+| Region | Bytes |
+| --- | ---: |
+| one K fragment tile | 512 |
+| one V fragment tile | 512 |
+| score scratch | 2048 |
+| softmax weight scratch | 1024 |
+| row max/sum scratch | 256 |
+| total | 4352 |
+
+For a D128/V128, two-subgroup workgroup with 16 query rows per subgroup, the
+first realistic LDS pressure step is to stage complete K and V head-dimension
+tiles for a 16-key tile:
+
+```text
+K full tile = 8 fragments * 32 lanes * 16 bytes = 4096 bytes
+V full tile = 8 fragments * 32 lanes * 16 bytes = 4096 bytes
+score scratch = 2 subgroups * 16 queries * 16 keys * 4 bytes = 2048 bytes
+weight scratch = 2 subgroups * 16 queries * 16 keys * 2 bytes = 1024 bytes
+row scratch = 2 subgroups * 16 queries * 2 values * 4 bytes = 256 bytes
+single-buffer total = 11520 bytes
+double-buffered K/V total = 19712 bytes
+```
+
+The double-buffered total is about 19.25 KiB, which is close to the llama.cpp
+RDNA MMA-F16 D128 fallback estimate. That makes it a good next "literal
+production-inspired" benchmark target: it is still far from 64 KiB, but it is
+using LDS for the same reasons a mature implementation does.
+
+If Jakub specifically wants a near-LDS-pressure rung, the cleanest next variant
+is not padding, but a wider key tile:
+
+```text
+K full tile, 32 keys = 8192 bytes
+V full tile, 32 keys = 8192 bytes
+double-buffered K/V = 32768 bytes
+score scratch = 2 subgroups * 16 queries * 32 keys * 4 bytes = 4096 bytes
+weight scratch = 2 subgroups * 16 queries * 32 keys * 2 bytes = 2048 bytes
+row scratch = 256 bytes
+total = 39168 bytes
+```
+
+That is about 38.25 KiB before any extra alignment, mask, or float-accumulator
+scratch. It is less literal than the 16-key tile, but it is still derived from
+real flash-attention tiling pressure: larger K/V staging, a larger score tile,
+and pipelined reuse. This should be labelled a D128 production-pressure variant,
+not a llama.cpp clone.
+
+The conclusion is:
+
+1. Keep the current 4352 B D128 benchmark as the scalar-scratch
+   instrumentation stress row.
+2. Add a D128 full-K/V double-buffer benchmark targeting about 19 KiB of LDS.
+3. If that still does not create enough resource pressure, add a D128 32-key
+   double-buffer pressure row targeting about 38 KiB of LDS.
+4. Compile-probe each candidate before instrumentation and record fixed LDS,
+   dynamic LDS, VGPRs, spills, and private segment size.
+
 Only after that probe should hip-moi add the familiar rows:
 
 * noop;
