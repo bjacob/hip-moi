@@ -98,6 +98,13 @@ fragments.
 BENCH_SEQ=16384 ./benchmarks/build_attention_d128_no_score_lds_benchmark.sh
 ```
 
+The companion codegen probe covers both no-score rows:
+
+```bash
+./benchmarks/inspect_attention_no_score_lds_codegen.sh
+./benchmarks/inspect_attention_no_score_lds_codegen.sh d128
+```
+
 ### RDNA4 WMMA D128 Attention Benchmark
 
 Use this as the source-mined D128/V128 attention row with AITER-style outer
@@ -423,6 +430,15 @@ Source-level LDS storage is only the two fragment-staging arrays:
 | V fragment staging | 512 B |
 | total source LDS | 1024 B |
 
+The codegen probe reports a compact, spill-free fast row:
+
+| Row | Instructions | Atomics | SGPRs | VGPRs | VGPR spills | Private segment |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| noop | 793 | 0 | 14 | 50 | 0 | 0 B |
+| sampled Loom | 1553 | 6 global | 51 | 91 | 0 | 0 B |
+| hip-moi `context + sampled_watchpoint` | 3259 | 17 flat | 64 | 112 | 0 | 0 B |
+| hip-moi `sampled_watchpoint_context` | 1090 | 4 flat | 26 | 65 | 0 | 0 B |
+
 ### RDNA4 WMMA D128 No-Score/Weight-LDS Attention Benchmark
 
 `hip_moi_benchmark_attention_d128_no_score_lds` grows
@@ -453,6 +469,23 @@ Source-level LDS storage is still only the two fragment-staging arrays:
 | K fragment staging | 512 B |
 | V fragment staging | 512 B |
 | total source LDS | 1024 B |
+
+The codegen probe again shows the fast row is spill-free and smaller than the
+sampled-Loom comparison row:
+
+| Row | Instructions | Atomics | SGPRs | VGPRs | VGPR spills | Private segment |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| noop | 1263 | 0 | 14 | 178 | 0 | 0 B |
+| sampled Loom | 5319 | 64 global | 54 | 161 | 0 | 0 B |
+| hip-moi `context + sampled_watchpoint` | 18025 | 129 flat | 63 | 176 | 0 | 0 B |
+| hip-moi `sampled_watchpoint_context` | 2778 | 32 flat | 24 | 122 | 0 | 0 B |
+
+A quick experiment specializing vector-sized sampled accesses in
+`sampled_watchpoint_context` reduced D128 no-score static code size and nudged
+that fast row from about `7.29 ms` to `7.07 ms`, but it regressed the production
+matmul guardrail to about `3.91 ms` from the usual mid-`3.3 ms` range. The
+experiment was rejected. Keep vector LDS accesses on the runtime-shaped sampled
+path unless a future policy can opt in without affecting matmul.
 
 ### RDNA4 WMMA D128 Attention Benchmark
 

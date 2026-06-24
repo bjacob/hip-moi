@@ -1067,6 +1067,25 @@ the dense-score attention rows remain much slower. Treat dense score/weight LDS
 materialization as a scalar-LDS stress case unless a target production kernel
 proves that it is actually representative.
 
+A no-score codegen probe now exists as
+`benchmarks/inspect_attention_no_score_lds_codegen.sh`. On the restored
+implementation, both no-score fast rows are spill-free. The D16 no-score fast
+row uses 26 SGPRs, 65 VGPRs, 1090 static instructions, and 4 flat atomics
+versus sampled Loom's 51 SGPRs, 91 VGPRs, 1553 static instructions, and
+6 global atomics. The D128 no-score fast row uses 24 SGPRs, 122 VGPRs, 2778
+static instructions, and 32 flat atomics versus sampled Loom's 54 SGPRs,
+161 VGPRs, 5319 static instructions, and 64 global atomics. That confirms the
+remaining no-score overhead is not a spill or code-size problem relative to
+Loom.
+
+One tempting quick win was tested and rejected again: using the compile-time
+range path for vector-sized `sampled_watchpoint_context` accesses. It improved
+no-score codegen and nudged D128 no-score fast latency from roughly `7.29 ms`
+to `7.07 ms`, but it regressed the production matmul fast row to about
+`3.91 ms` from the usual mid-`3.3 ms` range. Keep vector accesses on the
+runtime-shaped sampled path unless a future opt-in policy can specialize the
+attention row without changing matmul behavior.
+
 The D128 pressure rows remain useful production-inspired stressors:
 `full_kv16` is the better llama.cpp-scale LDS candidate, while `wide_k32` is an
 explicit high-LDS pressure row. The no-score/weight-LDS benchmark is the better
