@@ -39,6 +39,11 @@ fi
 
 mkdir -p "${BUILD_DIR}"
 
+EXTRA_DEFINES=()
+if [[ -n "${HIP_MOI_ATTENTION_SITE_MASK:-}" ]]; then
+  EXTRA_DEFINES+=("-DHIP_MOI_ATTENTION_SITE_MASK=${HIP_MOI_ATTENTION_SITE_MASK}")
+fi
+
 "${HIPCC}" \
   --offload-arch="${OFFLOAD_ARCH}" \
   -std=c++20 \
@@ -48,6 +53,7 @@ mkdir -p "${BUILD_DIR}"
   -Wextra \
   -Wno-unused-command-line-argument \
   -I "${HIP_MOI_ROOT}/include" \
+  "${EXTRA_DEFINES[@]}" \
   "${SCRIPT_DIR}/attention_block_benchmark.hip" \
   -o "${OUT}"
 

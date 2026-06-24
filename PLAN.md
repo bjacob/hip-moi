@@ -549,6 +549,47 @@ same extracted 2-wave benchmark. Refresh audits from the rebuilt benchmark
 executable before relying on exact VGPR/code-size numbers; sidecar code object
 files can be stale after header-only changes.
 
+The attention benchmark now has its own codegen and site-class triage. On the
+default all-LDS-sites `seq=12288` benchmark, the current RDNA4 numbers are:
+
+```
+noop                                           6.56 ms
+sampled Loom publish-only                     118 ms
+hip-moi context + sampled_watchpoint          148 ms
+hip-moi sampled_watchpoint_context            64.0 ms
+```
+
+Unbundling the default attention benchmark fatbin shows:
+
+* noop: 18 SGPR, 82 VGPR, no VGPR spills, no private segment;
+* sampled Loom: 95 SGPR, 205 VGPR, no VGPR spills, no private segment;
+* hip-moi `context + sampled_watchpoint`: 97 SGPR, 256 VGPR, 386 VGPR spills,
+  748-byte private segment;
+* hip-moi `sampled_watchpoint_context`: 45 SGPR, 146 VGPR, no VGPR spills, no
+  private segment.
+
+This reinforces the current split: `context` is the semantic and diagnostic
+path, while `sampled_watchpoint_context` is the publish-only hot path. The
+general context should not be optimized by contorting it into the fast view; the
+fast view exists precisely to keep the hot path small and spill-free.
+
+The attention benchmark also accepts a compile-time
+`HIP_MOI_ATTENTION_SITE_MASK` in its standalone script for attribution builds.
+The default mask remains `0xf`, all LDS sites. A quick `seq=4096`,
+`min_ms=200`, `warmup_ms=200` pass showed:
+
+* K/V fragment staging only (`0x1`): near-noop for all instrumentation paths;
+* score scratch only (`0x2`): almost the full fast-path attention cost;
+* weight scratch only (`0x4`): also substantial;
+* row-scale/row-sum scratch only (`0x8`): modest;
+* score + weight + row scratch (`0xe`): nearly the same as all sites.
+
+So the next attention-specific performance lever, if we choose one before
+atomics, is not WMMA fragment staging. It is the repeated scalar score/weight
+LDS traffic in the softmax phases. Any optimization here should remain generic
+enough to apply to attention-like scalar scratch patterns rather than baking
+attention semantics into the API.
+
 ## Test Corpus
 
 The active instrumented suite is intentionally smaller after dropping
@@ -896,6 +937,11 @@ it now instruments K/V staging plus the LDS score, softmax-weight, row-scale,
 and row-sum scratch. With full LDS instrumentation, this benchmark is no longer
 near-noop and should be treated as the current stress signal for attention-like
 LDS instrumentation.
+
+The first attention triage pass is complete. The benchmark has a compile-time
+site mask for local attribution builds, and that pass showed that score and
+weight scratch dominate the overhead while K/V fragment staging is cheap. The
+default CMake benchmark remains all-sites and should stay that way.
 
 Future benchmark rows should keep the row structure familiar:
 

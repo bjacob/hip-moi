@@ -56,6 +56,18 @@ Use this as the first larger end-to-end workload beyond isolated matmul.
 BENCH_SEQ=8192 ./benchmarks/build_attention_block_benchmark.sh
 ```
 
+The attention script also accepts a compile-time LDS site mask for overhead
+attribution:
+
+```bash
+HIP_MOI_ATTENTION_SITE_MASK=2 ./benchmarks/build_attention_block_benchmark.sh
+```
+
+The default mask is `0xf`, meaning all LDS accesses are instrumented. The bits
+are `0x1` for K/V fragment staging, `0x2` for score scratch, `0x4` for softmax
+weight scratch, and `0x8` for row-scale/row-sum scratch. Masked builds are
+triage-only; the benchmark numbers below use the default all-sites mask.
+
 ### Shared Knobs
 
 Timing knobs:
@@ -149,4 +161,36 @@ matmul benchmarks.
 
 | Shape | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: |
-| seq=12288, head_dim=16, value_dim=16 | 6.66 ms | 121 ms | 158 ms | 71.7 ms |
+| seq=12288, head_dim=16, value_dim=16 | 6.56 ms | 118 ms | 148 ms | 64.0 ms |
+
+On the same default all-sites build, the device metadata from the bundled
+AMDGPU object is:
+
+| Row | SGPRs | VGPRs | VGPR spills | Private segment |
+| --- | ---: | ---: | ---: | ---: |
+| noop | 18 | 82 | 0 | 0 B |
+| sampled Loom | 95 | 205 | 0 | 0 B |
+| hip-moi `context + sampled_watchpoint` | 97 | 256 | 386 | 748 B |
+| hip-moi `sampled_watchpoint_context` | 45 | 146 | 0 | 0 B |
+
+This is the clearest current reason to keep the narrow fast-view context
+separate from the general diagnostic-capable context: the general context spills
+in this workload, while the fast view is spill-free and uses fewer registers
+than the sampled-Loom comparison row.
+
+For attribution, a quick `seq=4096`, `min_ms=200`, `warmup_ms=200` pass with
+compile-time site masks showed:
+
+| Mask | Sites instrumented | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `0xf` | all | 2.82 ms | 40.1 ms | 31.7 ms | 18.7 ms |
+| `0x1` | K/V only | 2.70 ms | 2.76 ms | 1.68 ms | 1.28 ms |
+| `0x2` | scores only | 1.19 ms | 29.8 ms | 28.3 ms | 17.9 ms |
+| `0x4` | weights only | 1.19 ms | 20.5 ms | 18.6 ms | 13.1 ms |
+| `0x8` | row scratch only | 1.19 ms | 3.09 ms | 3.12 ms | 2.14 ms |
+| `0xe` | scores, weights, rows | 1.19 ms | 35.3 ms | 34.2 ms | 18.5 ms |
+
+The masked builds change the generated kernel shape and are not headline
+apples-to-apples numbers. They are useful for localizing the cost: K/V fragment
+staging is close to free here, while score and weight scratch account for nearly
+all of the attention instrumentation overhead.

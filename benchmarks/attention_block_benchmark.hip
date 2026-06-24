@@ -51,6 +51,19 @@ static constexpr uint32_t kRowSumSharedByteOffset
     = kRowOldScaleSharedByteOffset
       + kSubgroupCount * kQueryTile * static_cast<uint32_t>(sizeof(float));
 
+static constexpr uint32_t kAttentionSiteKv      = 1u << 0;
+static constexpr uint32_t kAttentionSiteScores  = 1u << 1;
+static constexpr uint32_t kAttentionSiteWeights = 1u << 2;
+static constexpr uint32_t kAttentionSiteRows    = 1u << 3;
+static constexpr uint32_t kAttentionSiteAll
+    = kAttentionSiteKv | kAttentionSiteScores | kAttentionSiteWeights | kAttentionSiteRows;
+
+#ifndef HIP_MOI_ATTENTION_SITE_MASK
+#define HIP_MOI_ATTENTION_SITE_MASK 15
+#endif
+
+static constexpr uint32_t kAttentionSiteMask = HIP_MOI_ATTENTION_SITE_MASK;
+
 static constexpr hip_moi::site_id kKStoreSite(0xb01);
 static constexpr hip_moi::site_id kVStoreSite(0xb02);
 static constexpr hip_moi::site_id kKLoadSite(0xb03);
@@ -216,6 +229,36 @@ __host__ __device__ static uint32_t row_sum_offset(int subgroup, int query_row)
 {
     return kRowSumSharedByteOffset
            + static_cast<uint32_t>((subgroup * kQueryTile + query_row) * sizeof(float));
+}
+
+template <uint32_t SiteClass, typename Policy, typename T>
+__device__ static void attention_store(
+    typename Policy::context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+{
+    if constexpr((kAttentionSiteMask & SiteClass) != 0)
+    {
+        Policy::store(ctx, ptr, value, offset, site);
+    }
+    else
+    {
+        *ptr = value;
+    }
+}
+
+template <uint32_t SiteClass, typename Policy, typename T>
+__device__ static T attention_load(typename Policy::context_type& ctx,
+                                   const T*                       ptr,
+                                   uint32_t                       offset,
+                                   hip_moi::site_id               site)
+{
+    if constexpr((kAttentionSiteMask & SiteClass) != 0)
+    {
+        return Policy::load(ctx, ptr, offset, site);
+    }
+    else
+    {
+        return *ptr;
+    }
 }
 
 __device__ __forceinline__ static f32x8 zero_f32x8()
@@ -730,22 +773,23 @@ __global__
     {
         if(subgroup == 0)
         {
-            Policy::store(ctx,
-                          &k_shared[lane],
-                          k_fragments[key_tile * kWaveSize + lane],
-                          k_fragment_offset(lane),
-                          kKStoreSite);
-            Policy::store(ctx,
-                          &v_shared[lane],
-                          v_fragments[key_tile * kWaveSize + lane],
-                          v_fragment_offset(lane),
-                          kVStoreSite);
+            attention_store<kAttentionSiteKv, Policy>(ctx,
+                                                      &k_shared[lane],
+                                                      k_fragments[key_tile * kWaveSize + lane],
+                                                      k_fragment_offset(lane),
+                                                      kKStoreSite);
+            attention_store<kAttentionSiteKv, Policy>(ctx,
+                                                      &v_shared[lane],
+                                                      v_fragments[key_tile * kWaveSize + lane],
+                                                      v_fragment_offset(lane),
+                                                      kVStoreSite);
         }
 
         Policy::syncthreads(ctx);
 
-        f16x8 k_fragment = Policy::load(ctx, &k_shared[lane], k_fragment_offset(lane), kKLoadSite);
-        f32x8 qk_acc     = zero_f32x8();
+        f16x8 k_fragment = attention_load<kAttentionSiteKv, Policy>(
+            ctx, &k_shared[lane], k_fragment_offset(lane), kKLoadSite);
+        f32x8 qk_acc = zero_f32x8();
         qk_acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(q_fragment, k_fragment, qk_acc);
 
         int key_column = lane & 15;
@@ -753,11 +797,12 @@ __global__
         for(int elem = 0; elem < kFragmentElements; ++elem)
         {
             int query_row = rdna4_wmma_acc_m(lane, elem);
-            Policy::store(ctx,
-                          &scores[subgroup][query_row][key_column],
-                          qk_acc[elem] * 0.25f,
-                          score_offset(subgroup, query_row, key_column),
-                          kScoreStoreSite);
+            attention_store<kAttentionSiteScores, Policy>(
+                ctx,
+                &scores[subgroup][query_row][key_column],
+                qk_acc[elem] * 0.25f,
+                score_offset(subgroup, query_row, key_column),
+                kScoreStoreSite);
         }
 
         Policy::syncthreads(ctx);
@@ -769,47 +814,51 @@ __global__
                 float tile_max = -3.402823466e38f;
                 for(int key = 0; key < kKeyTile; ++key)
                 {
-                    float score = Policy::load(ctx,
-                                               &scores[subgroup][query_row][key],
-                                               score_offset(subgroup, query_row, key),
-                                               kScoreLoadMaxSite);
-                    tile_max    = fmaxf(tile_max, score);
+                    float score = attention_load<kAttentionSiteScores, Policy>(
+                        ctx,
+                        &scores[subgroup][query_row][key],
+                        score_offset(subgroup, query_row, key),
+                        kScoreLoadMaxSite);
+                    tile_max = fmaxf(tile_max, score);
                 }
 
                 float new_max   = fmaxf(running_max[query_row], tile_max);
                 float old_scale = running_sum[query_row] == 0.0f
                                       ? 0.0f
                                       : expf(running_max[query_row] - new_max);
-                Policy::store(ctx,
-                              &row_old_scale[subgroup][query_row],
-                              old_scale,
-                              row_old_scale_offset(subgroup, query_row),
-                              kRowOldScaleStoreSite);
+                attention_store<kAttentionSiteRows, Policy>(
+                    ctx,
+                    &row_old_scale[subgroup][query_row],
+                    old_scale,
+                    row_old_scale_offset(subgroup, query_row),
+                    kRowOldScaleStoreSite);
 
                 float tile_sum = 0.0f;
                 for(int key = 0; key < kKeyTile; ++key)
                 {
-                    float  score       = Policy::load(ctx,
-                                               &scores[subgroup][query_row][key],
-                                               score_offset(subgroup, query_row, key),
-                                               kScoreLoadWeightSite);
+                    float score = attention_load<kAttentionSiteScores, Policy>(
+                        ctx,
+                        &scores[subgroup][query_row][key],
+                        score_offset(subgroup, query_row, key),
+                        kScoreLoadWeightSite);
                     float  weight      = expf(score - new_max);
                     half_t weight_half = static_cast<half_t>(weight);
-                    Policy::store(ctx,
-                                  &weights[subgroup][query_row][key],
-                                  weight_half,
-                                  weight_offset(subgroup, query_row, key),
-                                  kWeightStoreSite);
+                    attention_store<kAttentionSiteWeights, Policy>(
+                        ctx,
+                        &weights[subgroup][query_row][key],
+                        weight_half,
+                        weight_offset(subgroup, query_row, key),
+                        kWeightStoreSite);
                     tile_sum += static_cast<float>(weight_half);
                 }
 
                 running_sum[query_row] = running_sum[query_row] * old_scale + tile_sum;
                 running_max[query_row] = new_max;
-                Policy::store(ctx,
-                              &row_sum[subgroup][query_row],
-                              running_sum[query_row],
-                              row_sum_offset(subgroup, query_row),
-                              kRowSumStoreSite);
+                attention_store<kAttentionSiteRows, Policy>(ctx,
+                                                            &row_sum[subgroup][query_row],
+                                                            running_sum[query_row],
+                                                            row_sum_offset(subgroup, query_row),
+                                                            kRowSumStoreSite);
             }
         }
 
@@ -819,10 +868,11 @@ __global__
         for(int elem = 0; elem < kFragmentElements; ++elem)
         {
             int   query_row = rdna4_wmma_acc_m(lane, elem);
-            float old_scale = Policy::load(ctx,
-                                           &row_old_scale[subgroup][query_row],
-                                           row_old_scale_offset(subgroup, query_row),
-                                           kRowOldScaleLoadSite);
+            float old_scale = attention_load<kAttentionSiteRows, Policy>(
+                ctx,
+                &row_old_scale[subgroup][query_row],
+                row_old_scale_offset(subgroup, query_row),
+                kRowOldScaleLoadSite);
             out_acc[elem] *= old_scale;
         }
 
@@ -832,14 +882,16 @@ __global__
         {
             int query_row    = lane & 15;
             int key          = rdna4_wmma_f16_k(lane, elem);
-            p_fragment[elem] = Policy::load(ctx,
-                                            &weights[subgroup][query_row][key],
-                                            weight_offset(subgroup, query_row, key),
-                                            kWeightLoadSite);
+            p_fragment[elem] = attention_load<kAttentionSiteWeights, Policy>(
+                ctx,
+                &weights[subgroup][query_row][key],
+                weight_offset(subgroup, query_row, key),
+                kWeightLoadSite);
         }
 
-        f16x8 v_fragment = Policy::load(ctx, &v_shared[lane], v_fragment_offset(lane), kVLoadSite);
-        f32x8 pv_acc     = zero_f32x8();
+        f16x8 v_fragment = attention_load<kAttentionSiteKv, Policy>(
+            ctx, &v_shared[lane], v_fragment_offset(lane), kVLoadSite);
+        f32x8 pv_acc = zero_f32x8();
         pv_acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(p_fragment, v_fragment, pv_acc);
 
 #pragma unroll
@@ -857,10 +909,11 @@ __global__
     {
         int   query_row    = rdna4_wmma_acc_m(lane, elem);
         int   global_query = query_block * kQueriesPerBlock + subgroup * kQueryTile + query_row;
-        float normalizer   = Policy::load(ctx,
-                                        &row_sum[subgroup][query_row],
-                                        row_sum_offset(subgroup, query_row),
-                                        kRowSumLoadSite);
+        float normalizer
+            = attention_load<kAttentionSiteRows, Policy>(ctx,
+                                                         &row_sum[subgroup][query_row],
+                                                         row_sum_offset(subgroup, query_row),
+                                                         kRowSumLoadSite);
         out[global_query * kValueDim + value_column] = out_acc[elem] / normalizer;
     }
 }
@@ -1228,6 +1281,17 @@ static void print_device()
                 prop.multiProcessorCount);
 }
 
+static void print_site_mask()
+{
+    std::printf("attention LDS instrumentation sites: mask=0x%x kv=%s scores=%s "
+                "weights=%s rows=%s\n",
+                kAttentionSiteMask,
+                (kAttentionSiteMask & kAttentionSiteKv) ? "on" : "off",
+                (kAttentionSiteMask & kAttentionSiteScores) ? "on" : "off",
+                (kAttentionSiteMask & kAttentionSiteWeights) ? "on" : "off",
+                (kAttentionSiteMask & kAttentionSiteRows) ? "on" : "off");
+}
+
 int main()
 {
     int    sequence_length = get_int_env("BENCH_SEQ", 12288);
@@ -1276,6 +1340,7 @@ int main()
                 kSubgroupCount,
                 min_ms,
                 warmup_ms);
+    print_site_mask();
 
     SampledKnobs sampled_knobs = sampled_knobs_from_env();
     std::printf("sampled knobs: watchpoints=%u skip=%u probes=%u delay=%u "
@@ -1293,7 +1358,13 @@ int main()
                     "publish-only\n");
     }
 
-    std::string prefix              = "attention_wmma_seq" + std::to_string(sequence_length);
+    std::string prefix = "attention_wmma_seq" + std::to_string(sequence_length);
+    if(kAttentionSiteMask != kAttentionSiteAll)
+    {
+        char mask_suffix[32];
+        std::snprintf(mask_suffix, sizeof(mask_suffix), "_site_mask_0x%x", kAttentionSiteMask);
+        prefix += mask_suffix;
+    }
     std::string sampled_mode_suffix = sampled_knobs.reports ? "_reporting" : "_publish_only";
     run_one<NoopPolicy>((prefix + "_noop").c_str(),
                         Mode::Noop,
