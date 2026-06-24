@@ -1,5 +1,30 @@
 # PLAN for hip-moi: HIP memory-ordering instrumentation library
 
+## Current Delivery Phase
+
+The project has moved from exploration to delivery. The primary recipient is
+Jakub, and the durable output should now be precise documentation, benchmark
+evidence, and small proof-of-concept APIs that explain what hip-moi teaches
+about Loom-style instrumentation.
+
+Current documentation priorities:
+
+* define terms before using them;
+* describe exactly what metadata is recorded, when it is written, and when it is
+  consumed;
+* distinguish diagnostic-capable paths from publish-only measurement paths;
+* document why `sampled_watchpoint_context` is faster than
+  `context + sampled_watchpoint`, and what functionality it gives up;
+* report overhead not only as final latency, but also as VGPR pressure, spills,
+  private segment size, LDS usage, and code shape;
+* keep benchmark, test, tutorial, and source terminology consistent.
+
+The first delivery documents are now:
+
+* `README.md` for project orientation;
+* `docs/README.md` for the reading map;
+* `docs/instrumentation_model.md` for the implementation-facing model.
+
 ## Purpose
 
 hip-moi has two purposes.

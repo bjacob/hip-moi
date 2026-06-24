@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT
 
 # Scope And Fast Paths
 
+This file records current scoping decisions. For the precise definitions of
+metadata records, watchpoints, epochs, and diagnostic predicates, see
+[`instrumentation_model.md`](instrumentation_model.md).
+
 hip-moi currently has two different device-side shapes.
 
 `hip_moi::context` is the general diagnostic context. It is the right place for

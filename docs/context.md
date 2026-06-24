@@ -21,6 +21,10 @@ full-workgroup barriers. It deliberately does not carry the full diagnostic
 state of `hip_moi::context`. Treat it as a specialized performance mode, not as
 the general semantic model.
 
+For the precise metadata layout and access-time algorithms, see
+[`instrumentation_model.md`](instrumentation_model.md). This document focuses on
+allocation, construction, and user-facing context choices.
+
 Benchmark rows named `context + sampled_watchpoint` use the general
 `hip_moi::context` object with its sampled backend selected. Rows named
 `sampled_watchpoint_context` use the narrower class directly. The latter is
@@ -110,7 +114,7 @@ options.sampled_watchpoint_reports = false;
 selection seed has been mixed; `1` means no thinning. Reporting mode always
 checks the watchpoint entry displaced by the current publish. `probe_count`
 controls how many additional watchpoint slots are scanned; `0` means scan the
-whole table. `delay_iters` is a benchmark knob matching Jakub-Sampled-Loom
+whole table. `delay_iters` is a benchmark knob matching the Jakub-Sampled-Loom
 prototype. `sampled_watchpoint_reports=false` makes the sampled backend publish
 watchpoints without scanning for conflicts, which is useful for apples-to-apples
 publish-only benchmark rows.
@@ -286,7 +290,7 @@ its internal fields.
 
 ## One Watchpoint Fast Row
 
-For benchmark rows that intentionally match Jakub's one-watchpoint Jakub-Sampled-Loom
+For benchmark rows that intentionally match the one-watchpoint Jakub-Sampled-Loom
 configuration, make both the host capacity and the policy explicit:
 
 ```c++
