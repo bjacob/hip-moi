@@ -70,7 +70,7 @@ segment notes are included when that fast row is not spill-free.
 | `attention-d128-pressure-wide-k32` | `012_rdna4_d128_attention_pressure_benchmark.hip` | `tests/instrumented/012_rdna4_d128_attention_pressure_test.hip` | explicit high-LDS pressure variant | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B | 256, 120 spills, 352 B private |
 | `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 rung | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
 
-## Resource Pressure
+## Shapes and Resource Pressure
 
 This table describes the uninstrumented `noop` kernel shape. LDS percentages
 assume the local RDNA4 test device's 64 KiB workgroup LDS limit. VGPR and spill
@@ -88,6 +88,19 @@ counts come from the bundled RDNA4 code-object metadata for the `noop` row.
 | `attention-d128-pressure-full-kv16` | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B, 30.1% | 232 | no spills, 0 B private |
 | `attention-d128-pressure-wide-k32` | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B, 59.8% | 227 | no spills, 0 B private |
 | `attention-d128-no-score` | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B, 1.6% | 178 | no spills, 0 B private |
+
+## Benchmark Modes
+
+The result table uses compact column names so the rows stay readable. This
+table expands those benchmark modes.
+
+| Results column | Benchmark mode | What it measures |
+| --- | --- | --- |
+| `noop` | Uninstrumented kernel | Baseline kernel latency with the same workload shape and no hip-moi or Loom instrumentation. |
+| `sampled Loom` | Jakub-style sampled Loom | Publish-only sampled instrumentation modeled after Jakub's Loom-flavored HIP prototype. |
+| `exact shadow` | hip-moi exact shadow | Precise shadow-memory checking through explicit LDS-offset APIs. Present only in the tiny matmul wave-scaling benchmark. |
+| `context + sampled_watchpoint` | General hip-moi context with sampled-watchpoint backend | Diagnostic-capable hip-moi API path using sampled watchpoints. This keeps more state live than the publish-only fast path. |
+| `sampled_watchpoint_context` | hip-moi sampled publish-only fast path | Narrow fast-view context optimized for Loom-parity publish-only sampling. This is the main performance target. |
 
 ## Current RDNA4 Results
 

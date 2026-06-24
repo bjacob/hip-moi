@@ -427,9 +427,9 @@ attention benchmark source filenames now mirror the corresponding instrumented
 test filenames, changing only the suffix from `_test.hip` to `_benchmark.hip`
 where possible. The benchmark README is now the canonical lookup document: its
 catalog table records benchmark keys, source/test filenames, and provenance;
-its resource-pressure table records shape, LDS pressure, and noop-path VGPR
-pressure; and its results table uses the same keys for the current RDNA4 timing
-snapshot.
+its shapes-and-resource-pressure table records shape, LDS pressure, and
+noop-path VGPR pressure; its benchmark-mode table defines the result columns;
+and its results table uses the same keys for the current RDNA4 timing snapshot.
 
 Important invariant: instrumented tests and benchmark rows must route every LDS
 access in the instrumented kernel through the instrumentation path. It is fine
