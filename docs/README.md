@@ -31,8 +31,8 @@ interpreted.
 
 4. [Scope And Fast Paths](scope.md)
 
-   Captures the current scoping decisions. This is still transitional and will
-   shrink as stable facts move into the instrumentation and benchmark docs.
+   States the active scope boundaries, the diagnostic versus publish-only split,
+   and the next semantic expansion.
 
 5. [Benchmark README](../benchmarks/README.md)
 
@@ -44,4 +44,3 @@ Facts that Jakub needs for Loom, RFC, or performance discussions should be
 defined here, not left only in `PLAN.md` or commit history. Worklog-style
 observations should either be deleted or rewritten as precise claims with the
 relevant assumptions, measurements, and file paths.
-

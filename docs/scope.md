@@ -5,85 +5,97 @@ SPDX-License-Identifier: MIT
 
 # Scope And Fast Paths
 
-This file records current scoping decisions. For the precise definitions of
-metadata records, watchpoints, epochs, and diagnostic predicates, see
+This document states the current scope boundaries. For metadata fields,
+watchpoint layout, epoch handling, and diagnostic predicates, see
 [`instrumentation_model.md`](instrumentation_model.md).
 
-hip-moi currently has two different device-side shapes.
+## Diagnostic Scope
 
-`hip_moi::context` is the general diagnostic context. It is the right place for
-correctness-first behavior: exact shadow checks, sampled reporting mode,
-metadata saturation diagnostics, host reporting, and future synchronization
-models.
+hip-moi is currently subgroup-scoped. The diagnostic condition is a same-epoch
+LDS conflict between different subgroups in the same workgroup, with at least
+one write.
 
-`hip_moi::sampled_watchpoint_context` is a narrower sampled publish-only fast
-path. It exists for benchmark-sensitive kernels that use full-workgroup
-barriers and want a low-overhead Loom-style metadata publication path. It omits
-the cold diagnostic state carried by `hip_moi::context`.
+The current implementation intentionally does not diagnose conflicts wholly
+inside one subgroup. That choice is not a statement about the HIP/LLVM memory
+model; it is a scoping decision made because the current delivery target is
+comparison with Loom-style subgroup-scoped instrumentation.
 
-The benchmark row named `context + sampled_watchpoint` is different from
-`sampled_watchpoint_context`. The former keeps the full `hip_moi::context`
-object live and selects its sampled backend. The latter constructs the
-dedicated fast-view class, which carries only the watchpoint table, generation,
-subgroup size, and a local epoch counter. That split is the current way to keep
-apples-to-apples measurements of the general path and the publish-only fast
-path.
+The implemented synchronization model is full-workgroup barriers:
 
-This split is intentional. The current fastest RDNA4 matmul path uses local-only
-epoch tracking inside `sampled_watchpoint_context`; represented watchpoints
-carry that local epoch, and no reporting path consumes a global epoch word. That
-is a valid fast-path assumption for the current publish-only benchmark. It is
-not a general answer to synchronization.
+```c++
+ctx.syncthreads();
+```
 
-## Current Benchmark Shape
+Atomics, release/acquire ordering, fences paired with atomics, and
+subgroup-local synchronization are future semantic work.
 
-The vendored `benchmarks/prod_16x8_benchmark.hip` row compares:
+## Context Split
 
-* pass-through matmul,
-* Jakub-Sampled-Loom publish-only instrumentation,
-* hip-moi general `context` with the `sampled_watchpoint` backend,
-* hip-moi `sampled_watchpoint_context` publish-only instrumentation.
+`hip_moi::context` is the general diagnostic context. It owns the semantic
+surface for:
 
-At the current `4096^3` production shape, the narrow hip-moi
-`sampled_watchpoint_context` row is below Jakub-Sampled-Loom on this benchmark, while
-the general `context + sampled_watchpoint` row remains much slower. That is
-expected: the fast row is intentionally publish-only and omits general
-diagnostic state. The remaining near-term project risk is now workload breadth,
-starting with an attention block, rather than more matmul-only heroics.
+* exact-shadow checking;
+* sampled-watchpoint reporting mode;
+* `metadata_full` diagnostics;
+* host reporting through `HIP_MOI_CHECK` and `host_context` destructors;
+* future synchronization models beyond full-workgroup barriers.
 
-The first attention benchmark is not yet the production-pressure endpoint. It
-uses RDNA4 WMMA and instruments all LDS traffic, but its fixed LDS footprint is
-only 4352 B on a device with 64 KiB of workgroup LDS. Source mining points to a
-next attention row shaped by production MHA parameters: head dimension 128,
-query heads 32 or 64, KV heads 4 or 8, long sequences, and causal/no-mask
-variants. The microkernel should be compile-probed for LDS usage, VGPRs, and
-spills before instrumentation, because closeness to the LDS/VGPR limits is now
-the point of the next benchmark.
+`hip_moi::sampled_watchpoint_context` is a narrow publish-only fast view. It is
+for benchmark-sensitive kernels that want to measure low-overhead sampled
+watchpoint publication. It does not report races.
 
-A later source read sharpened the algorithmic target. Mature RDNA
-flash-attention code can keep QK scores in accumulator fragments and reshape
-those fragments into the PV operand path, rather than materializing dense
-score/weight scratch in LDS. The dense-score hip-moi attention rows remain useful
-scalar-LDS stress tests. The correctness ladder now has both the isolated RDNA4
-WMMA register-transpose test and a two-key-tile no-score/weight-LDS attention
-test; the remaining production-faithful rung is extracting and measuring the
-corresponding benchmark.
+The benchmark row named `context + sampled_watchpoint` is therefore not the
+same thing as `sampled_watchpoint_context`:
 
-## Next Scopes
+| Row | Device object | Diagnostic-capable? | Why it exists |
+| --- | --- | --- | --- |
+| `context + sampled_watchpoint` | `hip_moi::context` | Yes, when reporting is enabled | Measures the general API path with the sampled backend selected. |
+| `sampled_watchpoint_context` | `hip_moi::sampled_watchpoint_context` | No | Measures the narrow publish-only fast path. |
 
-The next non-negotiable scope increase is workload breadth. The first likely
-candidate is an attention block, because it should stress phase structure, LDS
-reuse, and multiple tiled operations more realistically than one isolated
-matmul. The right first step is a benchmark/reference workload, not a new hidden
-special case in the library.
+The split is intentional. The fast view removes diagnostic state, runtime
+backend selection, global subgroup epoch storage, and saturation reports from
+the hot kernel. Those omissions are exactly why it can have lower VGPR pressure
+and fewer spills. They are also why it is not a substitute for the diagnostic
+context.
 
-The next negotiable semantic increase is synchronization finer than global
-`__syncthreads()`, likely involving atomics. That work belongs first in
-`hip_moi::context`, because atomics require a synchronization model beyond a
-single local epoch advanced at full-workgroup barriers.
+## Benchmark Scope
 
-Fence-only reasoning remains insufficient. Fences become meaningful for
-inter-thread synchronization when paired with operations, typically atomics,
-that can create synchronizes-with edges. Any atomics work should model those
-edges explicitly rather than trying to stretch the sampled publish-only fast
-path beyond its assumptions.
+The benchmark suite currently covers:
+
+* tiny matmul wave-scaling rows for fast overhead triage;
+* a production-shaped FP16 RDNA4 matmul extraction from Jakub's benchmark;
+* dense attention rows that stress scalar LDS score and softmax-weight scratch;
+* D128/V128 attention pressure rows with larger K/V LDS staging;
+* no-score/register-handoff attention rows that are closer to mature
+  flash-attention structure.
+
+The benchmark catalog, resource-pressure table, mode definitions, and current
+RDNA4 timings live in [`../benchmarks/README.md`](../benchmarks/README.md).
+
+The main current performance lesson is not "always use the fast view." The
+lesson is narrower:
+
+* publish-only sampled metadata can be made very cheap when the hot path keeps
+  little state live;
+* diagnostic-capable paths carry real overhead because they preserve reporting,
+  saturation handling, and future semantic room;
+* attention-like workloads expose different bottlenecks than isolated matmul,
+  especially when scalar score/weight LDS scratch is instrumented.
+
+## Next Scope Increase
+
+The next semantic expansion is atomics. It belongs first in
+`hip_moi::context`, because atomics require a real synchronization model beyond
+the local epoch used by `sampled_watchpoint_context`.
+
+The atomics design should specify:
+
+* which HIP/Clang operations are represented;
+* which LLVM/HIP memory-ordering rules are being modeled;
+* what metadata records the synchronization state;
+* how conflicts are diagnosed;
+* which shortcuts, if any, are allowed in publish-only benchmark paths.
+
+Fence-only modeling remains out of scope. A fence becomes useful for
+inter-thread synchronization only together with an operation, typically an
+atomic, that can create a synchronizes-with edge.

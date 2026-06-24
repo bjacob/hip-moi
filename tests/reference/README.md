@@ -3,75 +3,74 @@ Copyright (c) 2026 Advanced Micro Devices, Inc.
 SPDX-License-Identifier: MIT
 -->
 
-# MVP reference kernels
+# Reference Kernels
 
-`mvp_reference_kernels.hip` is a self-checking GTest HIP binary containing the
-first MVP corpus in uninstrumented form.
+This directory contains uninstrumented HIP kernels used as concrete source
+shapes for tests and benchmarks.
 
-`rdna4_jakub_matmul_reference.hip` is a separate gfx12-gated reference binary
-derived from Jakub's `sanitizer-strategy/rdna4_matmul` corpus. It covers
-production-shaped FP16 packed WMMA matmul kernels with a 256-thread workgroup,
-eight wavefronts, KGroup=2 LDS publication, and exact host-reference checking
-for no-pipeline, pipelined, and double-buffered schedules. It also keeps
-Jakub-style missing-barrier variants concrete as compile-only shapes, without
-launching racy uninstrumented kernels as correctness tests.
+The reference kernels serve two purposes:
 
-Each reference case is represented as a small C++ type with:
+* safe kernels are launched and checked against host-side expected outputs;
+* diagnostic-positive kernels are kept as compile-only source shapes when
+  launching them uninstrumented would rely on undefined behavior or could hang.
 
-* metadata such as `name()`, `block_dim()`, and `grid_dim()`,
-* a `__global__ static void run(int *out)` kernel,
-* an `expected(int *out)` host-side oracle for launched safe cases.
+The active files are:
 
-The host harness uses concrete virtual `ReferenceCase` subclasses and passes
-them to a non-templated runner; virtual dispatch stays entirely on the host side.
-The launched safe cases are exposed to GTest as a parameterized suite, so CTest
-can report one named entry per reference kernel.
+* `mvp_reference_kernels.hip`: the original broad reference corpus, including
+  scalar LDS patterns, cooperative array patterns, looped epochs, 2D tiling,
+  pseudorandom LDS layouts, and matmul-inspired kernels.
+* `rdna4_jakub_matmul_reference.hip`: a `gfx12`-gated RDNA4 WMMA reference
+  derived from Jakub's `sanitizer-strategy/rdna4_matmul` corpus.
 
-This is intentionally similar in spirit to the kernel objects in
-`/home/benoit/workspace/hip-matmul/matmul_rdna4.hip`, but much smaller and
-specific to hip-moi's reference corpus.
+## Harness Shape
 
-The safe reference kernels are launched and numerically checked. The
-diagnostic-positive references are full `__global__` kernels too, but are not
-launched by this executable because they intentionally contain racy or otherwise
-hard synchronization patterns. Once hip-moi exists, corresponding instrumented
-tests should assert that those shapes produce diagnostics.
+Each launched reference case is represented as a small C++ type with:
 
-This split gives us three useful properties before the library exists:
+* host metadata such as `name()`, `block_dim()`, and `grid_dim()`;
+* a `__global__ static void run(int* out)` kernel;
+* an `expected(int* out)` host oracle.
 
-* every reference case is concrete code, not a snippet,
-* safe reference cases compile, run, and validate basic outputs,
-* racy reference cases still compile and remain available as templates for the
-  real diagnostic tests.
+The host runner uses virtual dispatch only on the host side. Device code stays
+ordinary HIP. GTest exposes the safe cases as a parameterized suite, so the
+CTest output names the individual reference kernel that failed.
 
-## Current MVP layers
+## Safe Reference Coverage
 
-The launched no-diagnostic corpus currently includes:
+The launched no-diagnostic corpus includes:
 
-* tiny scalar cases preserving the original first examples,
-* cooperative array cases where all or most threads participate,
-* looping cases that reuse LDS across many synchronization epochs,
-* 2D tiled and pseudorandomized LDS access patterns,
-* simple matmul-inspired kernels with cooperative LDS loads and host-side
-  reference matmul checks,
-* more involved matmul-inspired kernels with K loops, double buffering, skewed
-  LDS layouts, multiple workgroups, and host-side reference matmul checks.
-* a gfx12-gated Jakub-derived RDNA4 WMMA bridge with packed A/B/C data tiles,
-  production 16x8 WMMA-tile workgroup shape, no-pipeline, pipelined, and
-  double-buffered schedules.
+* single-thread and same-thread scalar LDS cases;
+* cooperative all-thread array cases;
+* looping cases that reuse LDS across multiple full-workgroup barriers;
+* 2D tiled and pseudorandomized LDS access patterns;
+* simple matmul-inspired kernels with host reference checks;
+* chunked, double-buffered, skewed-layout, and multi-workgroup matmul-inspired
+  kernels;
+* Jakub-derived RDNA4 packed FP16 WMMA matmul schedules: no-pipeline,
+  pipelined, and double-buffered.
 
-The compile-only diagnostic-positive corpus currently includes:
+## Compile-Only Diagnostic Shapes
 
-* same-epoch write/read and write/write conflicts,
-* partially overlapping object/subobject writes,
-* all-thread same-index array conflicts,
-* divergent-barrier hard cases that should eventually be handled through
-  simulation mode rather than launched directly.
-* Jakub-derived production-shaped RDNA4 WMMA missing-barrier variants for
-  load/compute and compute/load reuse synchronization mistakes.
+The compile-only corpus includes:
 
-Future instrumented tests should reuse the same case shapes and assert:
+* same-epoch write/read and write/write conflicts;
+* partially overlapping object and subobject writes;
+* all-thread same-index array conflicts;
+* divergent-barrier hard cases;
+* Jakub-derived RDNA4 WMMA missing-barrier variants for load/compute and
+  compute/load reuse mistakes.
 
-* launched safe cases produce no diagnostics,
-* compile-only diagnostic-positive cases produce deterministic diagnostics,
-* hard divergent-barrier cases are only tested in a mode that cannot hang.
+These kernels are deliberately not launched by the reference self-test. The
+corresponding instrumented tests should exercise the shape through hip-moi and
+assert either deterministic diagnostics or a non-hanging simulated diagnostic
+mode.
+
+## Relationship To Instrumented Tests
+
+Reference tests are not the specification for the detector. They are source
+shapes and sanity checks. The detector contract is documented in
+[`../../docs/instrumentation_model.md`](../../docs/instrumentation_model.md).
+
+When an instrumented test adopts a reference shape, every LDS access in the
+instrumented kernel should go through hip-moi unless the test is explicitly
+comparing against a plain-HIP kernel.
+

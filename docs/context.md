@@ -27,8 +27,9 @@ allocation, construction, and user-facing context choices.
 
 Benchmark rows named `context + sampled_watchpoint` use the general
 `hip_moi::context` object with its sampled backend selected. Rows named
-`sampled_watchpoint_context` use the narrower class directly. The latter is
-expected to be faster because less state is live in the hot kernel.
+`sampled_watchpoint_context` use the narrower class directly. The latter keeps
+less state live in the hot kernel and is the faster publish-only benchmark path
+in the current RDNA4 results.
 
 The distinction matters for future scope. `hip_moi::context` should remain the
 home for correctness-first diagnostics, storage saturation handling, reporting,
@@ -52,7 +53,7 @@ Use `hip_moi::sampled_watchpoint_context` only for the current narrow fast path:
 * fixed compile-time sampled policy,
 * full-workgroup barriers through `ctx.syncthreads()`,
 * source-instrumented kernels where the LDS byte offset is already known,
-* benchmark rows that should resemble Jakub-Sampled-Loom publish-only path.
+* benchmark rows that should resemble the Jakub-Sampled-Loom publish-only path.
 
 The fast view does not report conflicts. It publishes sampled watchpoint
 metadata at selected sites and intentionally omits the cold diagnostic state

@@ -8,12 +8,12 @@ SPDX-License-Identifier: MIT
 The test tree is intentionally split into two layers.
 
 * `reference/` contains ordinary uninstrumented HIP kernels. These are concrete
-  source-level reference cases for instrumented tests and benchmark shapes. They make
-  it explicit which threads run which accesses, what the workgroup size is, and
-  which cases are expected to be diagnostic-positive or diagnostic-free.
+  source-level shapes for instrumented tests and benchmarks. They make explicit
+  which threads run which accesses, what the workgroup size is, and which cases
+  are expected to be diagnostic-positive or diagnostic-free.
 * `instrumented/` contains the active `hip_moi::context` tests. The suite is
   intentionally narrower than the reference corpus and now focuses on
-  subgroup-level exact-shadow and sampled-watchpoint behavior.
+  subgroup-scoped exact-shadow and sampled-watchpoint behavior.
 
 All tests are registered through GTest. CMake first tries `find_package(GTest)`
 and falls back to `FetchContent` if no system package is available.
@@ -27,6 +27,9 @@ The reference GTest binary launches only well-defined kernels. Kernels that
 intentionally contain races or divergent barriers are compiled, but not launched
 by the reference self-test. They are there to prevent the corpus from being only
 comments while avoiding undefined behavior in the reference run.
+
+The detector contract tested by the instrumented suite is documented in
+[`../docs/instrumentation_model.md`](../docs/instrumentation_model.md).
 
 Configure/build example for this machine:
 

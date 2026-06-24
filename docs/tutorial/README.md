@@ -52,9 +52,9 @@ ctx.syncthreads();
 int observed = ctx.lds_load_at(&value, /*lds_byte_offset=*/0);
 ```
 
-The explicit offset is not just decoration. The current fast paths operate on
-compact shadow metadata keyed by LDS byte offsets, which avoids the old
-pointer-only record log.
+The explicit offset is part of the represented access. The current fast paths
+operate on compact shadow metadata keyed by LDS byte offsets, which avoids the
+old pointer-only record log.
 
 The host side owns storage with `hip_moi::host_context`:
 
@@ -80,7 +80,7 @@ The compiled companion is `001_passing_syncthreads.hip`.
 
 ## Diagnosing a Cross-Subgroup Race
 
-The first interesting failure needs at least two subgroups in one workgroup. A
+The smallest diagnostic example needs at least two subgroups in one workgroup. A
 plain kernel can have subgroup 0 write an LDS value and subgroup 1 read it
 without a barrier. The instrumented kernel makes the subgroup partition explicit:
 

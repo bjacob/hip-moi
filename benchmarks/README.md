@@ -64,17 +64,18 @@ segment notes are included when that fast row is not spill-free.
 | `matmul-wave-w8` | `w2_2x4_benchmark.hip` | `tests/reference/rdna4_jakub_matmul_reference.hip` | Jakub RDNA4 matmul extraction | 8 waves, 16x8 WMMA tiles, M=256 N=128 K=16 | 12288 B | 98, no spills |
 | `matmul-prod-16x8` | `prod_16x8_benchmark.hip` | `tests/reference/rdna4_jakub_matmul_reference.hip` | Jakub production fp16 WMMA row extraction | 8 waves, 16x8 WMMA tiles, KGroup=2, M=N=K=4096 | 24576 B | 256, 16 spills, 68 B private |
 | `attention-d16-dense` | `010_rdna4_wmma_attention_block_benchmark.hip` | `tests/instrumented/010_rdna4_wmma_attention_block_test.hip` | hip-moi D16 WMMA attention stress row | seq=12288, head_dim=16, value_dim=16, dense score and weight LDS | 4352 B | 146, no spills |
-| `attention-d16-no-score` | `014_rdna4_wmma_no_score_lds_attention_benchmark.hip` | `tests/instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip` | llama.cpp-style register-handoff direction, D16 rung | seq=12288, head_dim=16, value_dim=16, K/V LDS only | 1024 B | 65, no spills |
+| `attention-d16-no-score` | `014_rdna4_wmma_no_score_lds_attention_benchmark.hip` | `tests/instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip` | llama.cpp-style register-handoff direction, D16 shape | seq=12288, head_dim=16, value_dim=16, K/V LDS only | 1024 B | 65, no spills |
 | `attention-d128-dense` | `011_rdna4_d128_attention_block_benchmark.hip` | `tests/instrumented/011_rdna4_d128_attention_block_test.hip` | AITER/llama.cpp D128 shape signal | seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, dense score and weight LDS | 4352 B | 250, no spills |
 | `attention-d128-pressure-full-kv16` | `012_rdna4_d128_attention_pressure_benchmark.hip` | `tests/instrumented/012_rdna4_d128_attention_pressure_test.hip` | llama.cpp-scale LDS pressure candidate | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B | 256, 22 spills, 92 B private |
 | `attention-d128-pressure-wide-k32` | `012_rdna4_d128_attention_pressure_benchmark.hip` | `tests/instrumented/012_rdna4_d128_attention_pressure_test.hip` | explicit high-LDS pressure variant | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B | 256, 120 spills, 352 B private |
-| `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 rung | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
+| `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 shape | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
 
 ## Shapes and Resource Pressure
 
-This table describes the uninstrumented `pass-through` kernel shape. LDS percentages
-assume the local RDNA4 test device's 64 KiB workgroup LDS limit. VGPR counts
-come from the bundled RDNA4 code-object metadata for the `pass-through` row.
+This table describes the uninstrumented `pass-through` kernel shape. LDS
+percentages assume the local RDNA4 test device's 64 KiB workgroup LDS limit.
+VGPR counts come from the bundled RDNA4 code-object metadata for the
+`pass-through` row.
 
 | Key | Shape | LDS pressure | Pass-through VGPR pressure |
 | --- | --- | ---: | ---: |
@@ -125,10 +126,10 @@ score/weight instrumentation makes it much slower than the matmul rows.
 
 ## Reading The Suite
 
-The matmul wave rows are the fast intra-session guardrail: they expose overhead
-at tiny dynamic sizes and make wave-count scaling obvious. `matmul-prod-16x8`
-is the main matmul performance gate because it preserves Jakub's production
-shape and already runs close to the VGPR ceiling.
+The matmul wave rows are the small-shape guardrail: they expose overhead at
+tiny dynamic sizes and make wave-count scaling obvious. `matmul-prod-16x8` is
+the main matmul performance gate because it preserves Jakub's production shape
+and already runs close to the VGPR ceiling.
 
 The dense attention rows intentionally materialize score and softmax-weight
 tiles in LDS. They are valuable scalar-LDS stress tests, but source mining now
@@ -139,6 +140,6 @@ handoff stays in registers. The pressure rows remain useful because they push
 LDS and VGPR usage into the regime Jakub expects to be interesting for
 instrumentation overhead.
 
-The general `context + sampled_watchpoint` row is retained to track the
-diagnostic-capable API path. The row to optimize for Loom-parity is
+The general `context + sampled_watchpoint` row tracks the diagnostic-capable API
+path. The publish-only performance comparison row is
 `sampled_watchpoint_context`.

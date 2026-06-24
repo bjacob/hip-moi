@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 
 # Attention Source Mining
 
-This note records the current extraction of two different signals:
+This document records the extraction of two different signals:
 
 * which outer attention shapes look production-representative;
 * what a mature implementation chooses for those shapes.
@@ -15,8 +15,9 @@ The local source-mining snapshots were:
 * llama.cpp: `51eae8c`
 * AITER: `de79999`
 
-The goal is not to vendor either implementation. The goal is to choose the next
-hip-moi attention benchmark shape with less guesswork.
+The goal is not to vendor either implementation. The goal is to explain why the
+hip-moi attention benchmarks use their current outer shapes, LDS layouts, and
+register-handoff variants.
 
 ## AITER: Representative Outer Shapes
 
@@ -142,43 +143,47 @@ converted directly into the B operand fragments for the following VKQ/PV MMA
 step. The inspected path did not expose dense LDS arrays analogous to hip-moi's
 current `scores[query][key]` and `weights[query][key]` scratch.
 
-That makes the next hip-moi correctness rung clearer. Before writing another
-large attention benchmark, isolate the RDNA4 WMMA register-handoff problem:
+That made the hip-moi correctness ladder clearer. Before measuring a larger
+attention benchmark, the RDNA4 WMMA register-handoff problem had to be isolated:
 
 * QK accumulation currently gives each lane values shaped like
   `qk_acc[elem] -> (query_row=rdna4_wmma_acc_m(lane, elem), key_col=lane & 15)`.
 * PV wants a B operand shaped like
   `p_fragment[elem] -> (query_row=lane & 15, key=rdna4_wmma_f16_k(lane, elem))`.
 * Bridging those layouts without LDS score/weight scratch requires a
-  subgroup-level register transpose, likely through lane permutation/shuffle
+  subgroup-scoped register transpose, likely through lane permutation/shuffle
   operations.
 
-The first small surgical test is now
+The small surgical test is
 `tests/instrumented/013_rdna4_wmma_register_handoff_test.hip`. It proves the
 register handoff directly, then feeds the reshaped fragment to a second PV WMMA,
 with both exact-context and sampled-fast-context launches. The working lane
 exchange uses `ds_bpermute`; a temporary `readlane` probe was not sufficient for
 the dynamic cross-half permutation.
 
-The first attention-shaped user of that primitive is now
+The first attention-shaped user of that primitive is
 `tests/instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip`. It runs two
 key tiles, instruments the remaining K/V LDS staging, keeps the QK-to-PV handoff
 in registers, and deliberately omits softmax so the host reference stays small
-and exact. The next step is to extract a benchmark from that no-score/weight-LDS
-path. The existing D128 dense-score benchmarks remain valuable as scalar LDS
-instrumentation stress cases, but they should no longer be treated as the most
-production-faithful attention endpoint.
+and exact. The corresponding benchmark is
+`benchmarks/014_rdna4_wmma_no_score_lds_attention_benchmark.hip`; the D128/V128
+version is
+`benchmarks/015_rdna4_d128_no_score_lds_attention_benchmark.hip`.
+
+The D128 dense-score benchmarks remain valuable as scalar LDS instrumentation
+stress cases, but they should not be treated as the most production-faithful
+attention endpoint.
 
 ## Implications For hip-moi
 
-The next benchmark should separate two questions:
+The attention benchmark set separates two questions:
 
 1. Production representativeness: start from AITER-like outer shapes, especially
    BF16/FP16, D128/V128, q_heads=64, kv_heads=8 or 4, long equal Q/K sequences,
    and causal plus no-mask variants.
-2. Resource pressure: compile-probe candidate RDNA4 microkernels before
-   instrumentation and record fixed/dynamic LDS, VGPRs, spills, and private
-   segment size.
+2. Resource pressure: compile-probe RDNA4 microkernels and record fixed LDS,
+   VGPRs, spills, and private segment size before interpreting instrumentation
+   overhead.
 
 The source-mined production choices do not automatically saturate 64 KiB of LDS
 on `gfx1201`. A mature D128 path looks more like 18-25 KiB of LDS depending on
@@ -187,11 +192,11 @@ nearly full LDS, then our benchmark should say so explicitly and may need a
 production-derived pressure variant rather than a literal llama.cpp-selected
 D128 row.
 
-The first concrete benchmark target should therefore be:
+The concrete production-shape target represented in the current suite is:
 
 ```text
 RDNA4, FP16 or BF16 inputs, D128/V128, q_heads=64, kv_heads=8 or 4,
-seq_q=seq_kv at least 8192, causal first, no-mask second,
+seq_q=seq_kv at least 8192,
 microkernel compile-probed before instrumentation.
 ```
 
@@ -238,7 +243,7 @@ RDNA MMA-F16 D128 fallback estimate. That makes it a good next "literal
 production-inspired" benchmark target: it is still far from 64 KiB, but it is
 using LDS for the same reasons a mature implementation does.
 
-If Jakub specifically wants a near-LDS-pressure rung, the cleanest next variant
+If Jakub specifically wants a near-LDS-pressure benchmark, the cleanest variant
 is not padding, but a wider key tile:
 
 ```text
@@ -257,17 +262,18 @@ real flash-attention tiling pressure: larger K/V staging, a larger score tile,
 and pipelined reuse. This should be labelled a D128 production-pressure variant,
 not a llama.cpp clone.
 
-The conclusion is:
+The implemented benchmark mapping is:
 
-1. Keep the current 4352 B D128 benchmark as the scalar-scratch
+1. `attention-d128-dense` keeps the 4352 B D128 shape as the scalar-scratch
    instrumentation stress row.
-2. Add a D128 full-K/V double-buffer benchmark targeting about 19 KiB of LDS.
-3. If that still does not create enough resource pressure, add a D128 32-key
-   double-buffer pressure row targeting about 38 KiB of LDS.
-4. Compile-probe each candidate before instrumentation and record fixed LDS,
-   dynamic LDS, VGPRs, spills, and private segment size.
+2. `attention-d128-pressure-full-kv16` uses D128 full-K/V double-buffering and
+   targets about 19 KiB of LDS.
+3. `attention-d128-pressure-wide-k32` uses a wider 32-key tile and targets about
+   38 KiB of LDS.
+4. `attention-d128-no-score` keeps the QK-to-PV handoff in registers and uses
+   LDS only for K/V staging.
 
-Only after that probe should hip-moi add the familiar rows:
+Each benchmark uses the familiar rows when applicable:
 
 * pass-through;
 * Jakub-Sampled-Loom-style;
