@@ -68,6 +68,14 @@ are `0x1` for K/V fragment staging, `0x2` for score scratch, `0x4` for softmax
 weight scratch, and `0x8` for row-scale/row-sum scratch. Masked builds are
 triage-only; the benchmark numbers below use the default all-sites mask.
 
+The companion codegen probe compiles masked variants, unbundles the AMDGPU code
+object, and prints register/spill metadata plus coarse instruction-class counts:
+
+```bash
+./benchmarks/inspect_attention_block_codegen.sh
+./benchmarks/inspect_attention_block_codegen.sh 0x2 0x4 0x6
+```
+
 ### Shared Knobs
 
 Timing knobs:
@@ -178,19 +186,49 @@ separate from the general diagnostic-capable context: the general context spills
 in this workload, while the fast view is spill-free and uses fewer registers
 than the sampled-Loom comparison row.
 
-For attribution, a quick `seq=4096`, `min_ms=200`, `warmup_ms=200` pass with
-compile-time site masks showed:
+For attribution, a `seq=4096`, `min_ms=300`, `warmup_ms=300` pass on
+2026-06-24 with compile-time site masks showed:
 
 | Mask | Sites instrumented | noop | sampled Loom | hip-moi `context + sampled_watchpoint` | hip-moi `sampled_watchpoint_context` |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `0xf` | all | 2.82 ms | 40.1 ms | 31.7 ms | 18.7 ms |
-| `0x1` | K/V only | 2.70 ms | 2.76 ms | 1.68 ms | 1.28 ms |
-| `0x2` | scores only | 1.19 ms | 29.8 ms | 28.3 ms | 17.9 ms |
-| `0x4` | weights only | 1.19 ms | 20.5 ms | 18.6 ms | 13.1 ms |
-| `0x8` | row scratch only | 1.19 ms | 3.09 ms | 3.12 ms | 2.14 ms |
-| `0xe` | scores, weights, rows | 1.19 ms | 35.3 ms | 34.2 ms | 18.5 ms |
+| `0xf` | all | 1.19 ms | 38.7 ms | 36.4 ms | 24.6 ms |
+| `0x1` | K/V only | 1.18 ms | 1.38 ms | 1.64 ms | 1.29 ms |
+| `0x2` | scores only | 1.19 ms | 30.2 ms | 28.8 ms | 16.4 ms |
+| `0x4` | weights only | 1.19 ms | 19.7 ms | 17.4 ms | 13.1 ms |
+| `0x6` | scores and weights | 1.20 ms | 36.6 ms | 37.8 ms | 23.1 ms |
+| `0x8` | row scratch only | 1.19 ms | 3.18 ms | 3.24 ms | 2.11 ms |
+| `0xe` | scores, weights, rows | 1.19 ms | 37.3 ms | 41.7 ms | 23.5 ms |
 
 The masked builds change the generated kernel shape and are not headline
 apples-to-apples numbers. They are useful for localizing the cost: K/V fragment
 staging is close to free here, while score and weight scratch account for nearly
 all of the attention instrumentation overhead.
+
+The dynamic access pressure explains this split. Per key tile and workgroup,
+the K/V class performs 192 vector `f16x8` LDS accesses. The score class performs
+1536 scalar float LDS accesses: 512 stores after QK, 512 loads for the max pass,
+and 512 more loads for the weight pass. The weight class performs 1024 scalar
+half LDS accesses: 512 stores and 512 loads. Row scratch is smaller: 576 scalar
+float accesses per key tile plus one final 512-load epilogue per workgroup.
+
+The codegen probe for masks `0x2`, `0x4`, and `0x6` showed that
+`sampled_watchpoint_context` remains spill-free and far smaller than both
+comparison rows:
+
+| Mask | Row | Instructions | Atomics | VGPRs | VGPR spills | Private segment |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `0x2` | sampled Loom | 1696 | 14 | 140 | 0 | 0 B |
+| `0x2` | `context + sampled_watchpoint` | 5797 | 41 | 182 | 0 | 0 B |
+| `0x2` | `sampled_watchpoint_context` | 1056 | 12 | 110 | 0 | 0 B |
+| `0x4` | sampled Loom | 1519 | 13 | 125 | 0 | 0 B |
+| `0x4` | `context + sampled_watchpoint` | 5162 | 37 | 174 | 0 | 0 B |
+| `0x4` | `sampled_watchpoint_context` | 887 | 10 | 100 | 0 | 0 B |
+| `0x6` | sampled Loom | 2731 | 23 | 164 | 0 | 0 B |
+| `0x6` | `context + sampled_watchpoint` | 10279 | 77 | 252 | 0 | 0 B |
+| `0x6` | `sampled_watchpoint_context` | 1415 | 20 | 124 | 0 | 0 B |
+
+The next plausible attention optimization is therefore not reducing K/V
+fragment instrumentation. It is hoisting or caching the per-site sampled
+selection decision for dense scalar score/weight loops, so losing sampled sites
+can bypass the instrumentation call before paying repeated seed/lane/range
+setup. That idea is publish-only and `sampled_watchpoint_context`-specific.

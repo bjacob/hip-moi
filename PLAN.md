@@ -575,20 +575,43 @@ fast view exists precisely to keep the hot path small and spill-free.
 
 The attention benchmark also accepts a compile-time
 `HIP_MOI_ATTENTION_SITE_MASK` in its standalone script for attribution builds.
-The default mask remains `0xf`, all LDS sites. A quick `seq=4096`,
-`min_ms=200`, `warmup_ms=200` pass showed:
+The default mask remains `0xf`, all LDS sites. The companion
+`benchmarks/inspect_attention_block_codegen.sh` script compiles selected masks,
+unbundles the AMDGPU object, and prints register/spill metadata plus coarse
+instruction-class counts. A `seq=4096`, `min_ms=300`, `warmup_ms=300` pass
+showed:
 
 * K/V fragment staging only (`0x1`): near-noop for all instrumentation paths;
 * score scratch only (`0x2`): almost the full fast-path attention cost;
 * weight scratch only (`0x4`): also substantial;
+* score + weight scratch (`0x6`): almost the full all-sites cost;
 * row-scale/row-sum scratch only (`0x8`): modest;
 * score + weight + row scratch (`0xe`): nearly the same as all sites.
 
+The dynamic access pressure explains this better than the raw site count. Per
+key tile and workgroup, K/V staging performs 192 vector `f16x8` LDS accesses.
+Score scratch performs 1536 scalar float accesses: 512 stores after QK, 512
+loads for the max pass, and 512 more loads for the weight pass. Weight scratch
+performs 1024 scalar half accesses. Row scratch is smaller: 576 scalar float
+accesses per key tile plus one final 512-load epilogue per workgroup.
+
+Codegen for the hot masks is consistent with the runtime numbers.
+`sampled_watchpoint_context` is spill-free and much smaller than sampled Loom:
+for score-only (`0x2`), 1056 static instructions and 110 VGPRs versus sampled
+Loom's 1696 instructions and 140 VGPRs; for weight-only (`0x4`), 887
+instructions and 100 VGPRs versus sampled Loom's 1519 instructions and 125
+VGPRs. The general `context + sampled_watchpoint` path is much larger even
+before it spills: 5797 score-only instructions, 5162 weight-only instructions,
+and 10279 score+weight instructions.
+
 So the next attention-specific performance lever, if we choose one before
 atomics, is not WMMA fragment staging. It is the repeated scalar score/weight
-LDS traffic in the softmax phases. Any optimization here should remain generic
-enough to apply to attention-like scalar scratch patterns rather than baking
-attention semantics into the API.
+LDS traffic in the softmax phases. The most plausible first optimization is a
+publish-only, `sampled_watchpoint_context`-specific way to hoist or cache the
+per-site sampled selection decision, so losing sampled sites can bypass the
+instrumentation call before paying repeated seed/lane/range setup. Any
+optimization here should remain generic enough to apply to attention-like
+scalar scratch patterns rather than baking attention semantics into the API.
 
 ## Test Corpus
 
@@ -941,7 +964,9 @@ LDS instrumentation.
 The first attention triage pass is complete. The benchmark has a compile-time
 site mask for local attribution builds, and that pass showed that score and
 weight scratch dominate the overhead while K/V fragment staging is cheap. The
-default CMake benchmark remains all-sites and should stay that way.
+default CMake benchmark remains all-sites and should stay that way. The second
+triage pass added the reusable codegen probe and identified per-site sampled
+selection hoisting as the clearest pre-atomics optimization to try.
 
 Future benchmark rows should keep the row structure familiar:
 
