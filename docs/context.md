@@ -48,7 +48,7 @@ Use `hip_moi::sampled_watchpoint_context` only for the current narrow fast path:
 * fixed compile-time sampled policy,
 * full-workgroup barriers through `ctx.syncthreads()`,
 * source-instrumented kernels where the LDS byte offset is already known,
-* benchmark rows that should resemble Jakub's sampled Loom publish-only path.
+* benchmark rows that should resemble Jakub-Sampled-Loom publish-only path.
 
 The fast view does not report conflicts. It publishes sampled watchpoint
 metadata at selected sites and intentionally omits the cold diagnostic state
@@ -110,7 +110,7 @@ options.sampled_watchpoint_reports = false;
 selection seed has been mixed; `1` means no thinning. Reporting mode always
 checks the watchpoint entry displaced by the current publish. `probe_count`
 controls how many additional watchpoint slots are scanned; `0` means scan the
-whole table. `delay_iters` is a benchmark knob matching Jakub's sampled Loom
+whole table. `delay_iters` is a benchmark knob matching Jakub-Sampled-Loom
 prototype. `sampled_watchpoint_reports=false` makes the sampled backend publish
 watchpoints without scanning for conflicts, which is useful for apples-to-apples
 publish-only benchmark rows.
@@ -140,7 +140,7 @@ watchpoint capacity is read from runtime context storage. Passing `1` tells the
 sampled hot-path view that the table has exactly one watchpoint entry, so slot
 selection folds to zero instead of running the generic slot-mixing code. That is
 useful for fair publish-only benchmark rows that intentionally match Jakub's
-one-watchpoint sampled Loom configuration.
+one-watchpoint Jakub-Sampled-Loom configuration.
 
 `hip_moi::sampled_watchpoint_context` currently supports only publish-only
 sampled policies. It tracks its epoch locally across instrumented
@@ -286,7 +286,7 @@ its internal fields.
 
 ## One Watchpoint Fast Row
 
-For benchmark rows that intentionally match Jakub's one-watchpoint sampled Loom
+For benchmark rows that intentionally match Jakub's one-watchpoint Jakub-Sampled-Loom
 configuration, make both the host capacity and the policy explicit:
 
 ```c++

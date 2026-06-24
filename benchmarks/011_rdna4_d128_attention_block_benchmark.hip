@@ -6,8 +6,8 @@
 // This grows tests/instrumented/011_rdna4_d128_attention_block_test.hip into a
 // benchmark-sized workload. It keeps the common benchmark row structure while
 // switching the attention dimensions to the source-mined AITER/llama.cpp D128
-// production signal. Every LDS access is wrapped when comparing noop execution,
-// sampled Loom-style instrumentation, and hip-moi's sampled watchpoint paths.
+// production signal. Every LDS access is wrapped when comparing pass-through execution,
+// Jakub-Sampled-Loom-style instrumentation, and hip-moi's sampled watchpoint paths.
 
 #include <hip/hip_runtime.h>
 
@@ -559,7 +559,7 @@ __device__ __forceinline__ static void observe_sampled_range(Runtime  runtime,
 }
 
 template <uint32_t AccessSize>
-__device__ __forceinline__ static void observe_sampled_loom_access(Runtime  runtime,
+__device__ __forceinline__ static void observe_jakub_sampled_loom_access(Runtime  runtime,
                                                                    uint32_t byte_offset,
                                                                    uint32_t access_kind,
                                                                    uint32_t site_id,
@@ -579,7 +579,7 @@ __device__ __forceinline__ static void observe_sampled_loom_access(Runtime  runt
     }
 }
 
-struct NoopPolicy
+struct PassThroughPolicy
 {
     struct context_type
     {
@@ -610,7 +610,7 @@ struct NoopPolicy
     }
 };
 
-struct SampledLoomPolicy
+struct JakubSampledLoomPolicy
 {
     struct context_type
     {
@@ -644,7 +644,7 @@ struct SampledLoomPolicy
         uint32_t lane      = flat & (kWaveSize - 1);
         uint32_t site_bits = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
         uint32_t seed      = wave_selection_seed(ctx.runtime, wave, site_bits);
-        observe_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
+        observe_jakub_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
             ctx.runtime, offset, kTsanShadowAccessWrite, site_bits, wave, lane, seed);
         *ptr = value;
     }
@@ -658,7 +658,7 @@ struct SampledLoomPolicy
         uint32_t lane      = flat & (kWaveSize - 1);
         uint32_t site_bits = static_cast<uint32_t>(site.value() ^ (site.value() >> 32));
         uint32_t seed      = wave_selection_seed(ctx.runtime, wave, site_bits);
-        observe_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
+        observe_jakub_sampled_loom_access<static_cast<uint32_t>(sizeof(T))>(
             ctx.runtime, offset, kTsanShadowAccessRead, site_bits, wave, lane, seed);
         return *ptr;
     }
@@ -987,8 +987,8 @@ static T* gpu_alloc(std::size_t count)
 
 enum class Mode
 {
-    Noop,
-    SampledLoom,
+    PassThrough,
+    JakubSampledLoom,
     HipMoiContextSampledWatchpoint,
     HipMoiSampledWatchpointContext,
 };
@@ -1071,7 +1071,7 @@ static Allocation make_allocation(Mode mode, int sequence_length, SampledKnobs s
     allocation.probe_count         = sampled_knobs.probe_count;
     allocation.sampled_reports     = sampled_knobs.reports;
 
-    if(mode == Mode::SampledLoom)
+    if(mode == Mode::JakubSampledLoom)
     {
         allocation.workgroup_stride_entries
             = 1 + static_cast<uint32_t>(allocation.sampled_watchpoints);
@@ -1276,7 +1276,7 @@ static double run_one(const char*  name,
     HIP_CHECK(hipEventDestroy(stop));
 
     uint64_t reports = 0;
-    if(mode == Mode::SampledLoom && allocation.report_count)
+    if(mode == Mode::JakubSampledLoom && allocation.report_count)
     {
         HIP_CHECK(
             hipMemcpy(&reports, allocation.report_count, sizeof(reports), hipMemcpyDeviceToHost));
@@ -1430,8 +1430,8 @@ int main()
         prefix += mask_suffix;
     }
     std::string sampled_mode_suffix = sampled_knobs.reports ? "_reporting" : "_publish_only";
-    run_one<NoopPolicy>((prefix + "_noop").c_str(),
-                        Mode::Noop,
+    run_one<PassThroughPolicy>((prefix + "_pass_through").c_str(),
+                        Mode::PassThrough,
                         q,
                         k,
                         v,
@@ -1440,8 +1440,8 @@ int main()
                         sampled_knobs,
                         min_ms,
                         warmup_ms);
-    run_one<SampledLoomPolicy>((prefix + "_sampled_loom" + sampled_mode_suffix).c_str(),
-                               Mode::SampledLoom,
+    run_one<JakubSampledLoomPolicy>((prefix + "_jakub_sampled_loom" + sampled_mode_suffix).c_str(),
+                               Mode::JakubSampledLoom,
                                q,
                                k,
                                v,

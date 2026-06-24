@@ -90,8 +90,8 @@ for shape in "$@"; do
   echo "===== no-score ${shape} metadata ====="
   "${READOBJ}" --notes "${device}" | awk '
     function row_name(mangled) {
-      if(mangled ~ /I10NoopPolicy/) return "noop";
-      if(mangled ~ /I17SampledLoomPolicy/) return "sampled Loom";
+      if(mangled ~ /I17PassThroughPolicy/) return "pass-through";
+      if(mangled ~ /I22JakubSampledLoomPolicy/) return "Jakub-Sampled-Loom";
       if(mangled ~ /I20ContextSampledPolicy/) return "context + sampled_watchpoint";
       if(mangled ~ /I30SampledWatchpointContextPolicy/) return "sampled_watchpoint_context";
       return mangled;
@@ -126,8 +126,8 @@ for shape in "$@"; do
         name = $0;
         sub(/^.*attention_no_score_lds_kernel</, "", name);
         sub(/Policy>.*$/, "", name);
-        if(name == "Noop") name = "noop";
-        else if(name == "SampledLoom") name = "sampled Loom";
+        if(name == "PassThrough") name = "pass-through";
+        else if(name == "JakubSampledLoom") name = "Jakub-Sampled-Loom";
         else if(name == "ContextSampled") name = "context + sampled_watchpoint";
         else if(name == "SampledWatchpointContext") name = "sampled_watchpoint_context";
         instr = flat_atomic = global_atomic = flat_load = flat_store = global_mem = ds = scratch = branch = 0;

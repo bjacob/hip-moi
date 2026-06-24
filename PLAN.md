@@ -140,7 +140,7 @@ Real Loom:
 * branches to a cold diagnostic path only when the compact predicate fires.
 
 Jakub's exact Loom HIP path mirrors this shape with direct helper calls. Jakub's
-sampled Loom path is the more performance-relevant data point: it stores exact
+Jakub-Sampled-Loom path is the more performance-relevant data point: it stores exact
 dword-cell ranges in a small global watchpoint table, but only selected lanes
 publish and check metadata. Sampling and table overwrites can introduce false
 negatives, but the represented dword-range conflicts are exact.
@@ -261,7 +261,7 @@ shadow traffic.
 
 ## Sampled Watchpoint Path
 
-The main performance target is a sampled-Loom-style watchpoint path.
+The main performance target is a Jakub-Sampled-Loom-style watchpoint path.
 
 Each watchpoint entry represents an exact LDS dword-cell range:
 
@@ -272,7 +272,7 @@ Each watchpoint entry represents an exact LDS dword-cell range:
 Only selected lanes publish and check watchpoints. The selection is
 deterministic for a launch and mixed from generation, workgroup id, subgroup id,
 and site id. The sampled backend now exposes the same basic tuning axes as
-Jakub's sampled Loom HIP prototype:
+Jakub-Sampled-Loom HIP prototype:
 
 * watchpoint count,
 * sample skip,
@@ -428,7 +428,7 @@ test filenames, changing only the suffix from `_test.hip` to `_benchmark.hip`
 where possible. The benchmark README is now the canonical lookup document: its
 catalog table records benchmark keys, source/test filenames, and provenance;
 its shapes-and-resource-pressure table records shape, LDS pressure, and
-noop-path VGPR pressure; its benchmark-mode table defines the result columns;
+pass-through-path VGPR pressure; its benchmark-mode table defines the result columns;
 and its results table uses the same keys for the current RDNA4 timing snapshot.
 
 Important invariant: instrumented tests and benchmark rows must route every LDS
@@ -439,8 +439,8 @@ instrumented kernel gives misleading correctness and performance signals.
 
 The small `w2_2x4_benchmark.hip` family compares:
 
-* noop,
-* sampled Loom,
+* pass-through,
+* Jakub-Sampled-Loom,
 * hip-moi exact shadow through explicit LDS-offset APIs,
 * hip-moi general `context` with the `sampled_watchpoint` backend,
 * hip-moi narrower `sampled_watchpoint_context` fast view when the default
@@ -452,8 +452,8 @@ optimization target. It keeps Jakub's real fp16 production 16x8 row shape:
 runtime `BENCH_M/N/K` sizes. It compares only the rows that matter for the
 current Loom-parity loop:
 
-* noop,
-* sampled Loom publish-only,
+* pass-through,
+* Jakub-Sampled-Loom publish-only,
 * hip-moi publish-only through the general `context` with the
   `sampled_watchpoint` backend,
 * hip-moi publish-only through `sampled_watchpoint_context`.
@@ -477,7 +477,7 @@ SAMPLED_REPORTS
 ```
 
 By default this is `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
-`reports=off`, matching Jakub's sampled-Loom publish-only configuration. The
+`reports=off`, matching Jakub-Sampled-Loom publish-only configuration. The
 benchmark prints these effective knobs and names sampled rows as
 `publish_only` or `reporting`. The headline per-iteration latency prints in
 microseconds for values below 1 ms and in milliseconds otherwise; elapsed
@@ -505,8 +505,8 @@ performance-sensitive code changed. The current focused baseline at
 `BENCH_M=BENCH_N=BENCH_K=4096` is roughly:
 
 ```text
-noop                                      1.16 ms
-sampled Loom                              8.65 ms
+pass-through                                      1.16 ms
+Jakub-Sampled-Loom                              8.65 ms
 hip-moi context + sampled_watchpoint     25.9 ms
 hip-moi sampled_watchpoint_context        3.38 ms
 ```
@@ -514,7 +514,7 @@ hip-moi sampled_watchpoint_context        3.38 ms
 The current corrected compact baselines are:
 
 ```text
-shape      noop       sampled Loom  exact shadow  context+sampled  sampled_context
+shape      pass-through       Jakub-Sampled-Loom  exact shadow  context+sampled  sampled_context
 w2 2x4     2.80 µs   4.69 µs       8.91 µs       4.85 µs          3.49 µs
 w4 4x16    3.15 µs   5.91 µs       14.0 µs       7.45 µs          4.31 µs
 w8 16x8    3.20 µs   5.79 µs       13.0 µs       7.74 µs          4.62 µs
@@ -530,7 +530,7 @@ The current hip-moi rows exercise the explicit-offset exact-shadow path, the
 general `context` with the `sampled_watchpoint` backend, and the narrow
 `sampled_watchpoint_context` sampled fast path. Under the fair publish-only
 production default, the narrow sampled view is now substantially faster than
-the sampled-Loom row on the vendored 16x8 benchmark, while the general
+the Jakub-Sampled-Loom row on the vendored 16x8 benchmark, while the general
 `context` row remains much slower. Dense sampling, reporting-on rows, and
 future workload families are still expected to expose overhead that the current
 matmul does not.
@@ -558,16 +558,16 @@ The attention benchmark now has its own codegen and site-class triage. On the
 default all-LDS-sites `seq=12288` benchmark, the current RDNA4 numbers are:
 
 ```
-noop                                           6.56 ms
-sampled Loom publish-only                     118 ms
+pass-through                                           6.56 ms
+Jakub-Sampled-Loom publish-only                     118 ms
 hip-moi context + sampled_watchpoint          148 ms
 hip-moi sampled_watchpoint_context            64.0 ms
 ```
 
 Unbundling the default attention benchmark fatbin shows:
 
-* noop: 18 SGPR, 82 VGPR, no VGPR spills, no private segment;
-* sampled Loom: 95 SGPR, 205 VGPR, no VGPR spills, no private segment;
+* pass-through: 18 SGPR, 82 VGPR, no VGPR spills, no private segment;
+* Jakub-Sampled-Loom: 95 SGPR, 205 VGPR, no VGPR spills, no private segment;
 * hip-moi `context + sampled_watchpoint`: 97 SGPR, 256 VGPR, 386 VGPR spills,
   748-byte private segment;
 * hip-moi `sampled_watchpoint_context`: 45 SGPR, 146 VGPR, no VGPR spills, no
@@ -586,7 +586,7 @@ unbundles the AMDGPU object, and prints register/spill metadata plus coarse
 instruction-class counts. A `seq=4096`, `min_ms=300`, `warmup_ms=300` pass
 showed:
 
-* K/V fragment staging only (`0x1`): near-noop for all instrumentation paths;
+* K/V fragment staging only (`0x1`): near-pass-through for all instrumentation paths;
 * score scratch only (`0x2`): almost the full fast-path attention cost;
 * weight scratch only (`0x4`): also substantial;
 * score + weight scratch (`0x6`): almost the full all-sites cost;
@@ -601,10 +601,10 @@ performs 1024 scalar half accesses. Row scratch is smaller: 576 scalar float
 accesses per key tile plus one final 512-load epilogue per workgroup.
 
 Codegen for the hot masks is consistent with the runtime numbers.
-`sampled_watchpoint_context` is spill-free and much smaller than sampled Loom:
-for score-only (`0x2`), 1056 static instructions and 110 VGPRs versus sampled
-Loom's 1696 instructions and 140 VGPRs; for weight-only (`0x4`), 887
-instructions and 100 VGPRs versus sampled Loom's 1519 instructions and 125
+`sampled_watchpoint_context` is spill-free and much smaller than Jakub-Sampled-Loom:
+for score-only (`0x2`), 1056 static instructions and 110 VGPRs versus
+Jakub-Sampled-Loom's 1696 instructions and 140 VGPRs; for weight-only (`0x4`), 887
+instructions and 100 VGPRs versus Jakub-Sampled-Loom's 1519 instructions and 125
 VGPRs. The general `context + sampled_watchpoint` path is much larger even
 before it spills: 5797 score-only instructions, 5162 weight-only instructions,
 and 10279 score+weight instructions.
@@ -743,7 +743,7 @@ does not yet improve latency relative to exact shadow. This says the next
 optimization should attack per-lane wrapper work, selected-lane calculation,
 context creation, and register pressure, not merely metadata write count.
 
-Implement the sampled-Loom-style backend:
+Implement the Jakub-Sampled-Loom-style backend:
 
 * dword-cell range normalization,
 * selected-lane publication,
@@ -769,7 +769,7 @@ Status: implemented for the matmul-only phase. The first tightening pass added
 compile-time backend selection for the explicit-offset access helpers and
 replaced sampled watchpoint lane/slot selection with cheaper 32-bit mixing and
 masking. On the 2-wave benchmark, sampled hip-moi moved from roughly 0.010 ms
-after legacy cleanup to roughly 0.007 ms, while sampled Loom remains roughly
+after legacy cleanup to roughly 0.007 ms, while Jakub-Sampled-Loom remains roughly
 0.005 ms. The same pass made the 4-wave and 8-wave sampled rows roughly
 0.011 ms.
 
@@ -780,11 +780,11 @@ VGPR use rose to 63 for the sampled row, so this is not a free lunch; it mostly
 confirms that repeated context lookup was real overhead and that context live
 range is now a central tuning problem.
 
-The fairness pass then aligned sampled knobs between sampled Loom and hip-moi,
+The fairness pass then aligned sampled knobs between Jakub-Sampled-Loom and hip-moi,
 fixed per-launch hip-moi generation in the benchmark, and split sampled row
 names into publish-only versus reporting. With fair default knobs
 (`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`), sampled
-hip-moi is now approximately tied with sampled Loom on 2-wave and trails it by
+hip-moi is now approximately tied with Jakub-Sampled-Loom on 2-wave and trails it by
 about 0.002 ms on the 4/8-wave rows. Dense sampling (`skip=1`) and reporting
 mode show hip-moi still has avoidable policy/checking overhead. The same pass
 also fixed sampled reporting rendezvous so same-range conflicts meet in the
@@ -805,8 +805,8 @@ sampled row for Jakub's production fp16 16x8 matmul. The focused
 main optimization gate. With fair publish-only knobs
 (`watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, `reports=off`) and
 `BENCH_M=BENCH_N=BENCH_K=4096`, the initial focused baseline was roughly
-`1.17 ms` noop, `8.63 ms` sampled Loom, and `17.6 ms` hip-moi sampled
-watchpoints. That put hip-moi at about 2x sampled Loom on the production shape,
+`1.17 ms` pass-through, `8.63 ms` Jakub-Sampled-Loom, and `17.6 ms` hip-moi sampled
+watchpoints. That put hip-moi at about 2x Jakub-Sampled-Loom on the production shape,
 even though the tiny 2/4/8-wave benchmark had reached parity. That result is
 what redirected the next performance work to the production extraction.
 
@@ -826,20 +826,20 @@ can dominate the actual sanitizer work.
 The first generated-code audit on the focused production extraction confirmed
 that the new goal is not to invent a different sampling algorithm first. The
 goal is to make hip-moi's sampled hot path compile into something much closer
-to Jakub's sampled Loom path:
+to Jakub-Sampled-Loom path:
 
 ```text
 row                  private bytes  VGPR spills  SGPRs  code size
-noop                            0            0     23   0x01a28
-sampled Loom                  320          244     57   0x0f528
+pass-through                            0            0     23   0x01a28
+Jakub-Sampled-Loom                  320          244     57   0x0f528
 hip-moi static sampled       1024          751     50   0x1d340
 hip-moi runtime sampled      1456         1203    107   0x44328
 ```
 
-The disassembly tells the same story. The sampled Loom row is about 11.8k
+The disassembly tells the same story. The Jakub-Sampled-Loom row is about 11.8k
 assembly lines, while the hip-moi static sampled row is about 21.8k. The hip-moi
 static row has roughly 354 scratch loads and 221 scratch stores versus 75 and
-72 for sampled Loom. It also has 2624 `s_nop` occurrences because the
+72 for Jakub-Sampled-Loom. It also has 2624 `s_nop` occurrences because the
 compile-time delay policy unrolled the 32-iteration delay at every hot call
 site. That is the first low-risk fix.
 
@@ -866,12 +866,12 @@ Production sampled roadmap:
    `sampled_watchpoint_context`. The focused production benchmark now routes the
    static publish-only hip-moi fast row through this view. That dropped the
    `sampled_watchpoint_context` production row from roughly `16.9 ms` after the
-   delay-loop cleanup to `7.35 ms`, beating sampled Loom's roughly `8.63 ms` on
+   delay-loop cleanup to `7.35 ms`, beating Jakub-Sampled-Loom's roughly `8.63 ms` on
    the same run. Codegen improved from 1024 private bytes and 769 VGPR spills to
    116 private bytes and 40 VGPR spills. This confirms that the main production
    gap was the full context's live state, not the sampled watchpoint algorithm.
 3. Add a full-workgroup-barrier sampled epoch path. In the production benchmark,
-   every `ctx.syncthreads()` is a full workgroup barrier, and sampled Loom uses
+   every `ctx.syncthreads()` is a full workgroup barrier, and Jakub-Sampled-Loom uses
    one per-workgroup epoch header. hip-moi still carries the more general
    subgroup-epoch machinery from earlier designs. For this sampled fast path,
    use the Loom-shaped sequence: barrier, one workgroup epoch increment by one
@@ -883,7 +883,7 @@ Production sampled roadmap:
    hot context no longer carries subgroup-state capacity or loops over subgroup
    epochs. The focused production `sampled_watchpoint_context` row dropped again
    from roughly
-   `7.35 ms` to `5.27 ms`, while sampled Loom was roughly `8.59 ms`.
+   `7.35 ms` to `5.27 ms`, while Jakub-Sampled-Loom was roughly `8.59 ms`.
    A later tightening pass made this path more Loom-shaped by replacing the
    ordinary epoch store/increment plus `__threadfence()` with atomic epoch
    updates between workgroup barriers. That improved latency from roughly
@@ -922,9 +922,9 @@ Production sampled roadmap:
    inline reporting, metadata-full diagnostics, or slow validation branches into
    every instrumented access. If those paths are still required for safety,
    move them behind cold noinline helpers or an explicitly checked setup phase.
-6. Only after the generated code resembles sampled Loom should we revisit more
+6. Only after the generated code resembles Jakub-Sampled-Loom should we revisit more
    ambitious regular-pattern or coalescing-style ideas. Status: the
-   publish-only sampled row is now well below sampled Loom on the vendored
+   publish-only sampled row is now well below Jakub-Sampled-Loom on the vendored
    production benchmark, so the next decision point is workload breadth rather
    than more matmul-only heroics.
 
@@ -932,7 +932,7 @@ For each performance-sensitive step, record both latency and generated-code
 metrics. The important codegen gates are private segment size, VGPR spill count,
 SGPR pressure, approximate code size, and whether the hot kernel uses flat
 scratch. The win condition for the matmul-only phase was sampled hip-moi
-publish-only below sampled Loom publish-only on `prod_16x8_benchmark.hip` with
+publish-only below Jakub-Sampled-Loom publish-only on `prod_16x8_benchmark.hip` with
 the fair default knobs; that has been achieved.
 
 ### Session 8: Broaden End-To-End Workloads
@@ -989,10 +989,10 @@ The D128 LDS-pressure benchmark now exists as
 kernel into the familiar benchmark rows for both pressure candidates. A first
 RDNA4 run on `seq=8192` measured:
 
-* `full_kv16`, 19712 B LDS: `5.87 ms` noop, `156 ms` sampled Loom, `132 ms`
+* `full_kv16`, 19712 B LDS: `5.87 ms` pass-through, `156 ms` Jakub-Sampled-Loom, `132 ms`
   general `context + sampled_watchpoint`, and `48.4 ms` fast
   `sampled_watchpoint_context`;
-* `wide_k32`, 39168 B LDS: `8.87 ms` noop, `183 ms` sampled Loom, `162 ms`
+* `wide_k32`, 39168 B LDS: `8.87 ms` pass-through, `183 ms` Jakub-Sampled-Loom, `162 ms`
   general `context + sampled_watchpoint`, and `75.5 ms` fast
   `sampled_watchpoint_context`.
 
@@ -1050,8 +1050,8 @@ The benchmark rung now exists as
 `hip_moi_benchmark_attention_no_score_lds`. It keeps the same D16/V16,
 two-subgroup, one-workgroup-per-32-queries shape as the smaller attention block
 benchmark, but K/V fragment staging is the only LDS payload. A first RDNA4 run
-at `seq=12288`, `min_ms=100`, and `warmup_ms=100` measured `1.06 ms` noop,
-`1.89 ms` sampled Loom, `2.41 ms` general `context + sampled_watchpoint`, and
+at `seq=12288`, `min_ms=100`, and `warmup_ms=100` measured `1.06 ms` pass-through,
+`1.89 ms` Jakub-Sampled-Loom, `2.41 ms` general `context + sampled_watchpoint`, and
 `1.49 ms` fast `sampled_watchpoint_context`.
 
 The D128/V128 version now exists too:
@@ -1061,13 +1061,13 @@ The D128/V128 version now exists too:
 `hip_moi_benchmark_attention_d128_no_score_lds`. It runs eight QK head
 fragments and eight PV value fragments while still making K/V fragment staging
 the only instrumented LDS payload. A first RDNA4 run at `seq=12288`,
-`min_ms=100`, and `warmup_ms=100` measured `3.44 ms` noop, `10.9 ms` sampled
-Loom, `22.0 ms` general `context + sampled_watchpoint`, and `7.29 ms` fast
+`min_ms=100`, and `warmup_ms=100` measured `3.44 ms` pass-through, `10.9 ms`
+Jakub-Sampled-Loom, `22.0 ms` general `context + sampled_watchpoint`, and `7.29 ms` fast
 `sampled_watchpoint_context`.
 
 This is the cleanest current signal that K/V fragment staging by itself is not
 the attention bottleneck for hip-moi, even at D128/V128. The fast publish-only
-row is close to noop and faster than sampled Loom on both no-score paths, while
+row is close to pass-through and faster than Jakub-Sampled-Loom on both no-score paths, while
 the dense-score attention rows remain much slower. Treat dense score/weight LDS
 materialization as a scalar-LDS stress case unless a target production kernel
 proves that it is actually representative.
@@ -1076,9 +1076,9 @@ A no-score codegen probe now exists as
 `benchmarks/inspect_attention_no_score_lds_codegen.sh`. On the restored
 implementation, both no-score fast rows are spill-free. The D16 no-score fast
 row uses 26 SGPRs, 65 VGPRs, 1090 static instructions, and 4 flat atomics
-versus sampled Loom's 51 SGPRs, 91 VGPRs, 1553 static instructions, and
+versus Jakub-Sampled-Loom's 51 SGPRs, 91 VGPRs, 1553 static instructions, and
 6 global atomics. The D128 no-score fast row uses 24 SGPRs, 122 VGPRs, 2778
-static instructions, and 32 flat atomics versus sampled Loom's 54 SGPRs,
+static instructions, and 32 flat atomics versus Jakub-Sampled-Loom's 54 SGPRs,
 161 VGPRs, 5319 static instructions, and 64 global atomics. That confirms the
 remaining no-score overhead is not a spill or code-size problem relative to
 Loom.
@@ -1102,11 +1102,11 @@ The D128 benchmark rung now exists as
 `benchmarks/011_rdna4_d128_attention_block_benchmark.hip`, with script
 `benchmarks/build_attention_d128_benchmark.sh` and CMake target
 `hip_moi_benchmark_attention_d128`. It grows the `011` correctness kernel into
-the familiar benchmark rows: noop, sampled Loom-style publish-only,
+the familiar benchmark rows: pass-through, Jakub-Sampled-Loom-style publish-only,
 `context + sampled_watchpoint`, and `sampled_watchpoint_context`. The default
 shape is `seq=8192`, `head_dim=128`, `value_dim=128`, and the source-mined
 AITER-style labels are `q_heads=64`, `kv_heads=8`, `gqa=8`. A first RDNA4 run
-measured `4.22 ms` noop, `101 ms` sampled Loom, `105 ms` general
+measured `4.22 ms` pass-through, `101 ms` Jakub-Sampled-Loom, `105 ms` general
 `context + sampled_watchpoint`, and `59.2 ms` fast
 `sampled_watchpoint_context`.
 
@@ -1126,12 +1126,12 @@ device's 64 KiB workgroup LDS.
 
 The first D128 performance-analysis pass is complete. The companion
 `benchmarks/inspect_attention_d128_codegen.sh` probe shows the D128 kernel is
-already register-heavy before instrumentation: noop uses 218 VGPRs. Sampled
-Loom and the general `context + sampled_watchpoint` path both hit the 256 VGPR
+already register-heavy before instrumentation: pass-through uses 218 VGPRs.
+Jakub-Sampled-Loom and the general `context + sampled_watchpoint` path both hit the 256 VGPR
 ceiling and spill. The fast `sampled_watchpoint_context` row now uses 250 VGPRs
 with no spills after the scalar-sized fast-path specialization described below.
 That explains the headline ordering: the fast row is much smaller and faster
-than sampled Loom, but the D128 shape leaves little register headroom.
+than Jakub-Sampled-Loom, but the D128 shape leaves little register headroom.
 
 Masked timing on `seq=8192` says the dynamic cost center remains dense scalar
 scratch, not K/V fragment staging. After specializing scalar-sized publish-only
@@ -1156,13 +1156,13 @@ The first benchmark version should be a benchmark/reference workload before it
 is a new detector feature. `benchmarks/010_rdna4_wmma_attention_block_benchmark.hip` is now
 that first benchmark rung: it uses the same RDNA4 WMMA QK/PV shape as the
 `010` correctness test, scales to one workgroup per 32-query block, defaults to
-`seq=12288`, and compares noop execution with both the general
+`seq=12288`, and compares pass-through execution with both the general
 `context + sampled_watchpoint` path, the fast `sampled_watchpoint_context`
-path, and a sampled-Loom row ported from the matmul benchmark. Status update:
+path, and a Jakub-Sampled-Loom row ported from the matmul benchmark. Status update:
 the initial attention benchmark accidentally instrumented only K/V LDS staging;
 it now instruments K/V staging plus the LDS score, softmax-weight, row-scale,
 and row-sum scratch. With full LDS instrumentation, this benchmark is no longer
-near-noop and should be treated as the current stress signal for attention-like
+near-pass-through and should be treated as the current stress signal for attention-like
 LDS instrumentation.
 
 The first attention triage pass is complete. The benchmark has a compile-time
@@ -1183,7 +1183,7 @@ current benchmark is not there:
 * the bundled RDNA4 code object reports `group_segment_fixed_size: 4352`;
 * the local `gfx1201` device reports 64 KiB of workgroup LDS, so the benchmark
   uses only about 6.6% of available LDS;
-* the fast hip-moi row uses 146 VGPRs and no spills, while sampled Loom uses 205
+* the fast hip-moi row uses 146 VGPRs and no spills, while Jakub-Sampled-Loom uses 205
   VGPRs and no spills. The general `context + sampled_watchpoint` row spills,
   but that is already known to be the wrong hot path for publish-only
   performance work.
@@ -1228,7 +1228,7 @@ in `benchmarks/attention_source_mining.md`. The right workflow is:
 6. keep AITER-style production dimensions in the outer problem shape
    (`head_dim=128`, many heads, long sequence, causal and no-mask variants),
    even if the microkernel remains hip-moi-native;
-7. keep the familiar benchmark rows: noop, sampled Loom-style,
+7. keep the familiar benchmark rows: pass-through, Jakub-Sampled-Loom-style,
    `context + sampled_watchpoint`, and `sampled_watchpoint_context`.
 
 The important correction from source mining is that "production-pressure" does
@@ -1272,8 +1272,8 @@ therefore:
 
 Future benchmark rows should keep the row structure familiar:
 
-* noop baseline,
-* sampled Loom-style comparison when feasible,
+* pass-through baseline,
+* Jakub-Sampled-Loom-style comparison when feasible,
 * hip-moi sampled publish-only fast path,
 * optionally the general `context` path for correctness-oriented spot checks.
 

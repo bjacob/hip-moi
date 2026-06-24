@@ -35,13 +35,13 @@ not a general answer to synchronization.
 
 The vendored `benchmarks/prod_16x8_benchmark.hip` row compares:
 
-* noop matmul,
-* Jakub-style sampled Loom publish-only instrumentation,
+* pass-through matmul,
+* Jakub-Sampled-Loom publish-only instrumentation,
 * hip-moi general `context` with the `sampled_watchpoint` backend,
 * hip-moi `sampled_watchpoint_context` publish-only instrumentation.
 
 At the current `4096^3` production shape, the narrow hip-moi
-`sampled_watchpoint_context` row is below sampled Loom on this benchmark, while
+`sampled_watchpoint_context` row is below Jakub-Sampled-Loom on this benchmark, while
 the general `context + sampled_watchpoint` row remains much slower. That is
 expected: the fast row is intentionally publish-only and omits general
 diagnostic state. The remaining near-term project risk is now workload breadth,

@@ -9,14 +9,14 @@ llama.cpp/AITER shape signals recorded in
 [`attention_source_mining.md`](attention_source_mining.md).
 
 All benchmark kernels route every LDS access through the selected
-instrumentation path. The `noop` rows are the only uninstrumented rows. Masked
-attention builds, when available, are triage-only and are not the headline
-results in this document.
+instrumentation path. The `pass-through` rows are the only uninstrumented rows.
+Masked attention builds, when available, are triage-only and are not the
+headline results in this document.
 
 The comparison rows are:
 
-* `noop`: the same kernel shape with no instrumentation.
-* `sampled Loom`: Jakub-style sampled-Loom publish-only instrumentation.
+* `pass-through`: the same kernel shape with no instrumentation.
+* `Jakub-Sampled-Loom`: Jakub's sampled publish-only comparison path.
 * `context + sampled_watchpoint`: the general diagnostic-capable
   `hip_moi::context` using the sampled-watchpoint backend.
 * `sampled_watchpoint_context`: the narrow publish-only fast path.
@@ -72,22 +72,22 @@ segment notes are included when that fast row is not spill-free.
 
 ## Shapes and Resource Pressure
 
-This table describes the uninstrumented `noop` kernel shape. LDS percentages
-assume the local RDNA4 test device's 64 KiB workgroup LDS limit. VGPR and spill
-counts come from the bundled RDNA4 code-object metadata for the `noop` row.
+This table describes the uninstrumented `pass-through` kernel shape. LDS percentages
+assume the local RDNA4 test device's 64 KiB workgroup LDS limit. VGPR counts
+come from the bundled RDNA4 code-object metadata for the `pass-through` row.
 
-| Key | Shape | LDS pressure | Noop VGPR pressure | Noop spill/private state |
-| --- | --- | ---: | ---: | --- |
-| `matmul-wave-w2` | 2 waves, 2x4 WMMA tiles, M=32 N=64 K=16 | 3072 B, 4.7% | 42 | no spills, 0 B private |
-| `matmul-wave-w4` | 4 waves, 4x16 WMMA tiles, M=64 N=256 K=16 | 10240 B, 15.6% | 114 | no spills, 0 B private |
-| `matmul-wave-w8` | 8 waves, 16x8 WMMA tiles, M=256 N=128 K=16 | 12288 B, 18.8% | 90 | no spills, 0 B private |
-| `matmul-prod-16x8` | 8 waves, 16x8 WMMA tiles, KGroup=2, M=N=K=4096 | 24576 B, 37.5% | 225 | no spills, 0 B private |
-| `attention-d16-dense` | seq=12288, head_dim=16, value_dim=16, dense score and weight LDS | 4352 B, 6.6% | 82 | no spills, 0 B private |
-| `attention-d16-no-score` | seq=12288, head_dim=16, value_dim=16, K/V LDS only | 1024 B, 1.6% | 50 | no spills, 0 B private |
-| `attention-d128-dense` | seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, dense score and weight LDS | 4352 B, 6.6% | 218 | no spills, 0 B private |
-| `attention-d128-pressure-full-kv16` | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B, 30.1% | 232 | no spills, 0 B private |
-| `attention-d128-pressure-wide-k32` | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B, 59.8% | 227 | no spills, 0 B private |
-| `attention-d128-no-score` | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B, 1.6% | 178 | no spills, 0 B private |
+| Key | Shape | LDS pressure | Pass-through VGPR pressure |
+| --- | --- | ---: | ---: |
+| `matmul-wave-w2` | 2 waves, 2x4 WMMA tiles, M=32 N=64 K=16 | 3072 B, 4.7% | 42 |
+| `matmul-wave-w4` | 4 waves, 4x16 WMMA tiles, M=64 N=256 K=16 | 10240 B, 15.6% | 114 |
+| `matmul-wave-w8` | 8 waves, 16x8 WMMA tiles, M=256 N=128 K=16 | 12288 B, 18.8% | 90 |
+| `matmul-prod-16x8` | 8 waves, 16x8 WMMA tiles, KGroup=2, M=N=K=4096 | 24576 B, 37.5% | 225 |
+| `attention-d16-dense` | seq=12288, head_dim=16, value_dim=16, dense score and weight LDS | 4352 B, 6.6% | 82 |
+| `attention-d16-no-score` | seq=12288, head_dim=16, value_dim=16, K/V LDS only | 1024 B, 1.6% | 50 |
+| `attention-d128-dense` | seq=8192, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, dense score and weight LDS | 4352 B, 6.6% | 218 |
+| `attention-d128-pressure-full-kv16` | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B, 30.1% | 232 |
+| `attention-d128-pressure-wide-k32` | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B, 59.8% | 227 |
+| `attention-d128-no-score` | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B, 1.6% | 178 |
 
 ## Benchmark Modes
 
@@ -96,8 +96,8 @@ table expands those benchmark modes.
 
 | Results column | Benchmark mode | What it measures |
 | --- | --- | --- |
-| `noop` | Uninstrumented kernel | Baseline kernel latency with the same workload shape and no hip-moi or Loom instrumentation. |
-| `sampled Loom` | Jakub-style sampled Loom | Publish-only sampled instrumentation modeled after Jakub's Loom-flavored HIP prototype. |
+| `pass-through` | Uninstrumented kernel | Baseline kernel latency with the same workload shape and no hip-moi or Jakub-Sampled-Loom instrumentation. |
+| `Jakub-Sampled-Loom` | Jakub-Sampled-Loom | Publish-only sampled instrumentation modeled after Jakub's Loom-flavored HIP prototype. |
 | `exact shadow` | hip-moi exact shadow | Precise shadow-memory checking through explicit LDS-offset APIs. Present only in the tiny matmul wave-scaling benchmark. |
 | `context + sampled_watchpoint` | General hip-moi context with sampled-watchpoint backend | Diagnostic-capable hip-moi API path using sampled watchpoints. This keeps more state live than the publish-only fast path. |
 | `sampled_watchpoint_context` | hip-moi sampled publish-only fast path | Narrow fast-view context optimized for Loom-parity publish-only sampling. This is the main performance target. |
@@ -110,7 +110,7 @@ printed in milliseconds. Most rows use `MIN_MS=100` and `WARMUP_MS=100`.
 `attention-d16-dense` uses `MIN_MS=500` and `WARMUP_MS=500` because full dense
 score/weight instrumentation makes it much slower than the matmul rows.
 
-| Key | noop | sampled Loom | exact shadow | `context + sampled_watchpoint` | `sampled_watchpoint_context` |
+| Key | pass-through | Jakub-Sampled-Loom | exact shadow | `context + sampled_watchpoint` | `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `matmul-wave-w2` | 2.80 µs | 4.69 µs | 8.91 µs | 4.85 µs | 3.49 µs |
 | `matmul-wave-w4` | 3.15 µs | 5.91 µs | 14.0 µs | 7.45 µs | 4.31 µs |

@@ -269,7 +269,7 @@ The conclusion is:
 
 Only after that probe should hip-moi add the familiar rows:
 
-* noop;
-* sampled Loom-style;
+* pass-through;
+* Jakub-Sampled-Loom-style;
 * `hip_moi::context + sampled_watchpoint`, if still informative;
 * `hip_moi::sampled_watchpoint_context`.

@@ -11,7 +11,7 @@
 // preprocessor definitions for the shape constants below.
 //
 // The extraction deliberately preserves the same kernel shape, packed WMMA data
-// layout, manual LDS helper sites, sampled-Loom policy, and hip-moi
+// layout, manual LDS helper sites, Jakub-Sampled-Loom policy, and hip-moi
 // exact-shadow/sampled-watchpoint policies used by the large harness. It drops
 // correctness tests, FP8, RFC, same-wave policies, racy variants, and the
 // general variant table. Future focused benchmarks can be produced by repeating
@@ -221,20 +221,20 @@ __device__ __forceinline__ f32x8 zero_f32x8() {
 namespace tsan {
 
 enum class PolicyKind {
-  Noop,
-  SampledLoom,
+  PassThrough,
+  JakubSampledLoom,
   HipMoiExactShadow,
   HipMoiSampledWatchpoint,
 };
 
-struct NoopPolicy {
+struct PassThroughPolicy {
   static constexpr bool enabled = false;
-  static constexpr PolicyKind kind = PolicyKind::Noop;
+  static constexpr PolicyKind kind = PolicyKind::PassThrough;
 };
 
-struct SampledLoomPolicy {
+struct JakubSampledLoomPolicy {
   static constexpr bool enabled = true;
-  static constexpr PolicyKind kind = PolicyKind::SampledLoom;
+  static constexpr PolicyKind kind = PolicyKind::JakubSampledLoom;
 };
 
 struct HipMoiExactShadowPolicy {
@@ -525,7 +525,7 @@ observe_sampled_range(Runtime runtime, uint32_t start, uint32_t count,
   if (!sampled_should_publish(runtime, selection_seed, lane)) {
     return;
   }
-  uint64_t *base = workgroup_shadow_base<SampledLoomPolicy>(runtime);
+  uint64_t *base = workgroup_shadow_base<JakubSampledLoomPolicy>(runtime);
   uint64_t epoch = base[0] & ((1ull << kTsanSampledEpochBits) - 1);
   uint64_t current =
       pack_sampled_watchpoint(runtime, start, count, access_kind, epoch);
@@ -543,7 +543,7 @@ observe_sampled_range(Runtime runtime, uint32_t start, uint32_t count,
 }
 
 template <uint32_t AccessSize>
-__device__ __forceinline__ void observe_sampled_loom_access(
+__device__ __forceinline__ void observe_jakub_sampled_loom_access(
     Runtime runtime, uint32_t byte_offset, uint32_t access_kind,
     uint32_t site_id, uint32_t wave, uint32_t lane, uint32_t selection_seed) {
   uint32_t start = lds_cell_start(byte_offset);
@@ -564,12 +564,12 @@ __device__ __forceinline__ void observe(Runtime runtime, uint32_t byte_offset,
                                         uint32_t site_id) {
   if constexpr (!Policy::enabled) {
     return;
-  } else if constexpr (Policy::kind == PolicyKind::SampledLoom) {
+  } else if constexpr (Policy::kind == PolicyKind::JakubSampledLoom) {
     uint32_t flat = flat_workitem_id();
     uint32_t wave = flat / kWaveSize;
     uint32_t lane = flat & (kWaveSize - 1);
     uint32_t seed = wave_selection_seed(runtime, wave, site_id);
-    observe_sampled_loom_access<AccessSize>(runtime, byte_offset, access_kind,
+    observe_jakub_sampled_loom_access<AccessSize>(runtime, byte_offset, access_kind,
                                             site_id, wave, lane, seed);
   }
 }
@@ -645,7 +645,7 @@ syncthreads(Runtime runtime, HipMoiContextArg<Policy> &hip_moi_context_arg) {
   } else if constexpr (IsHipMoiPolicy<Policy>::value) {
     (void)runtime;
     hip_moi_context_arg.ctx.syncthreads();
-  } else if constexpr (Policy::kind == PolicyKind::SampledLoom) {
+  } else if constexpr (Policy::kind == PolicyKind::JakubSampledLoom) {
     (void)hip_moi_context_arg;
     __syncthreads();
     if (flat_workitem_id() == 0) {
@@ -802,8 +802,8 @@ template <typename T> static T *gpu_alloc(std::size_t count) {
 }
 
 enum class Mode {
-  Noop,
-  SampledLoom,
+  PassThrough,
+  JakubSampledLoom,
   HipMoiExactShadow,
   HipMoiSampledWatchpoint,
 };
@@ -882,7 +882,7 @@ static Allocation make_allocation(Mode mode) {
   allocation.probe_count = sampled_knobs.probe_count;
   allocation.sampled_reports = sampled_knobs.reports;
 
-  if (mode == Mode::SampledLoom) {
+  if (mode == Mode::JakubSampledLoom) {
     allocation.workgroup_stride_entries =
         1 + static_cast<uint32_t>(allocation.sampled_watchpoints);
     HIP_CHECK(
@@ -1062,7 +1062,7 @@ static double run_one(const char *name, Mode mode, half_t *a, half_t *b,
   HIP_CHECK(hipEventDestroy(start));
   HIP_CHECK(hipEventDestroy(stop));
   uint64_t reports = 0;
-  if (mode == Mode::SampledLoom && allocation.report_count) {
+  if (mode == Mode::JakubSampledLoom && allocation.report_count) {
     HIP_CHECK(hipMemcpy(&reports, allocation.report_count, sizeof(reports),
                         hipMemcpyDeviceToHost));
     if (reports != 0) {
@@ -1151,11 +1151,11 @@ int main() {
                        std::to_string(kMTiles) + "x" + std::to_string(kNTiles);
   std::string sampled_mode_suffix =
       sampled_knobs.reports ? "_reporting" : "_publish_only";
-  run_one<tsan::NoopPolicy>((prefix + "_noop").c_str(), Mode::Noop, a, b, c,
+  run_one<tsan::PassThroughPolicy>((prefix + "_pass_through").c_str(), Mode::PassThrough, a, b, c,
                             min_ms, warmup_ms);
-  run_one<tsan::SampledLoomPolicy>(
-      (prefix + "_sampled_loom" + sampled_mode_suffix).c_str(),
-      Mode::SampledLoom, a, b, c, min_ms, warmup_ms);
+  run_one<tsan::JakubSampledLoomPolicy>(
+      (prefix + "_jakub_sampled_loom" + sampled_mode_suffix).c_str(),
+      Mode::JakubSampledLoom, a, b, c, min_ms, warmup_ms);
   run_one<tsan::HipMoiExactShadowPolicy>(
       (prefix + "_hip_moi_exact_shadow").c_str(), Mode::HipMoiExactShadow, a, b,
       c, min_ms, warmup_ms);
