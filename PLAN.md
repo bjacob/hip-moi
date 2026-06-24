@@ -991,6 +991,19 @@ RDNA4 run on `seq=8192` measured:
   general `context + sampled_watchpoint`, and `75.5 ms` fast
   `sampled_watchpoint_context`.
 
+The latest codegen cleanup pass tried two smaller sampled-fast-path ideas and
+did not keep either. First, a static subgroup-size policy hint did not
+materially change the D128 generated code or pressure benchmark timing. Second,
+a naturally-aligned one-granule scalar access path only nudged the all-sites
+D128 codegen by about one VGPR and left `full_kv16` / `wide_k32` fast timings
+around the existing `48 ms` / `75 ms` envelope; the production matmul guardrail
+also stayed around `3.4 ms`. The useful conclusion is that the remaining
+attention overhead is not explained by subgroup division/modulo or by the final
+scalar cell-count arithmetic. The next real optimization attempt should work at
+the static-site level: avoid recomputing the sampled selection setup for dense
+score/weight/row scratch sites, while preserving the no-private-memory,
+spill-free property of `sampled_watchpoint_context`.
+
 The immediate reading is that `full_kv16` is the better production-inspired
 next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
 The next analysis pass should inspect generated-code resource metadata for

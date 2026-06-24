@@ -479,3 +479,14 @@ dispatch clone. In both candidates, the fast hip-moi row remains substantially
 faster than sampled Loom; the general `context + sampled_watchpoint` row also
 beats sampled Loom here, but it remains the larger correctness-oriented path and
 is not the publish-only hot path.
+
+A codegen/performance cleanup pass on 2026-06-24 tested two tempting
+`sampled_watchpoint_context` micro-optimizations and rejected both. A static
+subgroup-size policy hint removed no meaningful generated-code structure on the
+D128 probe. A narrower naturally-aligned one-granule scalar path changed the
+all-sites D128 codegen by only about one VGPR and left the pressure benchmark
+within noise: roughly `48 ms` / `75 ms` for the two fast rows. The production
+matmul guardrail also stayed at about `3.4 ms`. These were not kept in the API
+or implementation. The next credible optimization target is larger-grain:
+reduce repeated per-site sampled-selection setup in dense score/weight/row
+scratch without introducing private memory or spills.
