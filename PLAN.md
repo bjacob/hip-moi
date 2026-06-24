@@ -1001,12 +1001,12 @@ Source mining gives two concrete shape signals.
 * llama.cpp's CUDA/HIP flash-attention implementation has RDNA-relevant WMMA
   paths for head dimensions up to 128 and broader MMA/template machinery for
   larger head/value dimensions such as 192/128, 256/256, 320/256, 512/512, and
-  576/512. Its dynamic shared-memory formula can reach roughly 42 KiB for a
-  256/256, 64-column candidate, while 512/512 and 576/512 variants exceed the
-  64 KiB workgroup LDS limit on this local `gfx1201` device. Dispatch details
-  matter: llama.cpp gates MFMA to CDNA and its exact RDNA4 path depends on the
-  WMMA/rocWMMA configuration, so these are candidate shapes to compile/probe,
-  not a copy-paste answer.
+  576/512. Its actual RDNA4 dispatch is narrower than the template list: for
+  AITER-like D128 long-sequence GQA shapes, llama.cpp chooses a WMMA FATTN path
+  when the rocWMMA flash-attention build path is enabled, or an RDNA MMA-F16
+  path with about 18-19 KiB of LDS otherwise. Dispatch details matter:
+  llama.cpp gates MFMA to CDNA, and some larger RDNA config-table entries are
+  pressure signals rather than dispatch-selected `gfx1201` choices.
 * AITER's MHA tests and benchmark docs provide production inference shapes:
   bf16/fp16, head dimension 128, query heads 32 or 64, KV heads 4 or 8, sequence
   lengths from 1024 through 16384, batch sizes 1/4/8, and causal/no-mask
@@ -1016,12 +1016,14 @@ Source mining gives two concrete shape signals.
 
 The next attention benchmark should be a source-mined production-pressure
 variant, not another optimization pass over the current scalar-scratch kernel.
+The detailed extraction lives in `benchmarks/attention_source_mining.md`.
 The right workflow is:
 
 1. compile/probe a few llama-inspired RDNA4 candidates and record LDS/VGPR/spill
    metadata before adding instrumentation;
-2. choose a candidate that is close to the 64 KiB LDS limit without exceeding it
-   and already has high VGPR pressure in the noop row;
+2. choose a production-representative D128/V128 candidate first, then decide
+   from measured LDS/VGPR pressure whether a separate production-derived
+   pressure variant is needed;
 3. use AITER-style production dimensions for the outer problem shape
    (`head_dim=128`, many heads, long sequence, causal and no-mask variants), even
    if the microkernel remains hip-moi-native;

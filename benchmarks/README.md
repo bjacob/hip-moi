@@ -264,11 +264,11 @@ Two outside codebases provide the strongest current guidance.
 * llama.cpp's `ggml-cuda` flash-attention sources expose RDNA-relevant WMMA
   paths around head dimensions 64, 80, 96, 112, and 128, plus broader MMA
   template machinery for shapes such as 192/128, 256/256, 320/256, 512/512, and
-  576/512. The shared-memory formulas suggest a 256/256, 64-column candidate can
-  reach roughly 42 KiB of LDS, while 512/512 and 576/512 variants exceed the 64
-  KiB workgroup LDS limit on the local `gfx1201` device. Those larger shapes are
-  therefore useful source-mining signals, not automatically usable RDNA4
-  benchmark rows.
+  576/512. Its actual RDNA4 dispatch is narrower than the template list: for
+  AITER-like D128 long-sequence GQA shapes it chooses a WMMA FATTN path when the
+  rocWMMA flash-attention build path is enabled, or an RDNA MMA-F16 path with
+  about 18-19 KiB of LDS otherwise. The larger entries are useful pressure
+  signals, not automatically dispatch-selected RDNA4 benchmark rows.
 * AITER's MHA benchmark/test coverage points to production inference shapes:
   bf16/fp16, head dimension 128, query heads 32 or 64, KV heads 4 or 8, sequence
   lengths from 1024 through 16384, batch sizes 1/4/8, and causal/no-mask
@@ -279,8 +279,13 @@ Two outside codebases provide the strongest current guidance.
 The next attention benchmark should be built by compile-probing candidate
 microkernels for LDS usage, VGPRs, and spills before instrumentation. A good next
 target is an RDNA4-compatible, hip-moi-native attention row with production-style
-outer parameters (`head_dim=128`, many heads, long sequence) and an inner tile
-that pushes LDS toward the 64 KiB limit without exceeding it.
+outer parameters (`head_dim=128`, many heads, long sequence). If that
+representative row does not approach the LDS/VGPR pressure Jakub wants, add a
+clearly labeled production-derived pressure variant instead of pretending the
+literal D128 production row already saturates the machine.
+
+See [attention_source_mining.md](attention_source_mining.md) for the detailed
+shape and dispatch extraction.
 
 The attention optimization foray leaves a narrow, useful conclusion. The current
 benchmark is production-like in that it uses RDNA4 WMMA for QK and PV, multiple
