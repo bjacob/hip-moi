@@ -125,6 +125,41 @@ read as "these are all equally mature RDNA4 choices." In particular:
   pressure signals, but some of those entries are not dispatch-selected on
   `gfx1201`.
 
+## llama.cpp: Score And Weight Scratch Signal
+
+The most important follow-up source-mining result is about where the QK scores
+and softmax weights live. The current hip-moi attention benchmarks materialize a
+dense score tile and a dense softmax-weight tile in LDS because that makes the
+QK-to-softmax-to-PV handoff simple, explicit, and easy to instrument. That is a
+good stress test for scalar LDS instrumentation, but it is not obviously what a
+mature attention kernel does.
+
+The upstream llama.cpp RDNA MMA-F16 path points in the other direction. In
+`ggml/src/ggml-cuda/fattn-mma-f16.cuh`, the QK result is kept in accumulator
+fragment arrays such as `KQ_C`; row state is tracked in register arrays such as
+`KQ_max`, `KQ_max_scale`, and `KQ_rowsum`; and the QK accumulator fragments are
+converted directly into the B operand fragments for the following VKQ/PV MMA
+step. The inspected path did not expose dense LDS arrays analogous to hip-moi's
+current `scores[query][key]` and `weights[query][key]` scratch.
+
+That makes the next hip-moi correctness rung clearer. Before writing another
+large attention benchmark, isolate the RDNA4 WMMA register-handoff problem:
+
+* QK accumulation currently gives each lane values shaped like
+  `qk_acc[elem] -> (query_row=rdna4_wmma_acc_m(lane, elem), key_col=lane & 15)`.
+* PV wants a B operand shaped like
+  `p_fragment[elem] -> (query_row=lane & 15, key=rdna4_wmma_f16_k(lane, elem))`.
+* Bridging those layouts without LDS score/weight scratch requires a
+  subgroup-level register transpose, likely through lane permutation/shuffle
+  operations.
+
+The next test should therefore be small and surgical: a RDNA4-only WMMA
+register-transpose correctness test. Once that is correct, grow it into a
+no-score/weight-LDS attention correctness test, and only then extract the next
+benchmark. The existing D128 dense-score benchmarks remain valuable as scalar
+LDS instrumentation stress cases, but they should no longer be treated as the
+most production-faithful attention endpoint.
+
 ## Implications For hip-moi
 
 The next benchmark should separate two questions:

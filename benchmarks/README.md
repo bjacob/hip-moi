@@ -327,9 +327,16 @@ benchmark is production-like in that it uses RDNA4 WMMA for QK and PV, multiple
 subgroups, K/V LDS staging, and online softmax state. It is also deliberately a
 scalar-scratch stress benchmark: it materializes the score tile and the softmax
 weights in LDS so that the QK-to-softmax-to-PV handoff stays simple and
-auditable. A more production attention kernel might use wave-level softmax
-machinery, different fragment layouts, or register/shuffle handoff paths to
-avoid some or all of that dense score/weight LDS scratch.
+auditable.
+
+The latest llama.cpp source read makes that distinction sharper. Its RDNA
+MMA-F16 flash-attention path keeps QK results in accumulator fragments, tracks
+row max/sum state in registers, and reshapes those QK fragments directly into
+the VKQ/PV MMA operand path. That is evidence that a mature implementation can
+avoid dense LDS `scores` and `weights` scratch entirely. hip-moi should keep the
+current dense-score rows as scalar-LDS stress tests, but the next
+production-faithful attention benchmark should be built only after an isolated
+RDNA4 WMMA register-transpose correctness test proves that handoff.
 
 That distinction matters for prioritization. If a future attention benchmark
 mostly instruments K/V staging plus row state, the `0x9` proxy suggests the
@@ -501,3 +508,11 @@ semantic intent is attractive. The next performance direction should be either
 a different compiler-friendly representation of static-site decisions, or a
 kernel/workload study that determines whether production attention avoids dense
 LDS score/weight materialization altogether.
+
+The source read now favors the second path. Treat `full_kv16` and `wide_k32` as
+dense-score pressure rows, not as the final production-faithful attention model.
+The next concrete coding step is a small RDNA4-only WMMA register-transpose test:
+move from the QK accumulator layout to the PV B-fragment layout without storing a
+dense score/weight tile in LDS. A no-score/weight-LDS attention benchmark should
+grow from that test, not from another micro-optimization of the current
+score/weight scratch loops.

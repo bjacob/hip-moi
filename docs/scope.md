@@ -56,6 +56,14 @@ variants. The microkernel should be compile-probed for LDS usage, VGPRs, and
 spills before instrumentation, because closeness to the LDS/VGPR limits is now
 the point of the next benchmark.
 
+A later source read sharpened the algorithmic target. Mature RDNA
+flash-attention code can keep QK scores in accumulator fragments and reshape
+those fragments into the PV operand path, rather than materializing dense
+score/weight scratch in LDS. The dense-score hip-moi attention rows remain useful
+scalar-LDS stress tests, but the next production-faithful attention rung should
+start with an isolated RDNA4 WMMA register-transpose correctness test and then
+grow into a no-score/weight-LDS attention benchmark.
+
 ## Next Scopes
 
 The next non-negotiable scope increase is workload breadth. The first likely

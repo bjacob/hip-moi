@@ -1015,6 +1015,23 @@ ordinary live local state; otherwise the better next question is whether a more
 production-faithful attention kernel avoids dense LDS score/weight scratch in
 the first place.
 
+The follow-up source read answered that question strongly enough to redirect the
+next coding step. llama.cpp's RDNA MMA-F16 flash-attention path keeps QK results
+in accumulator fragments, tracks row max/sum state in registers, and converts
+those QK fragments directly into the B operand fragments for the following
+VKQ/PV MMA step. It does not look like the dense LDS `scores` and `weights`
+scratch used by hip-moi's current attention stress benchmarks. That means the
+D128 dense-score rows are still useful scalar-LDS stressors, but the next
+production-faithful attention rung should first solve the RDNA4 WMMA
+register-handoff problem. Concretely, add a small RDNA4-only test that transposes
+the QK accumulator layout
+`qk_acc[elem] -> (query_row=rdna4_wmma_acc_m(lane, elem), key_col=lane & 15)`
+into the PV B-fragment layout
+`p_fragment[elem] -> (query_row=lane & 15, key=rdna4_wmma_f16_k(lane, elem))`
+without materializing dense score/weight LDS. Only after that isolated test
+passes should we build a no-score/weight-LDS attention correctness test and then
+extract a new benchmark.
+
 The immediate reading is that `full_kv16` is the better production-inspired
 next benchmark candidate, while `wide_k32` is a useful high-LDS pressure row.
 The next analysis pass should inspect generated-code resource metadata for
@@ -1169,6 +1186,23 @@ the current fast path may already be close enough. If it keeps dense scalar
 score/weight scratch, the next optimization needs a deeper sampling model for
 repeated scalar sites, not another source-level rewrite of the rejected
 prepared-site idea.
+
+The latest source-mining pass now says to assume the mature path avoids that
+dense score/weight materialization until proven otherwise. In llama.cpp's RDNA
+MMA-F16 flash-attention code, QK accumulator fragments are not written out as a
+dense LDS score tile; they are reshaped into the VKQ/PV B operand path, while
+row max/sum state is carried separately. The hip-moi next-step ladder is
+therefore:
+
+1. add an isolated RDNA4 WMMA register-transpose correctness test for the
+   QK-accumulator to PV-B-fragment handoff;
+2. grow that into a no-score/weight-LDS attention correctness test that still
+   instruments all remaining LDS traffic, especially K/V staging and any row
+   state that is truly stored in LDS;
+3. extract a new attention benchmark from that test and compare it with the
+   dense-score pressure rows;
+4. only return to dense scalar score/weight instrumentation optimization if a
+   target production kernel actually materializes those values in LDS.
 
 Future benchmark rows should keep the row structure familiar:
 
