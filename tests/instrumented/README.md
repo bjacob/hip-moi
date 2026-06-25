@@ -62,6 +62,23 @@ Current files:
 * `018_rdna4_pingpong_wide_cooperative_lds_test.hip`: RDNA4-only four-subgroup
   ping-pong-shaped WMMA test where each pair has an even subgroup stage shared
   B fragments for both subgroups in the pair.
+* `019_atomic_api_test.hip`: pass-through atomic API skeleton for global
+  release/acquire flags around LDS payload code.
+* `020_atomic_metadata_test.hip`: bounded atomic-object metadata capacity,
+  launch-generation reuse, and deterministic metadata-full diagnostics.
+* `021_atomic_happens_before_test.hip`: release/acquire atomic synchronization
+  suppresses an ordered LDS handoff while relaxed publication still diagnoses.
+* `023_atomic_rmw_happens_before_test.hip`: release/acquire `fetch_add`
+  arrival counters and two-RMW `acq_rel` chains order LDS payload handoffs.
+* `024_atomic_or_bitmask_happens_before_test.hip`: old-value-dependent
+  `atomicOr` bitmask control flow orders LDS payload when the returned mask
+  observes the releasing operation.
+* `025_atomic_fence_happens_before_test.hip`: release-fence-before-relaxed
+  publication paired with relaxed-observation-before-acquire-fence.
+* `026_streamk_flag_protocol_test.hip`: RocJITsu hip-stream-k-shaped
+  owner/helper flag fixup distilled to LDS partial payloads.
+* `027_streamk_two_tile_flag_protocol_test.hip`: two independent
+  Stream-K-style owner/helper tile fixups, one release/acquire flag per tile.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

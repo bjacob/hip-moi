@@ -105,6 +105,11 @@ integration benchmark. It keeps the RocJITsu hip-stream-k owner/helper flag
 protocol but distills the payload to LDS partials so hip-moi can diagnose the
 handoff.
 
+`027_streamk_two_tile_flag_protocol_benchmark.hip` is the second Stream-K
+integration row. It keeps the flag protocol distilled to LDS partials, but
+splits the work into two independent tile fixups, each with its own owner
+subgroup and helper subgroup.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -132,6 +137,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a; `context` row is 24 VGPRs, no spills |
 | `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a; `context` row is 23 VGPRs, no spills |
 | `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a; `context` row is 25 VGPRs, no spills |
+| `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a; `context` row is 59 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -162,6 +168,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-or-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `atomicOr` bitmask orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-fence-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed atomic flag operations around instrumented LDS payload | 4 B, <0.1% | 3 |
 | `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
+| `streamk-two-tile-flag-fixup` | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B, <0.1% | 3 |
 
 ## Benchmark Modes
 
@@ -215,6 +222,7 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-or-bitmask-handoff` | 3.24 µs | 8.52 µs |
 | `atomic-fence-handoff` | 3.12 µs | 10.2 µs |
 | `streamk-flag-fixup` | 3.35 µs | 11.2 µs |
+| `streamk-two-tile-flag-fixup` | 3.20 µs | 11.1 µs |
 
 ## Reading The Suite
 
@@ -308,3 +316,11 @@ The pass-through kernel reports 12 B LDS, 4 VGPRs, 14 SGPRs, and no spills. The
 segment, and no spills. The high SGPR count is the first atomics row where the
 control-flow shape, not just the number of metadata operations, is visibly
 pushing scalar pressure.
+
+The Stream-K two-tile flag fixup row is the next ownership-shape rung. It uses
+four subgroups: tile 0 has one owner/helper pair, and tile 1 has another
+owner/helper pair. The pass-through kernel reports 16 B LDS, 3 VGPRs, 14 SGPRs,
+and no spills. The `context` kernel reports 16 B LDS, 59 VGPRs, 85 SGPRs, no
+scratch/private segment, and no spills. This row shows that widening the
+Stream-K control-flow shape can substantially increase live register pressure
+even when latency remains close to the previous integration row.

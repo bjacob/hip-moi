@@ -264,8 +264,13 @@ READMEs now describe the current detector scope.
    specialized path. Stage 8 has landed the first standard fence-plus-atomic
    shape: release fence before relaxed publication, relaxed observation before
    acquire fence. Stage 9 has started with a RocJITsu hip-stream-k-shaped
-   owner/helper flag fixup test and benchmark; the next integration rung should
-   preserve more of the original two-tile or RDNA4 WMMA Stream-K shape. The
+   owner/helper flag fixup test and benchmark. The two-tile Stream-K-shaped
+   owner/helper fixup test and benchmark have also landed; they are quiet when
+   each tile uses release/acquire publication and diagnose the deliberately
+   relaxed second-tile handoff. That row remains spill-free but raises
+   `context` pressure to 59 VGPRs and 85 SGPRs, so the next integration rung
+   should preserve arithmetic and control flow from a small RDNA4 WMMA Stream-K
+   extraction while checking register pressure closely. The
    diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the
