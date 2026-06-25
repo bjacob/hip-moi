@@ -133,6 +133,10 @@ Current stable conclusions:
 * Dense attention benchmarks are scalar-LDS stress tests and remain expensive.
 * No-score/register-handoff attention benchmarks are closer to production
   attention structure and much closer to the pass-through baseline.
+* The private-LDS ping-pong benchmark is now a scheduling-sensitive RDNA4 row:
+  it uses the same optimized `setprio`/`sched_barrier`/WMMA kernel shape that
+  the ATT probe validates, then times pass-through versus
+  `sampled_watchpoint_context`.
 * LDS pressure alone is not sufficient to characterize overhead; VGPR pressure,
   spills, private segment size, and code size are first-class metrics.
 
@@ -150,14 +154,15 @@ The instrumented suite now focuses on:
 * explicit LDS-offset APIs;
 * exact-shadow diagnostics;
 * sampled-watchpoint diagnostics and publish-only fast execution;
-* RDNA4 matmul and attention-shaped correctness tests.
+* RDNA4 matmul and attention-shaped correctness tests;
 * RDNA4 ping-pong-shaped correctness tests with private LDS staging,
   cooperative LDS staging, `setprio`, `sched_barrier`, WMMA, and exact-shadow
   diagnostics for the intentionally unsynchronized cooperative shape.
-* An optimized RDNA4 ping-pong ATT probe that validates dynamic
-  `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace output,
-  including complementary LDS-priority signatures across representative SIMD
-  selections.
+* an optimized RDNA4 ping-pong ATT probe and timing benchmark that validates
+  dynamic `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace
+  output, including complementary LDS-priority signatures across representative
+  SIMD selections, and then reports pass-through versus sampled hip-moi
+  latency.
 
 The reference suite remains useful as concrete uninstrumented HIP code for
 safe-kernel validation and benchmark-shape provenance. Racy reference kernels
@@ -215,17 +220,17 @@ READMEs now describe the current detector scope.
    should make clear that this is Jakub's HIP prototype shape, not upstream
    Loom itself.
 
-4. Keep ping-pong ATT validation as a guardrail if ping-pong timing work
-   resumes.
+4. Keep ping-pong ATT validation as the guardrail for ping-pong benchmark work.
 
    The optimized probe now validates pass-through and sampled hip-moi dynamic
    instruction streams through ROCprof UI JSON. SIMD 0/1 traces validate the
    `1010` LDS-priority role and SIMD 2/3 traces validate the complementary
    `0101` role. On gfx10+ the local ATT workflow selects one SIMD ID per run,
    so this confirms complementary role schedules but not same-cycle activity of
-   both roles in one trace. Any future ping-pong timing benchmark should first
-   pass the same generated-code and ATT checks before latency numbers are
-   treated as meaningful.
+   both roles in one trace. The current private-LDS timing row uses this
+   validated kernel shape; future ping-pong variants should pass the same
+   generated-code and ATT checks before latency numbers are treated as
+   meaningful.
 
 5. Plan the next semantic expansion: atomics.
 

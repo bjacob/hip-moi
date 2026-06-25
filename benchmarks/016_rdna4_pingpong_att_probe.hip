@@ -3,14 +3,16 @@
 //
 // benchmarks/016_rdna4_pingpong_att_probe.hip
 //
-// Optimized RDNA4 ping-pong-shaped kernels for ATT scheduling validation.
-// This is not a latency benchmark. It launches enough workgroups for ROCprof
-// ATT to capture real waves on the selected target CU, then writes a checksum
-// so the compiler must keep the WMMA and LDS traffic live.
+// Optimized RDNA4 ping-pong-shaped kernels for ATT scheduling validation and
+// timing. The one-shot modes launch enough workgroups for ROCprof ATT to
+// capture real waves on the selected target CU. The benchmark mode uses the
+// same kernels with HIP event timing.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,6 +55,7 @@ namespace
     {
         PrivatePassThrough,
         PrivateSampled,
+        Benchmark,
     };
 
     struct DeviceBuffers
@@ -295,6 +298,41 @@ namespace
         return value ? std::atoi(value) : default_value;
     }
 
+    double get_double_env(const char* name, double default_value)
+    {
+        const char* value = std::getenv(name);
+        return value ? std::atof(value) : default_value;
+    }
+
+    struct DisplayLatency
+    {
+        double      value;
+        const char* unit;
+    };
+
+    DisplayLatency display_latency(double ms)
+    {
+        if(ms < 1.0)
+        {
+            return DisplayLatency{/*value=*/ms * 1000.0, /*unit=*/"µs"};
+        }
+        return DisplayLatency{/*value=*/ms, /*unit=*/"ms"};
+    }
+
+    const char* mode_name(Mode mode)
+    {
+        switch(mode)
+        {
+        case Mode::PrivatePassThrough:
+            return "private-pass-through";
+        case Mode::PrivateSampled:
+            return "private-sampled";
+        case Mode::Benchmark:
+            return "benchmark";
+        }
+        return "unknown";
+    }
+
     Mode parse_mode(const char* mode)
     {
         if(std::strcmp(mode, "private-pass-through") == 0)
@@ -305,10 +343,14 @@ namespace
         {
             return Mode::PrivateSampled;
         }
+        if(std::strcmp(mode, "benchmark") == 0)
+        {
+            return Mode::Benchmark;
+        }
 
         std::fprintf(stderr,
                      "usage: pingpong_att_probe "
-                     "[private-pass-through|private-sampled]\n");
+                     "[private-pass-through|private-sampled|benchmark]\n");
         std::exit(EXIT_FAILURE);
     }
 
@@ -417,15 +459,197 @@ namespace
         }
         return checksum;
     }
+
+    void launch_kernel(Mode mode, const DeviceBuffers& buffers, int blocks, hipStream_t stream)
+    {
+        dim3 grid(static_cast<unsigned>(blocks));
+        dim3 block(kThreadCount);
+        if(mode == Mode::PrivatePassThrough)
+        {
+            hipLaunchKernelGGL(private_pingpong_pass_through_kernel,
+                               grid,
+                               block,
+                               0,
+                               stream,
+                               buffers.a_fragments,
+                               buffers.b_fragments,
+                               buffers.output);
+        }
+        else if(mode == Mode::PrivateSampled)
+        {
+            hipLaunchKernelGGL(private_pingpong_sampled_kernel,
+                               grid,
+                               block,
+                               0,
+                               stream,
+                               buffers.a_fragments,
+                               buffers.b_fragments,
+                               buffers.output);
+        }
+        else
+        {
+            std::fprintf(stderr, "internal error: cannot launch mode=%s\n", mode_name(mode));
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    double run_one(const char*          name,
+                   Mode                 mode,
+                   const DeviceBuffers& buffers,
+                   int                  blocks,
+                   double               min_ms,
+                   double               warmup_ms)
+    {
+        std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
+        HipMoiStorageRefs                                   storage_refs;
+        if(mode == Mode::PrivateSampled)
+        {
+            storage_refs = install_storage_refs(blocks, &contexts);
+        }
+
+        hipStream_t stream = nullptr;
+        for(int i = 0; i < 5; ++i)
+        {
+            launch_kernel(mode, buffers, blocks, stream);
+        }
+        HIP_MOI_ATT_HIP_CHECK(hipGetLastError());
+        HIP_MOI_ATT_HIP_CHECK(hipDeviceSynchronize());
+
+        hipEvent_t start;
+        hipEvent_t stop;
+        HIP_MOI_ATT_HIP_CHECK(hipEventCreate(&start));
+        HIP_MOI_ATT_HIP_CHECK(hipEventCreate(&stop));
+
+        int calibration_iterations = std::max(1, get_int_env("BENCH_CALIBRATION_ITERS", 10));
+        int max_iterations         = std::max(1, get_int_env("MAX_ITERS", 100000));
+
+        auto run_timed_iterations = [&](int iteration_count) {
+            HIP_MOI_ATT_HIP_CHECK(hipEventRecord(start, stream));
+            for(int i = 0; i < iteration_count; ++i)
+            {
+                launch_kernel(mode, buffers, blocks, stream);
+            }
+            HIP_MOI_ATT_HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_MOI_ATT_HIP_CHECK(hipEventSynchronize(stop));
+            float elapsed_ms = 0.0f;
+            HIP_MOI_ATT_HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start, stop));
+            HIP_MOI_ATT_HIP_CHECK(hipGetLastError());
+            return elapsed_ms;
+        };
+
+        auto target_iterations = [&](double target_ms, double estimate_ms) {
+            if(target_ms <= 0.0)
+            {
+                return 0;
+            }
+            int iterations = std::max(
+                1, static_cast<int>(std::ceil(target_ms / std::max(0.001, estimate_ms))));
+            return std::min(iterations, max_iterations);
+        };
+
+        auto run_until_target = [&](double target_ms, int* iteration_count) {
+            if(target_ms <= 0.0 || *iteration_count <= 0)
+            {
+                *iteration_count = 0;
+                return 0.0f;
+            }
+
+            float elapsed_ms = 0.0f;
+            for(;;)
+            {
+                elapsed_ms = run_timed_iterations(*iteration_count);
+                if(elapsed_ms >= target_ms || *iteration_count == max_iterations)
+                {
+                    return elapsed_ms;
+                }
+
+                double scale = target_ms / std::max(0.001f, elapsed_ms);
+                int    next_iterations
+                    = static_cast<int>(std::ceil(static_cast<double>(*iteration_count) * scale));
+                *iteration_count
+                    = std::min(max_iterations, std::max(*iteration_count + 1, next_iterations));
+            }
+        };
+
+        float calibration_ms = run_timed_iterations(calibration_iterations);
+        float one_ms         = calibration_ms / calibration_iterations;
+
+        int    warmup_iterations = target_iterations(warmup_ms, one_ms);
+        float  warmup_elapsed_ms = run_until_target(warmup_ms, &warmup_iterations);
+        double measurement_guess = warmup_iterations > 0 && warmup_elapsed_ms > 0.0f
+                                       ? static_cast<double>(warmup_elapsed_ms) / warmup_iterations
+                                       : one_ms;
+        int    iterations        = target_iterations(min_ms, measurement_guess);
+        float  elapsed_ms        = run_until_target(min_ms, &iterations);
+
+        HIP_MOI_ATT_HIP_CHECK(hipEventDestroy(start));
+        HIP_MOI_ATT_HIP_CHECK(hipEventDestroy(stop));
+
+        uint64_t reports = 0;
+        for(const auto& context : contexts)
+        {
+            int count = context->consume_diagnostics(nullptr);
+            if(count < 0)
+            {
+                std::fprintf(stderr, "error: failed to read hip-moi diagnostics\n");
+                std::exit(EXIT_FAILURE);
+            }
+            reports += static_cast<uint64_t>(count);
+        }
+        if(reports != 0)
+        {
+            std::printf("%-58s reports=%llu\n", name, static_cast<unsigned long long>(reports));
+        }
+
+        double         ms       = elapsed_ms / iterations;
+        DisplayLatency latency  = display_latency(ms);
+        double         checksum = checksum_output(buffers.output, blocks);
+        std::printf("%-58s %#9.3g %s  checksum=%12.6f"
+                    "  total=%8.3f ms  iters=%d  warmup=%8.3f ms  warmup_iters=%d\n",
+                    name,
+                    latency.value,
+                    latency.unit,
+                    checksum,
+                    elapsed_ms,
+                    iterations,
+                    warmup_elapsed_ms,
+                    warmup_iterations);
+        return ms;
+    }
+
+    void print_device()
+    {
+        int device = 0;
+        HIP_MOI_ATT_HIP_CHECK(hipGetDevice(&device));
+        hipDeviceProp_t prop;
+        HIP_MOI_ATT_HIP_CHECK(hipGetDeviceProperties(&prop, device));
+        std::printf("device %d: %s, gcnArch=%s, CUs=%d\n",
+                    device,
+                    prop.name,
+                    prop.gcnArchName,
+                    prop.multiProcessorCount);
+    }
 }
 
 int main(int argc, char** argv)
 {
-    Mode mode   = parse_mode(argc >= 2 ? argv[1] : "private-pass-through");
-    int  blocks = get_int_env("HIP_MOI_ATT_BLOCKS", kDefaultBlocks);
+    Mode   mode      = parse_mode(argc >= 2 ? argv[1] : "private-pass-through");
+    int    blocks    = get_int_env("HIP_MOI_ATT_BLOCKS", kDefaultBlocks);
+    double min_ms    = get_double_env("MIN_MS", 100.0);
+    double warmup_ms = get_double_env("WARMUP_MS", min_ms);
     if(blocks <= 0)
     {
         std::fprintf(stderr, "HIP_MOI_ATT_BLOCKS must be positive\n");
+        return EXIT_FAILURE;
+    }
+    if(min_ms <= 0.0)
+    {
+        std::fprintf(stderr, "MIN_MS must be positive\n");
+        return EXIT_FAILURE;
+    }
+    if(warmup_ms < 0.0)
+    {
+        std::fprintf(stderr, "WARMUP_MS must be nonnegative\n");
         return EXIT_FAILURE;
     }
 
@@ -434,6 +658,31 @@ int main(int argc, char** argv)
     fill_fragments(blocks, &a_fragments, &b_fragments);
     DeviceBuffers buffers = copy_inputs(a_fragments, b_fragments, blocks);
 
+    if(mode == Mode::Benchmark)
+    {
+        print_device();
+        std::printf("pingpong_private_lds: blocks=%d waves=%d k_tiles=%d"
+                    " min_ms=%.1f warmup_ms=%.1f\n",
+                    blocks,
+                    kSubgroupCount,
+                    kKTileCount,
+                    min_ms,
+                    warmup_ms);
+        run_one("pingpong_private_lds_pass_through",
+                Mode::PrivatePassThrough,
+                buffers,
+                blocks,
+                min_ms,
+                warmup_ms);
+        run_one("pingpong_private_lds_sampled_watchpoint_context",
+                Mode::PrivateSampled,
+                buffers,
+                blocks,
+                min_ms,
+                warmup_ms);
+        return EXIT_SUCCESS;
+    }
+
     std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
     HipMoiStorageRefs                                   storage_refs;
     if(mode == Mode::PrivateSampled)
@@ -441,37 +690,12 @@ int main(int argc, char** argv)
         storage_refs = install_storage_refs(blocks, &contexts);
     }
 
-    dim3 grid(static_cast<unsigned>(blocks));
-    dim3 block(kThreadCount);
-    if(mode == Mode::PrivatePassThrough)
-    {
-        hipLaunchKernelGGL(private_pingpong_pass_through_kernel,
-                           grid,
-                           block,
-                           0,
-                           0,
-                           buffers.a_fragments,
-                           buffers.b_fragments,
-                           buffers.output);
-    }
-    else
-    {
-        hipLaunchKernelGGL(private_pingpong_sampled_kernel,
-                           grid,
-                           block,
-                           0,
-                           0,
-                           buffers.a_fragments,
-                           buffers.b_fragments,
-                           buffers.output);
-    }
+    launch_kernel(mode, buffers, blocks, nullptr);
     HIP_MOI_ATT_HIP_CHECK(hipGetLastError());
     HIP_MOI_ATT_HIP_CHECK(hipDeviceSynchronize());
 
-    const char* mode_name
-        = mode == Mode::PrivatePassThrough ? "private-pass-through" : "private-sampled";
     std::printf("mode=%s blocks=%d checksum=%.6f\n",
-                mode_name,
+                mode_name(mode),
                 blocks,
                 checksum_output(buffers.output, blocks));
     return EXIT_SUCCESS;
