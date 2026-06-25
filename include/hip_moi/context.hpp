@@ -503,9 +503,16 @@ namespace hip_moi
                 atomic_object_record* record = &storage_.atomic_objects[index];
                 uint64_t              slot_generation
                     = *reinterpret_cast<volatile uint64_t*>(&record->generation);
-                if(slot_generation != generation)
+                if(slot_generation == kAtomicObjectClaimedGeneration)
                 {
                     continue;
+                }
+                // Records are never deleted within a generation. A stale slot
+                // therefore terminates this address's open-addressing probe
+                // chain unless another thread is actively claiming it.
+                if(slot_generation != generation)
+                {
+                    return nullptr;
                 }
 
                 uintptr_t slot_address = *reinterpret_cast<volatile uintptr_t*>(&record->address);

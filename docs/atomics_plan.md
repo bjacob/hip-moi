@@ -29,7 +29,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 2. Public atomic API skeleton | Complete | `hip_moi::context` has pass-through atomic load/store/fetch-add/fetch-or wrappers, `019_atomic_api_test.hip` verifies device behavior, and `019_atomic_flag_handoff_benchmark.hip` records wrapper codegen/latency. |
 | 3. Atomic object metadata | Complete | `context::atomic_object_record` is allocated from the host byte budget, release-style atomics populate a bounded generation-separated table, and `020_atomic_metadata_test.hip` / `020_atomic_metadata_benchmark.hip` cover saturation, generation reuse, and codegen cost. |
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
-| 5. Release/acquire fast path | In progress | First optimization landed: byte-budget-derived atomic-object capacities round up to powers of two, and probe starts use a mask instead of runtime division. |
+| 5. Release/acquire fast path | In progress | Two optimizations have landed: byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
 | 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
 | 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
 | 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
@@ -373,9 +373,16 @@ two, and the device probe-start mapping uses `hash & (capacity - 1)` instead of
 runtime modulo. A deliberately bad intermediate experiment rounded capacity
 down to a power of two; it made the 4096-workgroup metadata rows fill the table
 to 100% and regressed `atomic-metadata-release-store_context` to 1.52 ms and
-`atomic-flag-handoff_context` to 4.42 ms. Rounding up keeps those rows around
-50% load and improves the current baselines to 13.4 µs and 30.6 µs,
-respectively. The semantic `atomic-hb-lds-handoff_context` row is 13.6 µs.
+`atomic-flag-handoff_context` to 4.42 ms.
+
+The second fast-path change targets acquire-side misses. Atomic metadata records
+are never deleted within one generation, so a stale slot terminates an
+open-addressing probe chain unless another thread is actively claiming that
+slot. This mainly helps spin loops before the releasing subgroup has published
+metadata. Current local RDNA4 numbers are 14.9 µs for
+`atomic-metadata-release-store_context`, 30.8 µs for
+`atomic-flag-handoff_context`, and 8.87 µs for
+`atomic-hb-lds-handoff_context`.
 
 ## Stage 6: RMW Atomics As Both Access And Synchronization
 

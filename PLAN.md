@@ -257,7 +257,8 @@ READMEs now describe the current detector scope.
    Stage 5: reduce the overhead of the release/acquire path without weakening
    those diagnostics. The first Stage 5 optimization has started by making
    atomic-object capacities powers of two and using masked probe starts instead
-   of runtime modulo. The diagnostic payload remains LDS access; global atomics
+   of runtime modulo; acquire lookups also now terminate on the first stale
+   open-addressing slot. The diagnostic payload remains LDS access; global atomics
    are synchronization operations, not a request to diagnose ordinary global
    load/store races. Each atomics stage must satisfy the completion checklist in
    `docs/atomics_plan.md`: instrumented test, matching benchmark,
