@@ -145,7 +145,22 @@ production-equivalent scheduling:
    remain easy to explain.
 7. Instrument every LDS access with hip-moi.
 
-That shape is enough to answer whether hip-moi can instrument code that uses
+There are two distinct LDS-sharing shapes worth keeping separate.
+
+The first shape is private LDS staging. Each subgroup writes fragments into LDS
+slots that only the same subgroup later reads. This is still useful because it
+tests code that combines hip-moi instrumentation with `setprio`,
+`sched_barrier`, LDS double-buffering, and WMMA, but it should not be presented
+as a cooperative LDS communication test.
+
+The second shape is cooperative LDS staging. One subgroup, or one subset of the
+workgroup, writes an LDS tile that other subgroups later consume. This is where
+hip-moi's subgroup-level race detector becomes semantically central: without a
+real synchronization edge between the stores and the cross-subgroup loads, the
+program has same-epoch conflicting LDS accesses. `setprio` and `sched_barrier`
+do not fix that; an actual workgroup synchronization operation does.
+
+These shapes are enough to answer whether hip-moi can instrument code that uses
 `setprio`, whether code generation keeps the priority operations where we
 expect them, and whether our overhead changes on ping-pong-like clustered
 access patterns.
@@ -181,11 +196,12 @@ next semantic expansion.
 
 The recommended sequence is:
 
-1. Add one self-contained RDNA4 HIP test with `setprio`, `sched_barrier`,
-   full-workgroup barriers, WMMA, and instrumented LDS double-buffering.
-2. Add a matching benchmark row only if the test shape is stable and the
+1. Add one self-contained RDNA4 HIP test with private LDS staging, `setprio`,
+   `sched_barrier`, WMMA, and instrumented LDS double-buffering.
+2. Add the cooperative LDS counterpart: one synchronized clean case and one
+   intentionally unsynchronized diagnostic case.
+3. Add a matching benchmark row only if the test shape is stable and the
    generated code visibly contains the expected `s_setprio` instructions.
-3. Document that hip-moi treats `setprio` and `sched_barrier` as scheduling
+4. Document that hip-moi treats `setprio` and `sched_barrier` as scheduling
    operations, not memory synchronization.
-4. Return to atomics for the next real memory-model expansion.
-
+5. Return to atomics for the next real memory-model expansion.

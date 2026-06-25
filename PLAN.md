@@ -188,16 +188,19 @@ READMEs now describe the current detector scope.
 
 ## Next Work
 
-1. Add one controlled ping-pong-shaped HIP test.
+1. Inspect generated code for the controlled ping-pong-shaped HIP tests.
 
-   This should be RDNA4-gated, use WMMA, multiple subgroups, LDS
-   double-buffering, `__builtin_amdgcn_s_setprio`, and
-   `__builtin_amdgcn_sched_barrier`, while keeping full-workgroup barriers as
-   the only epoch boundaries. The purpose is to prove that hip-moi can
-   instrument `setprio`-using code and to inspect code generation, not to claim
-   production RDNA4 ping-pong performance.
+   The private-LDS and cooperative-LDS RDNA4 tests now exist as
+   `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip` and
+   `tests/instrumented/017_rdna4_pingpong_cooperative_lds_test.hip`. They use
+   WMMA, multiple subgroups, LDS double-buffering,
+   `__builtin_amdgcn_s_setprio`, and `__builtin_amdgcn_sched_barrier`.
+   The cooperative test has both a synchronized clean case and an
+   intentionally unsynchronized diagnostic case. The next step is to inspect
+   generated code and confirm that the expected `s_setprio` instructions remain
+   visible.
 
-2. Add a matching ping-pong benchmark only if the test shape is stable.
+2. Add a matching ping-pong benchmark only if the generated code is stable.
 
    The benchmark should be added after generated-code inspection confirms that
    the expected `s_setprio` instructions remain in the kernel. Benchmark

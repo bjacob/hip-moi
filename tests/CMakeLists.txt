@@ -116,4 +116,8 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/014_rdna4_wmma_no_score_lds_attention_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_d128_no_score_lds_attention_test
                     instrumented/015_rdna4_d128_no_score_lds_attention_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_pingpong_private_lds_test
+                    instrumented/016_rdna4_pingpong_private_lds_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_pingpong_cooperative_lds_test
+                    instrumented/017_rdna4_pingpong_cooperative_lds_test.hip)
 endif()

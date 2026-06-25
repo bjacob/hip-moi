@@ -52,6 +52,13 @@ Current files:
 * `015_rdna4_d128_no_score_lds_attention_test.hip`: RDNA4-only D128/V128
   version of the no-score/weight-LDS attention test, paired with the D128
   no-score attention benchmark.
+* `016_rdna4_pingpong_private_lds_test.hip`: RDNA4-only ping-pong-shaped WMMA
+  test with `setprio` and `sched_barrier` where each subgroup stages and
+  consumes only its own LDS slots.
+* `017_rdna4_pingpong_cooperative_lds_test.hip`: RDNA4-only ping-pong-shaped
+  WMMA test where subgroup 0 stages B fragments in LDS for every subgroup to
+  consume; the synchronized case is clean and the unsynchronized case reports
+  diagnostics.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests
