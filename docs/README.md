@@ -38,7 +38,8 @@ interpreted.
 
    Records the current source survey and explains why `setprio` is a
    scheduling operation, not a memory-ordering operation, for hip-moi's current
-   detector.
+   detector. Also records the current RDNA4 ping-pong test shapes,
+   generated-code inspection workflow, and ATT trace smoke test.
 
 6. [Benchmark README](../benchmarks/README.md)
 

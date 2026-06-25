@@ -172,6 +172,138 @@ careful use of lower-level barrier builtins or inline assembly. That should be
 treated as a second step because it is easier to create invalid or deadlocking
 programs while experimenting.
 
+## Current hip-moi Tests
+
+The current controlled RDNA4 tests are:
+
+* `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`
+* `tests/instrumented/017_rdna4_pingpong_cooperative_lds_test.hip`
+
+They are tests first, not benchmarks. They exist to make sure hip-moi can
+instrument kernels that combine:
+
+* multiple subgroups in one workgroup;
+* LDS double-buffering;
+* WMMA;
+* `__builtin_amdgcn_s_setprio`;
+* `__builtin_amdgcn_sched_barrier`;
+* all LDS accesses routed through hip-moi.
+
+The private test stages each subgroup's own fragments in LDS. It should not
+diagnose a subgroup-level race, because the LDS producer and consumer are the
+same subgroup.
+
+The cooperative test stages an LDS tile produced by one subgroup and consumed
+by other subgroups. It has two shapes:
+
+* a synchronized clean shape, where a full workgroup barrier separates
+  producers from consumers;
+* an intentionally unsynchronized shape, where exact-shadow instrumentation
+  must diagnose a same-epoch cross-subgroup LDS conflict.
+
+Both tests use a small helper around `__builtin_amdgcn_s_setprio`. That helper
+is marked `__forceinline__`. Without forced inlining in the current test build
+configuration, Clang can leave the helper out of line and the target kernel may
+only show the priority reset while the priority raise lives in a callee. That is
+valid code, but it is a poor test shape for inspecting whether the clustered
+kernel itself contains the intended `s_setprio` instructions.
+
+## Generated-Code Inspection
+
+The reusable inspection script is:
+
+```bash
+benchmarks/inspect_pingpong_codegen.sh
+```
+
+It extracts the `.hip_fatbin` section from the two RDNA4 ping-pong GTest
+executables, unbundles the `gfx1201` device objects, and prints kernel metadata
+and instruction counts. The default build location is
+`/home/benoit/workspace/hip-moi-build`; override it with
+`HIP_MOI_BUILD_DIR=/path/to/build` if needed.
+
+The script currently checks:
+
+* LDS group segment size;
+* SGPR and VGPR counts;
+* SGPR and VGPR spill counts;
+* private segment size;
+* `s_setprio 1` and `s_setprio 0` counts;
+* WMMA counts;
+* `s_barrier` counts;
+* `flat_load_b128` and `flat_store_b128` counts;
+* scratch-memory instruction counts;
+* `s_swappc_b64` call counts.
+
+On the current unoptimized test build, the target ping-pong kernels visibly
+contain `s_setprio 1`, `s_setprio 0`, and WMMA. The script also reports many
+calls and scratch instructions. That is a property of inspecting GTest kernels
+built in the default test configuration, not a benchmark-grade performance
+claim.
+
+One caveat is important: full workgroup barriers can appear in helper functions
+called by the target kernels. In that case, the function-scoped `s_barrier`
+count for a kernel can be zero even though object-level counts show real
+barrier instructions in the extracted device object. A benchmark-quality
+ping-pong source should be inspected at its actual optimized build settings
+before interpreting barrier placement or register pressure.
+
+`__builtin_amdgcn_sched_barrier` is also easy to misread. It constrains backend
+instruction scheduling, but it does not necessarily lower to a visible machine
+instruction. Absence of a named `sched_barrier` instruction in disassembly is
+not, by itself, evidence that the source-level scheduling boundary was ignored.
+
+## ATT Trace Smoke Test
+
+The local TheRock tree can provide `rocprofv3` with advanced thread trace
+support. In this workspace it was built by enabling profiler support:
+
+```bash
+cmake -S /home/benoit/workspace/TheRock \
+      -B /home/benoit/workspace/TheRock-build \
+      -DTHEROCK_ENABLE_PROFILER=ON \
+      -DTHEROCK_ENABLE_ROCPROFV3=ON \
+      -DTHEROCK_BUILD_TESTING=OFF
+```
+
+The resulting tool is:
+
+```bash
+/home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/bin/rocprofv3
+```
+
+In the current local build, `rocprofv3 --version` reports ROCprofiler-SDK 1.3.2
+from the checked-out TheRock sources. The build may require the staged SQLite
+include directory to be visible to rocprofiler-sdk compilation if the local
+TheRock configuration does not propagate that sysdep include path.
+
+A minimal ATT smoke command for the private ping-pong sampled test is:
+
+```bash
+/home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/bin/rocprofv3 \
+  --att \
+  --att-library-path /home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/lib \
+  --kernel-include-regex private_pingpong_kernel \
+  --att-consecutive-kernels 1 \
+  -d /tmp/hip-moi-att-private-smoke \
+  -- /home/benoit/workspace/hip-moi-build/tests/hip_moi_instrumented_rdna4_pingpong_private_lds_test \
+     --gtest_filter=HipMoiRdna4PingpongPrivateLds.SampledFastContextMatchesHostReference
+```
+
+This produces the normal GTest result plus raw ATT output, decoded UI JSON, a
+stats CSV, captured code objects, and a profiler results database. The raw
+`.att` file is SQ thread trace data. The ROCprofiler-SDK documentation says
+that thread trace targets a single CU per shader engine by default; if a
+dispatch does not populate the chosen CU, the stats CSV can be empty even for a
+valid kernel. In that case, launch more waves or adjust the target CU and
+shader-engine mask.
+
+ATT is the right tool for checking whether the traced waves execute the
+expected clustered instruction stream and where stalls appear. It should be
+used as evidence about instruction execution only after the raw and decoded
+outputs have been inspected, not merely after confirming that collection
+succeeds.
+
 ## RDNA4 Suitability
 
 RDNA4 is suitable for syntax, code-generation, and instrumentation-overhead
@@ -196,12 +328,15 @@ next semantic expansion.
 
 The recommended sequence is:
 
-1. Add one self-contained RDNA4 HIP test with private LDS staging, `setprio`,
-   `sched_barrier`, WMMA, and instrumented LDS double-buffering.
-2. Add the cooperative LDS counterpart: one synchronized clean case and one
-   intentionally unsynchronized diagnostic case.
-3. Add a matching benchmark row only if the test shape is stable and the
-   generated code visibly contains the expected `s_setprio` instructions.
-4. Document that hip-moi treats `setprio` and `sched_barrier` as scheduling
+1. Keep the current private and cooperative tests as correctness and codegen
+   probes.
+2. Build a benchmark-shaped ping-pong source separately from the GTest
+   executables, with optimized compilation settings and pass-through plus
+   hip-moi rows.
+3. Run generated-code inspection on the benchmark object before trusting
+   benchmark numbers.
+4. Use ATT on selected dispatches when instruction ordering, wave execution, or
+   stalls are the question being asked.
+5. Document that hip-moi treats `setprio` and `sched_barrier` as scheduling
    operations, not memory synchronization.
-5. Return to atomics for the next real memory-model expansion.
+6. Return to atomics for the next real memory-model expansion.

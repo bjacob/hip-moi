@@ -52,6 +52,25 @@ The current headline rows use the fair publish-only defaults printed by the
 benchmarks: `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
 `reports=off`.
 
+## Codegen Inspection
+
+Several scripts in this directory extract HIP fatbins, unbundle RDNA4 device
+objects, and report metadata or instruction counts with LLVM tools. They are
+sanity checks for whether a benchmark or test object still has the generated
+code shape that the measurement assumes.
+
+The current ping-pong inspection script is:
+
+```bash
+benchmarks/inspect_pingpong_codegen.sh
+```
+
+It currently targets the RDNA4 ping-pong GTest executables. A future
+ping-pong benchmark should get the same inspection treatment on its optimized
+benchmark object before timing numbers are treated as meaningful. See
+[`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`, `sched_barrier`,
+and ATT-trace caveats.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private

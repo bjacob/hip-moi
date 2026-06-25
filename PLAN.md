@@ -151,6 +151,9 @@ The instrumented suite now focuses on:
 * exact-shadow diagnostics;
 * sampled-watchpoint diagnostics and publish-only fast execution;
 * RDNA4 matmul and attention-shaped correctness tests.
+* RDNA4 ping-pong-shaped correctness tests with private LDS staging,
+  cooperative LDS staging, `setprio`, `sched_barrier`, WMMA, and exact-shadow
+  diagnostics for the intentionally unsynchronized cooperative shape.
 
 The reference suite remains useful as concrete uninstrumented HIP code for
 safe-kernel validation and benchmark-shape provenance. Racy reference kernels
@@ -167,7 +170,8 @@ Current entry points:
 * `docs/tutorial/README.md`: tested tutorial sequence with local definitions,
   per-example intent, and links to deeper model/context docs;
 * `docs/pingpong.md`: source survey and scope decision for ping-pong
-  scheduling, `setprio`, `sched_barrier`, and RDNA4 suitability;
+  scheduling, `setprio`, `sched_barrier`, RDNA4 suitability, generated-code
+  inspection, and ATT smoke tracing;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
@@ -188,24 +192,22 @@ READMEs now describe the current detector scope.
 
 ## Next Work
 
-1. Inspect generated code for the controlled ping-pong-shaped HIP tests.
+1. Add a benchmark-shaped ping-pong source.
 
-   The private-LDS and cooperative-LDS RDNA4 tests now exist as
-   `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip` and
-   `tests/instrumented/017_rdna4_pingpong_cooperative_lds_test.hip`. They use
-   WMMA, multiple subgroups, LDS double-buffering,
-   `__builtin_amdgcn_s_setprio`, and `__builtin_amdgcn_sched_barrier`.
-   The cooperative test has both a synchronized clean case and an
-   intentionally unsynchronized diagnostic case. The next step is to inspect
-   generated code and confirm that the expected `s_setprio` instructions remain
-   visible.
+   The controlled GTest kernels now have codegen inspection coverage via
+   `benchmarks/inspect_pingpong_codegen.sh`, and a minimal ATT capture has been
+   proven to work with the local TheRock `rocprofv3` build. The next benchmark
+   should be built separately from the GTest executables, use optimized
+   compilation settings, include pass-through and hip-moi rows, and instrument
+   every LDS access. Generated-code inspection on that optimized benchmark
+   object is a precondition for trusting timing numbers.
 
-2. Add a matching ping-pong benchmark only if the generated code is stable.
+2. Use ATT selectively on ping-pong benchmark dispatches.
 
-   The benchmark should be added after generated-code inspection confirms that
-   the expected `s_setprio` instructions remain in the kernel. Benchmark
-   documentation must state that hip-moi treats `setprio` and `sched_barrier` as
-   scheduling operations, not synchronization edges.
+   ATT is useful when the question is whether traced waves execute the expected
+   clustered instruction stream and where stalls appear. Collection alone is
+   not enough; the decoded stats/UI output or raw trace must be inspected before
+   drawing scheduling conclusions.
 
 3. Write a Loom/RFC comparison document.
 

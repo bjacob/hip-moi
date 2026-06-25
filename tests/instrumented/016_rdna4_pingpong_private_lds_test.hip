@@ -115,7 +115,7 @@ namespace
         return value;
     }
 
-    __device__ void set_pingpong_priority(int subgroup, int k_tile)
+    __device__ __forceinline__ void set_pingpong_priority(int subgroup, int k_tile)
     {
         if(((subgroup + k_tile) & 1) == 0)
         {
