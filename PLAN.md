@@ -263,9 +263,12 @@ READMEs now describe the current detector scope.
    until a realistic Stream-K integration row shows which protocol deserves a
    specialized path. Stage 8 has landed the first standard fence-plus-atomic
    shape: release fence before relaxed publication, relaxed observation before
-   acquire fence. The diagnostic payload remains LDS access; global atomics are
-   synchronization operations, not a request to diagnose ordinary global
-   load/store races. Each atomics stage must satisfy the
+   acquire fence. Stage 9 has started with a RocJITsu hip-stream-k-shaped
+   owner/helper flag fixup test and benchmark; the next integration rung should
+   preserve more of the original two-tile or RDNA4 WMMA Stream-K shape. The
+   diagnostic payload remains LDS access; global atomics are synchronization
+   operations, not a request to diagnose ordinary global load/store races. Each
+   atomics stage must satisfy the
    completion checklist in `docs/atomics_plan.md`:
    instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence

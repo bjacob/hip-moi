@@ -139,3 +139,5 @@ hip_moi_add_gtest(hip_moi_instrumented_atomic_or_bitmask_happens_before_test
                   instrumented/024_atomic_or_bitmask_happens_before_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_atomic_fence_happens_before_test
                   instrumented/025_atomic_fence_happens_before_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_streamk_flag_protocol_test
+                  instrumented/026_streamk_flag_protocol_test.hip)

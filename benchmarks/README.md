@@ -100,6 +100,11 @@ reads LDS payload written by the first subgroup.
 benchmark. It models a release fence before relaxed atomic publication and an
 acquire fence after relaxed atomic observation.
 
+`026_streamk_flag_protocol_benchmark.hip` is the first Stream-K-shaped
+integration benchmark. It keeps the RocJITsu hip-stream-k owner/helper flag
+protocol but distills the payload to LDS partials so hip-moi can diagnose the
+handoff.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -126,6 +131,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a; `context` row is 25 VGPRs, no spills |
 | `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a; `context` row is 24 VGPRs, no spills |
 | `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a; `context` row is 23 VGPRs, no spills |
+| `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a; `context` row is 25 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -155,6 +161,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-rmw-acq-rel-chain` | 256 workgroups, 2 subgroups/workgroup, two-RMW `acq_rel fetch_add` chain orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-or-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `atomicOr` bitmask orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-fence-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed atomic flag operations around instrumented LDS payload | 4 B, <0.1% | 3 |
+| `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
 
 ## Benchmark Modes
 
@@ -207,6 +214,7 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.59 µs |
 | `atomic-or-bitmask-handoff` | 3.24 µs | 8.52 µs |
 | `atomic-fence-handoff` | 3.12 µs | 10.2 µs |
+| `streamk-flag-fixup` | 3.35 µs | 11.2 µs |
 
 ## Reading The Suite
 
@@ -290,3 +298,13 @@ no scratch/private segment, and no spills. The first implementation keeps fence
 state in the per-thread device context object: release fences arm the next
 relaxed atomic publication, and acquire fences consume the last relaxed atomic
 observation made through that context.
+
+The Stream-K flag fixup row is the first integration row rather than a one-edge
+microbenchmark. It preserves the RocJITsu hip-stream-k owner/helper flag
+protocol: two helpers publish ready flags with release stores, and one owner
+loops over those flags with acquire loads before folding the helper partials.
+The pass-through kernel reports 12 B LDS, 4 VGPRs, 14 SGPRs, and no spills. The
+`context` kernel reports 12 B LDS, 25 VGPRs, 82 SGPRs, no scratch/private
+segment, and no spills. The high SGPR count is the first atomics row where the
+control-flow shape, not just the number of metadata operations, is visibly
+pushing scalar pressure.

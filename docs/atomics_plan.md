@@ -33,7 +33,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 6. RMW atomics | Complete | `023_atomic_rmw_happens_before_test.hip` covers release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `024_atomic_or_bitmask_happens_before_test.hip` covers old-value-dependent `atomicOr` bitmask control flow. Both have matching benchmarks and RDNA4 resource notes. |
 | 7. RMW fast paths | Deferred | Stage 6 rows are measurable and spill-free; do not add benchmark-specific shortcuts until a realistic Stream-K integration row shows which RMW protocol needs a fast path. |
 | 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
-| 9. Stream-K integration tests | Not started | Starts after the relevant atomic protocols are supported. |
+| 9. Stream-K integration tests | In progress | `026_streamk_flag_protocol_test.hip` and matching benchmark add the first RocJITsu hip-stream-k-shaped owner/helper flag fixup. The next rung is a two-tile or RDNA4 WMMA Stream-K shape. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
 
 ## Stage Completion Checklist
@@ -543,6 +543,20 @@ Exit criteria:
 * at least one realistic Stream-K-shaped test diagnoses a deliberately broken
   handoff;
 * the test README says which source corpus each test came from.
+
+Status: in progress. The first integration rung landed in
+`026_streamk_flag_protocol_test.hip` and
+`026_streamk_flag_protocol_benchmark.hip`. It distills RocJITsu hip-stream-k's
+owner/helper release/acquire flag protocol to one owner subgroup looping over
+two helper flags and folding two LDS helper partials. The ordered variant is
+quiet; the broken variant makes the second helper publish with a relaxed store
+and diagnoses the corresponding LDS payload handoff. The local RDNA4 benchmark
+row is 3.35 µs pass-through and 11.2 µs through `context`, with 12 B LDS, 25
+VGPRs, 82 SGPRs, no private segment, and no spills in the `context` row.
+
+The next Stage 9 rung should preserve more of the original Stream-K ownership
+shape: either RocJITsu's two-tile case or a small RDNA4 WMMA Stream-K
+arrival-counter extraction from `matmul_rdna4.hip`.
 
 ## Stage 10: DBI-Oriented Atomic Instruction Seeds
 

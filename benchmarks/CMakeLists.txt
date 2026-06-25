@@ -93,3 +93,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_or_bitmask_happens_before
                             024_atomic_or_bitmask_happens_before_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_fence_happens_before
                             025_atomic_fence_happens_before_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_streamk_flag_protocol
+                            026_streamk_flag_protocol_benchmark.hip)
