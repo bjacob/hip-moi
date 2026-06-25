@@ -83,3 +83,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_pingpong_wide_cooperative_lds
                             018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_flag_handoff
                             019_atomic_flag_handoff_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_metadata
+                            020_atomic_metadata_benchmark.hip)

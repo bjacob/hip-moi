@@ -72,12 +72,19 @@ hip_moi::host_context moi(options);
 ```
 
 `storage_bytes` defaults to 16 MiB. The host context partitions that budget into
-diagnostics, subgroup epoch state, counters, and the selected shadow backend's
-metadata.
+diagnostics, subgroup epoch state, counters, atomic-object metadata, and the
+selected shadow backend's metadata.
 
 This keeps the ordinary API stable as the internal metadata layout changes. A
 user should not normally need to decide how many records of each internal type
 to allocate.
+
+Atomic-object metadata is currently an internal `hip_moi::context` facility.
+The host context derives its capacity from `storage_bytes`: larger global
+storage budgets can track more distinct atomic objects before emitting
+`metadata_full`, while small test contexts naturally get a smaller bounded
+table. There is no separate user-facing atomic-object capacity knob in the
+ordinary API.
 
 ## Backend Storage
 
@@ -382,6 +389,7 @@ std::size_t allocated = moi.storage_bytes();
 std::size_t used = moi.layout_bytes();
 int diagnostics = moi.diagnostic_capacity();
 int subgroups = moi.subgroup_capacity();
+int atomic_objects = moi.atomic_object_capacity();
 int exact_entries = moi.exact_shadow_entry_capacity();
 int watchpoints = moi.sampled_watchpoint_capacity();
 ```
@@ -411,9 +419,11 @@ and computed capacities show comfortable headroom for the kernels being
 diagnosed.
 
 If a shadow table cannot represent an access, hip-moi emits a `metadata_full`
-diagnostic when possible. If the diagnostic buffer itself fills, hip-moi keeps
-counting total diagnostics but only stores the first `diagnostic_capacity`
-records for host-side reporting.
+diagnostic when possible. If a release-style atomic operation cannot find or
+claim an atomic-object metadata slot, hip-moi also emits `metadata_full`, naming
+the atomic object's address, byte size, and source site. If the diagnostic
+buffer itself fills, hip-moi keeps counting total diagnostics but only stores
+the first `diagnostic_capacity` records for host-side reporting.
 
 ## Subgroup Capacity
 

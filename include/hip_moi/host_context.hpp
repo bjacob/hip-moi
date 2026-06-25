@@ -145,6 +145,8 @@ namespace hip_moi
                 options_.sampled_watchpoint_probe_count,
                 options_.sampled_watchpoint_delay_iters,
                 options_.sampled_watchpoint_reports ? 1u : 0u,
+                atomic_objects_,
+                atomic_object_capacity_,
             };
         }
 
@@ -250,6 +252,11 @@ namespace hip_moi
         int subgroup_capacity() const
         {
             return subgroup_capacity_;
+        }
+
+        int atomic_object_capacity() const
+        {
+            return atomic_object_capacity_;
         }
 
         backend_kind backend() const
@@ -396,12 +403,35 @@ namespace hip_moi
             return checked_capacity(capacity, "diagnostic");
         }
 
+        int auto_atomic_object_capacity() const
+        {
+            std::size_t atomic_bytes = storage_bytes_ / 64;
+            if(atomic_bytes < sizeof(context::atomic_object_record))
+            {
+                atomic_bytes = sizeof(context::atomic_object_record);
+            }
+
+            constexpr std::size_t kMaxAutoAtomicObjectBytes = 256u * 1024u;
+            if(atomic_bytes > kMaxAutoAtomicObjectBytes)
+            {
+                atomic_bytes = kMaxAutoAtomicObjectBytes;
+            }
+
+            std::size_t capacity = atomic_bytes / sizeof(context::atomic_object_record);
+            if(capacity == 0)
+            {
+                capacity = 1;
+            }
+            return checked_capacity(capacity, "atomic_object");
+        }
+
         std::size_t layout_byte_count() const
         {
             std::size_t offset = 0;
             append_slice_size<diagnostic>(&offset, diagnostic_capacity_);
             append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
             append_slice_size<int>(&offset, 2);
+            append_slice_size<context::atomic_object_record>(&offset, atomic_object_capacity_);
             append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
             append_slice_size<uint64_t>(&offset, sampled_watchpoint_capacity_);
             return offset;
@@ -415,6 +445,8 @@ namespace hip_moi
                 device_storage_, subgroup_capacity_, &offset, &subgroup_states_);
             assign_slice<int>(device_storage_, 1, &offset, &diagnostic_count_);
             assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
+            assign_slice<context::atomic_object_record>(
+                device_storage_, atomic_object_capacity_, &offset, &atomic_objects_);
             assign_slice<uint64_t>(
                 device_storage_, exact_shadow_entry_capacity_, &offset, &exact_shadow_entries_);
             assign_slice<uint64_t>(
@@ -448,11 +480,12 @@ namespace hip_moi
 
         void compute_layout_or_abort()
         {
-            storage_bytes_       = options_.storage_bytes;
-            subgroup_capacity_   = options_.subgroup_capacity;
-            diagnostic_capacity_ = is_auto_capacity(options_.diagnostic_capacity)
-                                       ? auto_diagnostic_capacity()
-                                       : options_.diagnostic_capacity;
+            storage_bytes_          = options_.storage_bytes;
+            subgroup_capacity_      = options_.subgroup_capacity;
+            atomic_object_capacity_ = auto_atomic_object_capacity();
+            diagnostic_capacity_    = is_auto_capacity(options_.diagnostic_capacity)
+                                          ? auto_diagnostic_capacity()
+                                          : options_.diagnostic_capacity;
 
             exact_shadow_entry_capacity_ = is_auto_capacity(options_.exact_shadow_entry_capacity)
                                                ? 0
@@ -525,13 +558,14 @@ namespace hip_moi
                          "hip-moi: host_context storage_bytes=%llu is too small; "
                          "layout requires at least %llu bytes "
                          "(exact_shadow=%d sampled_watchpoints=%d diagnostics=%d "
-                         "subgroups=%d)\n",
+                         "subgroups=%d atomic_objects=%d)\n",
                          static_cast<unsigned long long>(storage_bytes_),
                          static_cast<unsigned long long>(required_bytes),
                          exact_shadow_entry_capacity_,
                          sampled_watchpoint_capacity_,
                          diagnostic_capacity_,
-                         subgroup_capacity_);
+                         subgroup_capacity_,
+                         atomic_object_capacity_);
             std::fflush(stderr);
             std::abort();
         }
@@ -568,6 +602,10 @@ namespace hip_moi
                                 0,
                                 sizeof(int),
                                 "simulated_barrier_arrival_count");
+            hip_memset_or_abort(atomic_objects_,
+                                0,
+                                atomic_object_capacity_ * sizeof(context::atomic_object_record),
+                                "atomic_objects");
             hip_memset_or_abort(exact_shadow_entries_,
                                 0,
                                 exact_shadow_entry_capacity_ * sizeof(uint64_t),
@@ -704,28 +742,31 @@ namespace hip_moi
             simulated_barrier_arrival_count_ = nullptr;
             exact_shadow_entries_            = nullptr;
             sampled_watchpoints_             = nullptr;
+            atomic_objects_                  = nullptr;
         }
 
-        host_context_options options_;
-        bool                 diagnostics_consumed_            = true;
-        bool                 destructor_reports_              = true;
-        bool                 destructor_aborts_               = true;
-        std::FILE*           diagnostic_stream_               = stderr;
-        int                  last_diagnostic_count_           = 0;
-        std::size_t          storage_bytes_                   = 0;
-        std::size_t          layout_bytes_                    = 0;
-        int                  exact_shadow_entry_capacity_     = 0;
-        int                  sampled_watchpoint_capacity_     = 0;
-        int                  diagnostic_capacity_             = 0;
-        int                  subgroup_capacity_               = 0;
-        uint64_t             generation_                      = 1;
-        unsigned char*       device_storage_                  = nullptr;
-        diagnostic*          diagnostics_                     = nullptr;
-        subgroup_state*      subgroup_states_                 = nullptr;
-        int*                 diagnostic_count_                = nullptr;
-        int*                 simulated_barrier_arrival_count_ = nullptr;
-        uint64_t*            exact_shadow_entries_            = nullptr;
-        uint64_t*            sampled_watchpoints_             = nullptr;
+        host_context_options           options_;
+        bool                           diagnostics_consumed_            = true;
+        bool                           destructor_reports_              = true;
+        bool                           destructor_aborts_               = true;
+        std::FILE*                     diagnostic_stream_               = stderr;
+        int                            last_diagnostic_count_           = 0;
+        std::size_t                    storage_bytes_                   = 0;
+        std::size_t                    layout_bytes_                    = 0;
+        int                            exact_shadow_entry_capacity_     = 0;
+        int                            sampled_watchpoint_capacity_     = 0;
+        int                            diagnostic_capacity_             = 0;
+        int                            subgroup_capacity_               = 0;
+        int                            atomic_object_capacity_          = 0;
+        uint64_t                       generation_                      = 1;
+        unsigned char*                 device_storage_                  = nullptr;
+        diagnostic*                    diagnostics_                     = nullptr;
+        subgroup_state*                subgroup_states_                 = nullptr;
+        int*                           diagnostic_count_                = nullptr;
+        int*                           simulated_barrier_arrival_count_ = nullptr;
+        uint64_t*                      exact_shadow_entries_            = nullptr;
+        uint64_t*                      sampled_watchpoints_             = nullptr;
+        context::atomic_object_record* atomic_objects_                  = nullptr;
     };
 
     inline void check_or_abort(host_context& context, const char* file, int line)

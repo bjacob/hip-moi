@@ -74,10 +74,14 @@ ROCprof's decoded per-wave instruction stream for the expected
 signature. See [`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`,
 `sched_barrier`, and ATT-trace caveats.
 
-`019_atomic_flag_handoff_benchmark.hip` is the first atomics benchmark. It
-exercises the public `hip_moi::context` atomic API as a pass-through wrapper:
-global release/acquire atomics order a raw LDS payload, but hip-moi does not yet
-record atomic synchronization metadata or use it to suppress diagnostics.
+`019_atomic_flag_handoff_benchmark.hip` is the first atomics handoff benchmark:
+global release/acquire atomics order a raw LDS payload. Starting with atomics
+Stage 3, the `context` row records release-side atomic-object metadata, but
+hip-moi does not yet use that metadata to suppress LDS diagnostics.
+
+`020_atomic_metadata_benchmark.hip` isolates the Stage 3 metadata cost: each
+workgroup release-stores one unique global flag, and the `context` row records
+that atomic object in the bounded metadata table.
 
 ## Benchmark Catalog
 
@@ -98,7 +102,8 @@ segment notes are included when that fast row is not spill-free.
 | `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 shape | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
 | `pingpong-private-lds` | `016_rdna4_pingpong_att_probe.hip` | `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`, `run_pingpong_att_validation.sh` | hip-moi RDNA4 ping-pong scheduling probe | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B | 44, no spills |
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
-| `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 3 VGPRs, no spills |
+| `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 24 VGPRs, no spills |
+| `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a; `context` row is 23 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -122,6 +127,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `pingpong-private-lds` | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B, 6.3% | 23 |
 | `pingpong-wide-cooperative-lds` | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B, 9.4% | 24 |
 | `atomic-flag-handoff` | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B, <0.1% | 3 |
+| `atomic-metadata-release-store` | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B, 0.0% | 2 |
 
 ## Benchmark Modes
 
@@ -167,7 +173,8 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 
 | Key | pass-through | `context` |
 | --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.27 µs | 7.25 µs |
+| `atomic-flag-handoff` | 7.26 µs | 36.7 µs |
+| `atomic-metadata-release-store` | 3.45 µs | 23.9 µs |
 
 ## Reading The Suite
 
@@ -197,11 +204,18 @@ keeps the same scheduling idiom but adds real cross-subgroup LDS sharing: in
 each pair, the even subgroup stages B fragments and both subgroups consume
 them.
 
-The atomic flag handoff row is a Stage 2 API/codegen guardrail, not a
-diagnostic benchmark yet. Both pass-through and `context` kernels report 4 B of
-LDS, 3 VGPRs, 10 SGPRs, no scratch/private segment, and no register spills in
-the bundled RDNA4 code-object metadata. The disassembly is effectively
-identical aside from the `context` kernel-argument layout: both paths lower to
-global release/acquire atomic operations on the flag and a raw LDS payload
-handoff. Later atomics stages should use this row to catch API-wrapper overhead
-regressions before adding synchronization metadata.
+The atomic flag handoff row is no longer a pure API-wrapper guardrail: the
+`context` kernel records release-side atomic-object metadata. The pass-through
+kernel reports 4 B LDS, 3 VGPRs, 10 SGPRs, and no spills. The `context` kernel
+reports 4 B LDS, 24 VGPRs, 40 SGPRs, no scratch/private segment, and no spills.
+It is still not a diagnostic benchmark because Stage 3 does not query this
+metadata from the LDS conflict check.
+
+The atomic metadata release-store row isolates the table-recording cost. The
+pass-through kernel reports 0 B LDS, 2 VGPRs, 5 SGPRs, and no spills. The
+`context` kernel reports 0 B LDS, 23 VGPRs, 34 SGPRs, no scratch/private
+segment, and no spills. The disassembly shows the expected bounded metadata
+probe/claim path, including global loads and a 64-bit compare-and-swap for
+claiming stale slots. The first implementation uses address hashing before
+linear probing; a previous all-probes-from-zero prototype was rejected because
+it made table fill effectively quadratic.

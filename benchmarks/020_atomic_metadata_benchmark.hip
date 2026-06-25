@@ -1,20 +1,18 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// benchmarks/019_atomic_flag_handoff_benchmark.hip
+// benchmarks/020_atomic_metadata_benchmark.hip
 //
-// Atomics handoff benchmark. A global release/acquire flag orders a raw LDS
-// payload handoff inside each workgroup. The context path records release-side
-// atomic-object metadata but does not yet use that metadata for happens-before
-// suppression in LDS diagnostics.
+// Stage 3 atomics benchmark. Each workgroup publishes one unique global flag
+// with release semantics. The context path records the atomic object in the
+// bounded metadata table but does not yet use that metadata for happens-before
+// suppression.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <memory>
 #include <vector>
 
 namespace
@@ -48,14 +46,14 @@ namespace
         std::exit(EXIT_FAILURE);
     }
 
-#define HIP_MOI_ATOMIC_BENCH_HIP_CHECK(expr)                                  \
-    do                                                                        \
-    {                                                                         \
-        hipError_t hip_moi_atomic_bench_status = (expr);                      \
-        if(hip_moi_atomic_bench_status != hipSuccess)                         \
-        {                                                                     \
-            fail_hip(hip_moi_atomic_bench_status, #expr, __FILE__, __LINE__); \
-        }                                                                     \
+#define HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(expr)                                  \
+    do                                                                                 \
+    {                                                                                  \
+        hipError_t hip_moi_atomic_metadata_bench_status = (expr);                      \
+        if(hip_moi_atomic_metadata_bench_status != hipSuccess)                         \
+        {                                                                              \
+            fail_hip(hip_moi_atomic_metadata_bench_status, #expr, __FILE__, __LINE__); \
+        }                                                                              \
     } while(false)
 
     int get_int_env(const char* name, int default_value)
@@ -64,41 +62,18 @@ namespace
         return value ? std::atoi(value) : default_value;
     }
 
-    __device__ int payload_value(int block)
+    __global__ void atomic_metadata_pass_through(int* flags)
     {
-        return 37 + ((block * 17) & 255);
-    }
-
-    __global__ void atomic_flag_handoff_pass_through(int* flags, int* out)
-    {
-        __shared__ int payload;
-
         int tid   = static_cast<int>(threadIdx.x);
         int block = static_cast<int>(blockIdx.x);
         if(tid == 0)
         {
-            payload = 0;
-            __hip_atomic_store(&flags[block], 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        }
-        __syncthreads();
-
-        if(tid == 0)
-        {
-            payload = payload_value(block);
-            __hip_atomic_store(&flags[block], 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-        }
-
-        if(tid == kThreadsPerSubgroup)
-        {
-            while(__hip_atomic_load(&flags[block], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0)
-            {
-            }
-            out[block] = payload;
+            __hip_atomic_store(
+                &flags[block], block + 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
         }
     }
 
-    __global__ void
-        atomic_flag_handoff_context(hip_moi::context::storage_ref storage, int* flags, int* out)
+    __global__ void atomic_metadata_context(hip_moi::context::storage_ref storage, int* flags)
     {
         hip_moi::context::config cfg{
             /*thread_count=*/kThreadCount,
@@ -106,53 +81,26 @@ namespace
             /*subgroup_count=*/kSubgroupCount,
         };
         hip_moi::context ctx(storage, cfg);
-        __shared__ int   payload;
 
         int tid   = static_cast<int>(threadIdx.x);
         int block = static_cast<int>(blockIdx.x);
         if(tid == 0)
         {
-            payload = 0;
             ctx.atomic_store(&flags[block],
-                             1,
-                             hip_moi::atomic_memory_order::relaxed,
-                             hip_moi::atomic_memory_scope::agent,
-                             HIP_MOI_SITE_ID());
-        }
-        __syncthreads();
-
-        if(tid == 0)
-        {
-            payload = payload_value(block);
-            ctx.atomic_store(&flags[block],
-                             0,
+                             block + 1,
                              hip_moi::atomic_memory_order::release,
                              hip_moi::atomic_memory_scope::agent,
                              HIP_MOI_SITE_ID());
-        }
-
-        if(tid == kThreadsPerSubgroup)
-        {
-            while(ctx.atomic_load(&flags[block],
-                                  hip_moi::atomic_memory_order::acquire,
-                                  hip_moi::atomic_memory_scope::agent,
-                                  HIP_MOI_SITE_ID())
-                  != 0)
-            {
-            }
-            out[block] = payload;
         }
     }
 
     struct DeviceBuffers
     {
         int* flags = nullptr;
-        int* out   = nullptr;
 
         explicit DeviceBuffers(int blocks)
         {
-            HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipMalloc(&flags, blocks * sizeof(int)));
-            HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipMalloc(&out, blocks * sizeof(int)));
+            HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipMalloc(&flags, blocks * sizeof(int)));
         }
 
         DeviceBuffers(const DeviceBuffers&)            = delete;
@@ -161,7 +109,6 @@ namespace
         ~DeviceBuffers()
         {
             (void)hipFree(flags);
-            (void)hipFree(out);
         }
     };
 
@@ -170,19 +117,19 @@ namespace
     {
         hipEvent_t start = nullptr;
         hipEvent_t stop  = nullptr;
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventCreate(&start));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventCreate(&stop));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventRecord(start));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventCreate(&start));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventCreate(&stop));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventRecord(start));
         for(int i = 0; i < iterations; ++i)
         {
             launch();
         }
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventRecord(stop));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventSynchronize(stop));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventRecord(stop));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventSynchronize(stop));
         float ms = 0.0f;
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventDestroy(stop));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipEventDestroy(start));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventDestroy(stop));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipEventDestroy(start));
         return static_cast<double>(ms);
     }
 
@@ -219,27 +166,27 @@ namespace
         double         elapsed_ms         = run_launches(launch, measure_iterations);
         double         latency_ms         = elapsed_ms / static_cast<double>(measure_iterations);
         DisplayLatency latency            = display_latency(latency_ms);
-        std::printf("%-44s %7.3g %s\n", name, latency.value, latency.unit);
+        std::printf("%-52s %7.3g %s\n", name, latency.value, latency.unit);
         return latency_ms;
     }
 
-    void verify_outputs(int* device_output, int blocks)
+    void verify_flags(int* device_flags, int blocks)
     {
-        std::vector<int> host_output(static_cast<std::size_t>(blocks));
-        HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipMemcpy(host_output.data(),
-                                                 device_output,
-                                                 host_output.size() * sizeof(int),
-                                                 hipMemcpyDeviceToHost));
+        std::vector<int> host_flags(static_cast<std::size_t>(blocks));
+        HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipMemcpy(host_flags.data(),
+                                                          device_flags,
+                                                          host_flags.size() * sizeof(int),
+                                                          hipMemcpyDeviceToHost));
         for(int block = 0; block < blocks; ++block)
         {
-            int expected = 37 + ((block * 17) & 255);
-            if(host_output[static_cast<std::size_t>(block)] != expected)
+            int expected = block + 1;
+            if(host_flags[static_cast<std::size_t>(block)] != expected)
             {
                 std::fprintf(stderr,
-                             "block %d expected %d, got %d\n",
+                             "flag %d expected %d, got %d\n",
                              block,
                              expected,
-                             host_output[static_cast<std::size_t>(block)]);
+                             host_flags[static_cast<std::size_t>(block)]);
                 std::exit(EXIT_FAILURE);
             }
         }
@@ -260,49 +207,54 @@ int main()
     options.sampled_watchpoint_capacity = 0;
     options.diagnostic_capacity         = 64;
     options.subgroup_capacity           = kSubgroupCount;
-    hip_moi::host_context         moi(options);
+    hip_moi::host_context moi(options);
+    if(blocks > moi.atomic_object_capacity())
+    {
+        std::fprintf(stderr,
+                     "BLOCKS=%d exceeds atomic object capacity %d\n",
+                     blocks,
+                     moi.atomic_object_capacity());
+        return EXIT_FAILURE;
+    }
     hip_moi::context::storage_ref storage = moi.launch_ref();
 
     auto pass_through_launch = [&]() {
-        hipLaunchKernelGGL(atomic_flag_handoff_pass_through,
-                           dim3(blocks),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           buffers.flags,
-                           buffers.out);
+        hipLaunchKernelGGL(
+            atomic_metadata_pass_through, dim3(blocks), dim3(kThreadCount), 0, 0, buffers.flags);
     };
     auto context_launch = [&]() {
-        hipLaunchKernelGGL(atomic_flag_handoff_context,
+        hipLaunchKernelGGL(atomic_metadata_context,
                            dim3(blocks),
                            dim3(kThreadCount),
                            0,
                            0,
                            storage,
-                           buffers.flags,
-                           buffers.out);
+                           buffers.flags);
     };
 
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipMemset(buffers.flags, 0, blocks * sizeof(int)));
     pass_through_launch();
-    HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipGetLastError());
-    HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipDeviceSynchronize());
-    verify_outputs(buffers.out, blocks);
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipGetLastError());
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipDeviceSynchronize());
+    verify_flags(buffers.flags, blocks);
 
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipMemset(buffers.flags, 0, blocks * sizeof(int)));
     context_launch();
-    HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipGetLastError());
-    HIP_MOI_ATOMIC_BENCH_HIP_CHECK(hipDeviceSynchronize());
-    verify_outputs(buffers.out, blocks);
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipGetLastError());
+    HIP_MOI_ATOMIC_METADATA_BENCH_HIP_CHECK(hipDeviceSynchronize());
+    verify_flags(buffers.flags, blocks);
 
-    std::printf("hip-moi atomic flag handoff benchmark: blocks=%d warmup_ms=%d min_ms=%d\n",
+    std::printf("hip-moi atomic metadata benchmark: blocks=%d warmup_ms=%d min_ms=%d\n",
                 blocks,
                 warmup_ms,
                 measure_ms);
-    benchmark_mode("atomic-flag-handoff_pass-through", pass_through_launch, warmup_ms, measure_ms);
-    benchmark_mode("atomic-flag-handoff_context", context_launch, warmup_ms, measure_ms);
+    benchmark_mode(
+        "atomic-metadata-release-store_pass-through", pass_through_launch, warmup_ms, measure_ms);
+    benchmark_mode("atomic-metadata-release-store_context", context_launch, warmup_ms, measure_ms);
 
     if(!moi.check(nullptr))
     {
-        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 2 atomic benchmark\n");
+        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 3 atomic benchmark\n");
         return EXIT_FAILURE;
     }
 

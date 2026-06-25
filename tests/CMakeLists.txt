@@ -127,3 +127,5 @@ if(_hip_moi_build_rdna4_tests)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_atomic_api_test
                   instrumented/019_atomic_api_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_atomic_metadata_test
+                  instrumented/020_atomic_metadata_test.hip)

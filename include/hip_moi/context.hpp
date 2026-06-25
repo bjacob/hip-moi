@@ -40,26 +40,38 @@ namespace hip_moi
             uint32_t  observed_thread_count = 0;
         };
 
+        struct atomic_object_record
+        {
+            uint64_t  generation;
+            uintptr_t address;
+            uint64_t  value;
+            uint32_t  releasing_subgroup_id;
+            uint32_t  releasing_epoch;
+            uint64_t  release_site_id;
+        };
+
         struct storage_ref
         {
             using diagnostic_type = diagnostic;
 
-            diagnostic*     diagnostics                         = nullptr;
-            int             diagnostic_capacity                 = 0;
-            subgroup_state* subgroup_states                     = nullptr;
-            int             subgroup_capacity                   = 0;
-            int*            diagnostic_count                    = nullptr;
-            int*            simulated_barrier_arrival_count     = nullptr;
-            uint64_t*       exact_shadow_entries                = nullptr;
-            int             exact_shadow_entry_capacity         = 0;
-            uint64_t*       sampled_watchpoints                 = nullptr;
-            int             sampled_watchpoint_capacity         = 0;
-            uint64_t        generation                          = 0;
-            uint32_t        backend                             = 0;
-            uint32_t        sampled_watchpoint_sample_skip      = 1;
-            uint32_t        sampled_watchpoint_probe_count      = 1;
-            uint32_t        sampled_watchpoint_delay_iters      = 0;
-            uint32_t        sampled_watchpoint_report_conflicts = 1;
+            diagnostic*           diagnostics                         = nullptr;
+            int                   diagnostic_capacity                 = 0;
+            subgroup_state*       subgroup_states                     = nullptr;
+            int                   subgroup_capacity                   = 0;
+            int*                  diagnostic_count                    = nullptr;
+            int*                  simulated_barrier_arrival_count     = nullptr;
+            uint64_t*             exact_shadow_entries                = nullptr;
+            int                   exact_shadow_entry_capacity         = 0;
+            uint64_t*             sampled_watchpoints                 = nullptr;
+            int                   sampled_watchpoint_capacity         = 0;
+            uint64_t              generation                          = 0;
+            uint32_t              backend                             = 0;
+            uint32_t              sampled_watchpoint_sample_skip      = 1;
+            uint32_t              sampled_watchpoint_probe_count      = 1;
+            uint32_t              sampled_watchpoint_delay_iters      = 0;
+            uint32_t              sampled_watchpoint_report_conflicts = 1;
+            atomic_object_record* atomic_objects                      = nullptr;
+            int                   atomic_object_capacity              = 0;
         };
 
         template <int DiagnosticCapacity,
@@ -220,7 +232,10 @@ namespace hip_moi
             static_assert(detail::is_supported_atomic_value<T>::value,
                           "hip_moi::context::atomic_store currently supports "
                           "4-byte and 8-byte integral values");
-            (void)site;
+            if(detail::atomic_order_has_release(order))
+            {
+                record_atomic_release(ptr, sizeof(T), static_cast<uint64_t>(value), site);
+            }
             detail::atomic_store_dispatch(ptr, value, order, scope);
         }
 
@@ -234,8 +249,14 @@ namespace hip_moi
             static_assert(detail::is_supported_atomic_value<T>::value,
                           "hip_moi::context::atomic_fetch_add currently supports "
                           "4-byte and 8-byte integral values");
-            (void)site;
-            return detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+            T old_value = detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                uint64_t released_value
+                    = static_cast<uint64_t>(old_value) + static_cast<uint64_t>(value);
+                record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
+            return old_value;
         }
 
         template <typename T>
@@ -248,8 +269,14 @@ namespace hip_moi
             static_assert(detail::is_supported_atomic_value<T>::value,
                           "hip_moi::context::atomic_fetch_or currently supports "
                           "4-byte and 8-byte integral values");
-            (void)site;
-            return detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
+            T old_value = detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                uint64_t released_value
+                    = static_cast<uint64_t>(old_value) | static_cast<uint64_t>(value);
+                record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
+            return old_value;
         }
 
         __device__ void simulate_syncthreads(bool participates, site_id site = no_site_id)
@@ -350,9 +377,104 @@ namespace hip_moi
         }
 
     private:
+        static constexpr uint64_t kAtomicObjectClaimedGeneration = ~uint64_t{0};
+
         __device__ backend_kind selected_backend() const
         {
             return static_cast<backend_kind>(storage_.backend);
+        }
+
+        __device__ atomic_object_record* find_or_claim_atomic_object_record(uintptr_t address,
+                                                                            uint32_t  byte_count,
+                                                                            site_id   site) const
+        {
+            if(!storage_.atomic_objects || storage_.atomic_object_capacity <= 0)
+            {
+                emit_atomic_metadata_full(address, byte_count, site);
+                return nullptr;
+            }
+
+            uint64_t generation = storage_.generation;
+            uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
+            uint32_t seed
+                = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
+            uint32_t start = detail::mix32(seed) % capacity;
+            for(int attempt = 0; attempt < 4; ++attempt)
+            {
+                bool saw_claimed_slot = false;
+                for(uint32_t probe = 0; probe < capacity; ++probe)
+                {
+                    uint32_t index = start + probe;
+                    if(index >= capacity)
+                    {
+                        index -= capacity;
+                    }
+                    atomic_object_record* record = &storage_.atomic_objects[index];
+                    uint64_t              slot_generation
+                        = *reinterpret_cast<volatile uint64_t*>(&record->generation);
+                    if(slot_generation == generation)
+                    {
+                        uintptr_t slot_address
+                            = *reinterpret_cast<volatile uintptr_t*>(&record->address);
+                        if(slot_address == address)
+                        {
+                            return record;
+                        }
+                        continue;
+                    }
+
+                    if(slot_generation == kAtomicObjectClaimedGeneration)
+                    {
+                        saw_claimed_slot = true;
+                        continue;
+                    }
+
+                    unsigned long long prior = atomicCAS(
+                        reinterpret_cast<unsigned long long*>(&record->generation),
+                        static_cast<unsigned long long>(slot_generation),
+                        static_cast<unsigned long long>(kAtomicObjectClaimedGeneration));
+                    if(prior == static_cast<unsigned long long>(slot_generation))
+                    {
+                        record->address               = address;
+                        record->value                 = 0;
+                        record->releasing_subgroup_id = 0;
+                        record->releasing_epoch       = 0;
+                        record->release_site_id       = 0;
+                        __threadfence();
+                        record->generation = generation;
+                        return record;
+                    }
+                    saw_claimed_slot = true;
+                }
+
+                if(!saw_claimed_slot)
+                {
+                    break;
+                }
+            }
+
+            emit_atomic_metadata_full(address, byte_count, site);
+            return nullptr;
+        }
+
+        __device__ void record_atomic_release(const void* ptr,
+                                              uint32_t    byte_count,
+                                              uint64_t    value,
+                                              site_id     site) const
+        {
+            uintptr_t             address = reinterpret_cast<uintptr_t>(ptr);
+            atomic_object_record* record
+                = find_or_claim_atomic_object_record(address, byte_count, site);
+            if(!record)
+            {
+                return;
+            }
+
+            record->value                 = value;
+            record->releasing_subgroup_id = subgroup_id();
+            record->releasing_epoch       = detail::current_epoch(storage_, subgroup_id());
+            record->release_site_id       = site.value();
+            __threadfence();
         }
 
         __device__ void record_access_at(const void* ptr,
@@ -900,6 +1022,25 @@ namespace hip_moi
                                         subgroup,
                                         reinterpret_cast<uintptr_t>(ptr),
                                         static_cast<uintptr_t>(lds_byte_offset),
+                                        byte_count,
+                                        byte_count,
+                                        site.value(),
+                                        site.value(),
+                                    });
+        }
+
+        __device__ void
+            emit_atomic_metadata_full(uintptr_t address, uint32_t byte_count, site_id site) const
+        {
+            uint32_t subgroup = subgroup_id();
+            detail::emit_diagnostic(storage_,
+                                    diagnostic{
+                                        static_cast<uint32_t>(diagnostic_kind::metadata_full),
+                                        detail::current_epoch(storage_, subgroup),
+                                        subgroup,
+                                        subgroup,
+                                        address,
+                                        address,
                                         byte_count,
                                         byte_count,
                                         site.value(),

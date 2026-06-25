@@ -231,6 +231,18 @@ namespace hip_moi
                 = std::is_integral<T>::value && (sizeof(T) == 4 || sizeof(T) == 8);
         };
 
+        __host__ __device__ constexpr bool atomic_order_has_acquire(atomic_memory_order order)
+        {
+            return order == atomic_memory_order::acquire || order == atomic_memory_order::acq_rel
+                   || order == atomic_memory_order::seq_cst;
+        }
+
+        __host__ __device__ constexpr bool atomic_order_has_release(atomic_memory_order order)
+        {
+            return order == atomic_memory_order::release || order == atomic_memory_order::acq_rel
+                   || order == atomic_memory_order::seq_cst;
+        }
+
         template <int Scope, typename T>
         __device__ inline T atomic_load_with_scope(T* ptr, atomic_memory_order order)
         {

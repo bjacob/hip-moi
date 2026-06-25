@@ -27,8 +27,8 @@ benchmarks, documentation, and diligence notes have landed.
 | 0. Freeze the corpus map | Complete | `atomics_corpus.md` identifies RocJITsu-first seeds and limits `matmul_rdna4.hip` to missing Stream-K variants. |
 | 1. Reference kernels before instrumentation | Complete | `tests/reference/atomic_reference_kernels.hip` adds RocJITsu-derived safe and compile-only atomics source shapes. |
 | 2. Public atomic API skeleton | Complete | `hip_moi::context` has pass-through atomic load/store/fetch-add/fetch-or wrappers, `019_atomic_api_test.hip` verifies device behavior, and `019_atomic_flag_handoff_benchmark.hip` records wrapper codegen/latency. |
-| 3. Atomic object metadata | Next | Design and implement the bounded atomic-object table needed by release/acquire diagnostics. |
-| 4. Happens-before for LDS payload handoffs | Not started | First diagnostic-capable release/acquire stage. |
+| 3. Atomic object metadata | Complete | `context::atomic_object_record` is allocated from the host byte budget, release-style atomics populate a bounded generation-separated table, and `020_atomic_metadata_test.hip` / `020_atomic_metadata_benchmark.hip` cover saturation, generation reuse, and codegen cost. |
+| 4. Happens-before for LDS payload handoffs | Next | First diagnostic-capable release/acquire stage. |
 | 5. Release/acquire fast path | Not started | Starts immediately after Stage 4 works. |
 | 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
 | 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
@@ -242,6 +242,23 @@ Exit criteria:
 * metadata saturation produces deterministic `metadata_full` diagnostics;
 * release/acquire metadata is generation-separated across launches;
 * diagnostics report atomic source sites when available.
+
+Status: complete. `hip_moi::host_context` now derives an internal
+atomic-object table capacity from `storage_bytes`; the default 16 MiB storage
+budget provides thousands of records, while small test contexts get a small
+bounded table. Release-style atomic stores and release-capable RMW operations
+record address, value, releasing subgroup, releasing epoch, release site id,
+and generation. A stale slot is reclaimed through a temporary claim marker, and
+the probe sequence starts from a hash of the atomic-object address. If no slot
+can be found or claimed, hip-moi emits a deterministic `metadata_full`
+diagnostic carrying the atomic address, byte size, and source site.
+
+This stage intentionally does not suppress LDS diagnostics. The metadata is
+recorded but not yet queried by the LDS conflict predicate. The Stage 3
+benchmark shows the first cost baseline: `atomic-metadata-release-store` is
+3.45 µs pass-through and 23.9 µs through `context` on the local RDNA4 machine,
+with 23 VGPRs, 34 SGPRs, no private segment, and no spills in the `context`
+kernel.
 
 ## Stage 4: Happens-Before For LDS Payload Handoffs
 
