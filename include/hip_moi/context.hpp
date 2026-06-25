@@ -44,18 +44,18 @@ namespace hip_moi
         {
             using diagnostic_type = diagnostic;
 
-            diagnostic*     diagnostics                     = nullptr;
-            int             diagnostic_capacity             = 0;
-            subgroup_state* subgroup_states                 = nullptr;
-            int             subgroup_capacity               = 0;
-            int*            diagnostic_count                = nullptr;
-            int*            simulated_barrier_arrival_count = nullptr;
-            uint64_t*       exact_shadow_entries            = nullptr;
-            int             exact_shadow_entry_capacity     = 0;
-            uint64_t*       sampled_watchpoints             = nullptr;
-            int             sampled_watchpoint_capacity     = 0;
-            uint64_t        generation                      = 0;
-            uint32_t        backend                         = 0;
+            diagnostic*     diagnostics                         = nullptr;
+            int             diagnostic_capacity                 = 0;
+            subgroup_state* subgroup_states                     = nullptr;
+            int             subgroup_capacity                   = 0;
+            int*            diagnostic_count                    = nullptr;
+            int*            simulated_barrier_arrival_count     = nullptr;
+            uint64_t*       exact_shadow_entries                = nullptr;
+            int             exact_shadow_entry_capacity         = 0;
+            uint64_t*       sampled_watchpoints                 = nullptr;
+            int             sampled_watchpoint_capacity         = 0;
+            uint64_t        generation                          = 0;
+            uint32_t        backend                             = 0;
             uint32_t        sampled_watchpoint_sample_skip      = 1;
             uint32_t        sampled_watchpoint_probe_count      = 1;
             uint32_t        sampled_watchpoint_delay_iters      = 0;
@@ -195,6 +195,61 @@ namespace hip_moi
             record_access_at<Backend, SampledPolicy>(
                 ptr, sizeof(T), access_kind::store, lds_byte_offset, site);
             *ptr = value;
+        }
+
+        template <typename T>
+        __device__ T atomic_load(T*                  ptr,
+                                 atomic_memory_order order,
+                                 atomic_memory_scope scope,
+                                 site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_load currently supports "
+                          "4-byte and 8-byte integral values");
+            (void)site;
+            return detail::atomic_load_dispatch(ptr, order, scope);
+        }
+
+        template <typename T>
+        __device__ void atomic_store(T*                  ptr,
+                                     T                   value,
+                                     atomic_memory_order order,
+                                     atomic_memory_scope scope,
+                                     site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_store currently supports "
+                          "4-byte and 8-byte integral values");
+            (void)site;
+            detail::atomic_store_dispatch(ptr, value, order, scope);
+        }
+
+        template <typename T>
+        __device__ T atomic_fetch_add(T*                  ptr,
+                                      T                   value,
+                                      atomic_memory_order order,
+                                      atomic_memory_scope scope,
+                                      site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_fetch_add currently supports "
+                          "4-byte and 8-byte integral values");
+            (void)site;
+            return detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+        }
+
+        template <typename T>
+        __device__ T atomic_fetch_or(T*                  ptr,
+                                     T                   value,
+                                     atomic_memory_order order,
+                                     atomic_memory_scope scope,
+                                     site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_fetch_or currently supports "
+                          "4-byte and 8-byte integral values");
+            (void)site;
+            return detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
         }
 
         __device__ void simulate_syncthreads(bool participates, site_id site = no_site_id)

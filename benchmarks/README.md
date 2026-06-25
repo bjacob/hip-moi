@@ -74,6 +74,11 @@ ROCprof's decoded per-wave instruction stream for the expected
 signature. See [`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`,
 `sched_barrier`, and ATT-trace caveats.
 
+`019_atomic_flag_handoff_benchmark.hip` is the first atomics benchmark. It
+exercises the public `hip_moi::context` atomic API as a pass-through wrapper:
+global release/acquire atomics order a raw LDS payload, but hip-moi does not yet
+record atomic synchronization metadata or use it to suppress diagnostics.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -93,6 +98,7 @@ segment notes are included when that fast row is not spill-free.
 | `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 shape | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
 | `pingpong-private-lds` | `016_rdna4_pingpong_att_probe.hip` | `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`, `run_pingpong_att_validation.sh` | hip-moi RDNA4 ping-pong scheduling probe | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B | 44, no spills |
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
+| `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 3 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -115,6 +121,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `attention-d128-no-score` | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B, 1.6% | 178 |
 | `pingpong-private-lds` | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B, 6.3% | 23 |
 | `pingpong-wide-cooperative-lds` | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B, 9.4% | 24 |
+| `atomic-flag-handoff` | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B, <0.1% | 3 |
 
 ## Benchmark Modes
 
@@ -128,6 +135,7 @@ table expands those benchmark modes.
 | `exact shadow` | hip-moi exact shadow | Precise shadow-memory checking through explicit LDS-offset APIs. Present only in the tiny matmul wave-scaling benchmark. |
 | `context + sampled_watchpoint` | General hip-moi context with sampled-watchpoint backend | Diagnostic-capable hip-moi API path using sampled watchpoints. This keeps more state live than the publish-only fast path. |
 | `sampled_watchpoint_context` | hip-moi sampled publish-only fast path | Narrow fast-view context optimized for Loom-parity publish-only sampling. This is the main performance target. |
+| `context` | General hip-moi context | Used by atomics benchmarks when the feature is not part of sampled watchpoint instrumentation. Stage 2 atomics use this only as a pass-through wrapper around HIP/Clang atomics. |
 
 ## Current RDNA4 Results
 
@@ -153,6 +161,13 @@ matmul rows.
 | `attention-d128-no-score` | 3.44 ms | 10.9 ms | n/a | 22.0 ms | 7.29 ms |
 | `pingpong-private-lds` | 3.94 µs | n/a | n/a | 9.10 µs | 6.64 µs |
 | `pingpong-wide-cooperative-lds` | 5.41 µs | n/a | n/a | 18.9 µs | 9.67 µs |
+
+The atomics rows use a separate result table because the first atomics API is
+implemented only for `hip_moi::context`, not for sampled watchpoint modes.
+
+| Key | pass-through | `context` |
+| --- | ---: | ---: |
+| `atomic-flag-handoff` | 7.27 µs | 7.25 µs |
 
 ## Reading The Suite
 
@@ -181,3 +196,12 @@ checks for complementary per-SIMD priority signatures. The wide cooperative row
 keeps the same scheduling idiom but adds real cross-subgroup LDS sharing: in
 each pair, the even subgroup stages B fragments and both subgroups consume
 them.
+
+The atomic flag handoff row is a Stage 2 API/codegen guardrail, not a
+diagnostic benchmark yet. Both pass-through and `context` kernels report 4 B of
+LDS, 3 VGPRs, 10 SGPRs, no scratch/private segment, and no register spills in
+the bundled RDNA4 code-object metadata. The disassembly is effectively
+identical aside from the `context` kernel-argument layout: both paths lower to
+global release/acquire atomic operations on the flag and a raw LDS payload
+handoff. Later atomics stages should use this row to catch API-wrapper overhead
+regressions before adding synchronization metadata.

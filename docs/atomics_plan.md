@@ -26,8 +26,8 @@ benchmarks, documentation, and diligence notes have landed.
 | --- | --- | --- |
 | 0. Freeze the corpus map | Complete | `atomics_corpus.md` identifies RocJITsu-first seeds and limits `matmul_rdna4.hip` to missing Stream-K variants. |
 | 1. Reference kernels before instrumentation | Complete | `tests/reference/atomic_reference_kernels.hip` adds RocJITsu-derived safe and compile-only atomics source shapes. |
-| 2. Public atomic API skeleton | Next | Add pass-through `hip_moi::context` atomic methods, then matching instrumented tests and a benchmark. |
-| 3. Atomic object metadata | Not started | Waiting for pass-through API tests. |
+| 2. Public atomic API skeleton | Complete | `hip_moi::context` has pass-through atomic load/store/fetch-add/fetch-or wrappers, `019_atomic_api_test.hip` verifies device behavior, and `019_atomic_flag_handoff_benchmark.hip` records wrapper codegen/latency. |
+| 3. Atomic object metadata | Next | Design and implement the bounded atomic-object table needed by release/acquire diagnostics. |
 | 4. Happens-before for LDS payload handoffs | Not started | First diagnostic-capable release/acquire stage. |
 | 5. Release/acquire fast path | Not started | Starts immediately after Stage 4 works. |
 | 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
@@ -204,6 +204,12 @@ Exit criteria:
 * pass-through atomic wrappers compile on device;
 * tests verify that the wrappers preserve the uninstrumented kernel results;
 * no synchronization diagnostics are claimed yet.
+
+Status: complete. The Stage 2 benchmark shows the wrapper path compiling to the
+same RDNA4 resource profile as pass-through for the atomic flag handoff row: 4 B
+LDS, 3 VGPRs, 10 SGPRs, no private segment, and no spills. This is a skeleton
+API stage only. It deliberately does not suppress LDS diagnostics through
+release/acquire synchronization.
 
 ## Stage 3: Atomic Object Metadata
 
