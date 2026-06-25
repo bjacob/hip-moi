@@ -90,6 +90,10 @@ the local epoch used by `sampled_watchpoint_context`. The concrete staged plan
 is [`atomics_plan.md`](atomics_plan.md), and the source corpus inventory is
 [`atomics_corpus.md`](atomics_corpus.md).
 
+The race payload remains LDS access. Atomic synchronization operations may be
+in LDS or global memory, but this scope increase does not make hip-moi a
+general global-memory race detector.
+
 The atomics design should specify:
 
 * which HIP/Clang operations are represented;

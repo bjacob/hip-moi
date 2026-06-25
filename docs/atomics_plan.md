@@ -34,21 +34,34 @@ synchronization through an atomic object:
   diagnosed as races;
 * payload accesses not ordered by such an edge should still diagnose normally.
 
+The diagnostic payload remains LDS access. That is the central scope boundary
+for this plan:
+
+* instrumented LDS loads and stores are the accesses whose races hip-moi
+  diagnoses;
+* atomic operations are synchronization operations, and may be in LDS or global
+  memory;
+* global atomic support is required because real kernels often use global flags
+  or counters to order work;
+* ordinary global loads and stores are not diagnostic payloads in this plan.
+
 Fence-only modeling remains out of scope. A fence can matter once it is paired
 with an atomic or another operation that can create a synchronizes-with edge,
 but a naked fence is not a useful first implementation target.
 
-The first realistic Stream-K seed in RocJITsu uses global memory:
+The first realistic Stream-K seed in RocJITsu uses global atomics:
 
 * helpers write global partial accumulators;
 * helpers publish a global flag with release semantics;
 * owners acquire-load that flag;
 * owners read the global partial accumulators.
 
-That means atomics support should not be treated as a small extension to the
-current LDS-only detector. The staged plan below introduces global payload
-instrumentation deliberately, with a narrow first use case: global handoff
-buffers participating in atomic synchronization protocols.
+hip-moi should use that seed for the synchronization protocol, not as a reason
+to become a global-memory race detector. The first diagnostic tests should
+adapt the protocol so a global release/acquire flag orders LDS payload accesses
+inside one workgroup. Actual Stream-K global partial buffers remain useful
+corpus material and later DBI motivation, but they are outside the first
+source-level race payload.
 
 ## Stage 0: Freeze The Corpus Map
 
@@ -87,14 +100,15 @@ the uninstrumented program is defined. Suggested initial cases:
 | Case | Corpus source | Purpose |
 | --- | --- | --- |
 | `global_atomic_add_counter` | RocJITsu llama.cpp `count-equal.cu` | Tiny global RMW operation with an easy oracle. |
-| `release_acquire_flag_handoff` | RocJITsu hip-stream-k `device_locks.hpp` | Minimal producer writes payload, release-stores flag, consumer acquire-loads flag, consumer reads payload. |
-| `two_helper_flag_handoff` | RocJITsu `simple_streamk` / `two_tile_streamk` | Same protocol with more than one helper so ownership and flag indexing are concrete. |
+| `release_acquire_flag_handoff` | RocJITsu hip-stream-k `device_locks.hpp` | Minimal producer writes LDS payload, release-stores global flag, consumer acquire-loads flag, consumer reads LDS payload. |
+| `two_helper_flag_handoff` | RocJITsu `simple_streamk` / `two_tile_streamk` | Same atomic flag protocol with more than one helper-like participant so ownership and flag indexing are concrete. |
 | `plain_flag_handoff_compile_only` | Derived from hip-stream-k | Negative shape: non-atomic publication. Compile only, because launching it relies on undefined behavior or may hang. |
 | `relaxed_flag_handoff_compile_only` | Derived from hip-stream-k | Negative shape: atomic flag without release/acquire ordering. Compile only until hip-moi diagnostics exist. |
 
 Keep these kernels simple. They should preserve the synchronization structure,
-not the full GEMM math. The first Stream-K-like references should use small
-integer payloads and a tiny number of workgroups.
+not the full GEMM math or global partial-buffer payload. The first
+Stream-K-like references should use small integer LDS payloads and a tiny
+number of subgroups in one workgroup.
 
 Exit criteria:
 
@@ -120,16 +134,16 @@ Use explicit hip-moi enums for memory order and scope rather than passing raw
 integer builtin constants through the public API. The implementation can lower
 to HIP/Clang builtins internally.
 
-The first API should also add global payload access methods, because the first
-real Stream-K protocol publishes global partial buffers:
+Do not add global payload access methods in this stage. The payload API remains
+the existing LDS API:
 
 ```c++
-ctx.global_store(ptr, value, HIP_MOI_SITE_ID());
-value = ctx.global_load(ptr, HIP_MOI_SITE_ID());
+ctx.lds_store_at(ptr, value, /*lds_byte_offset=*/offset, HIP_MOI_SITE_ID());
+value = ctx.lds_load_at(ptr, /*lds_byte_offset=*/offset, HIP_MOI_SITE_ID());
 ```
 
-These methods should be documented as instrumented payload accesses, not as a
-general promise that every global memory access in a HIP program is interposed.
+The new atomic methods may operate on global or LDS atomic objects. Their job
+is to create synchronization metadata that can order LDS payload accesses.
 
 Exit criteria:
 
@@ -153,9 +167,8 @@ record at least:
 * generation.
 
 Here, a participant should be the unit that hip-moi currently diagnoses:
-subgroup within a workgroup for LDS, and a workgroup/subgroup pair for global
-handoff payloads. The exact representation can change, but the diagnostic
-message must name what it can actually know.
+subgroup within a workgroup. The exact representation can change, but the
+diagnostic message must name what it can actually know.
 
 The first supported operations:
 
@@ -170,28 +183,46 @@ Exit criteria:
 * release/acquire metadata is generation-separated across launches;
 * diagnostics report atomic source sites when available.
 
-## Stage 4: Happens-Before For Global Payload Handoffs
+## Stage 4: Happens-Before For LDS Payload Handoffs
 
-Goal: make the minimal hip-stream-k handoff meaningful to the detector.
+Goal: make the minimal hip-stream-k atomic handoff meaningful to the LDS
+detector.
 
-Add global payload shadow records for instrumented `global_load` and
-`global_store`. The first conflict predicate should be:
+Extend the existing LDS conflict check so that an apparent LDS conflict is not
+reported when release/acquire atomic synchronization orders the two accesses.
+The first conflict predicate should be:
 
 * same generation;
-* overlapping global byte range;
+* overlapping LDS byte range;
 * different participants;
 * at least one write;
 * neither access is ordered before the other by the tracked release/acquire
   happens-before state.
 
-The first implementation can be intentionally bounded: support small test
-participant counts and global handoff buffers first. It does not need to be a
-complete global-memory race detector for arbitrary production kernels.
+The first implementation can be intentionally bounded: support small subgroup
+counts, a bounded atomic-object table, and release-store/acquire-load handoffs
+first. It does not need to model arbitrary global-memory payloads.
+
+One straightforward correctness-first representation is:
+
+* each subgroup has a logical payload clock, advanced when its LDS epoch
+  advances;
+* an LDS shadow entry records the writer or reader subgroup and the subgroup's
+  clock at the time of the access;
+* a release atomic stores the releasing subgroup's current payload clock in the
+  atomic-object metadata;
+* an acquire atomic that observes the release merges that released clock into
+  the acquiring subgroup's acquired state;
+* the LDS conflict check asks whether the current subgroup has acquired a clock
+  that covers the prior subgroup's recorded access.
+
+The concrete representation can change, but the model must remain explainable
+in those terms.
 
 Instrumented tests:
 
-* correct release/acquire flag handoff from RocJITsu hip-stream-k shape: no
-  diagnostic;
+* correct release/acquire flag handoff adapted from RocJITsu hip-stream-k: no
+  diagnostic for the ordered LDS handoff;
 * missing release/acquire ordering: deterministic diagnostic;
 * plain non-atomic flag: deterministic diagnostic or explicit unsupported
   diagnostic, depending on the chosen API;
@@ -204,7 +235,44 @@ Exit criteria:
 * diagnostics explain both the payload access sites and the atomic sites that
   did or did not order them.
 
-## Stage 5: RMW Atomics As Both Access And Synchronization
+## Stage 5: Release/Acquire Fast Path
+
+Goal: make the first correct atomics implementation cheap enough to be a real
+candidate for Stream-K-like kernels.
+
+This fast path still lives under `hip_moi::context`. It is not
+`hip_moi::sampled_watchpoint_context`: it remains diagnostic-capable and must
+not silently drop conflicts. The target protocol is the RocJITsu hip-stream-k
+shape adapted to LDS payloads:
+
+* one or more subgroups write LDS payload;
+* a producer subgroup release-stores a flag or counter;
+* a consumer subgroup acquire-loads that atomic object;
+* the consumer reads LDS payload.
+
+The performance principle is to pay at synchronization points, not at every
+LDS access. Atomic operations should update compact per-subgroup ordering
+state. LDS instrumentation should keep the existing immediate conflict check
+and add only a cheap ordered-before query against that compact state.
+
+The first fast-path representation should aim for:
+
+* a small fixed-capacity or byte-budgeted atomic-object table;
+* per-subgroup acquired clocks or tokens, indexed by producer subgroup;
+* LDS shadow entries that continue to fit in the existing compact exact-shadow
+  shape if possible;
+* no scans over all atomic objects during LDS load/store instrumentation;
+* deterministic fallback to `metadata_full` or a correctness-first path when
+  the fast-path capacity is exceeded.
+
+Exit criteria:
+
+* the Stage 4 correct and incorrect release/acquire tests still pass;
+* the hot LDS access path does not perform global atomic metadata lookups;
+* a microbenchmark can compare the correctness-first path and the fast path on
+  the same RocJITsu-derived flag handoff.
+
+## Stage 6: RMW Atomics As Both Access And Synchronization
 
 Goal: represent read-modify-write atomics correctly enough for counters and
 bitmasks.
@@ -232,22 +300,42 @@ Implementation requirements:
 Exit criteria:
 
 * a tiny `atomicAdd` reduction reference has an instrumented counterpart;
-* an arrival-counter handoff can order payload stores before the final reducer;
+* an adapted arrival-counter handoff can order LDS payload stores before the
+  reducer subgroup reads them;
 * an `atomicOr` bitmask test proves that old-value-dependent control flow is
   represented.
 
-## Stage 6: Fences Paired With Atomics
+## Stage 7: RMW Fast Paths
+
+Goal: extend the Stage 5 fast-path idea only where the RMW protocol warrants
+it.
+
+Do not optimize all atomics generically up front. Add protocol-specific fast
+paths after correctness tests demonstrate the needed semantics:
+
+* `atomicAdd` arrival counters: cache the release state associated with the
+  counter value or last-arriver observation;
+* `atomicOr` bitmasks: cache the release state associated with published bits
+  and the old value returned by the RMW.
+
+Exit criteria:
+
+* each RMW fast path has a correctness-first test and a fast-path test;
+* unsupported or capacity-exceeded RMW shapes fall back deterministically;
+* the docs say exactly which RMW protocols are optimized.
+
+## Stage 8: Fences Paired With Atomics
 
 Goal: cover the source patterns that use relaxed atomics plus explicit fences.
 
 Do not model fences alone. Model the pair:
 
-* producer payload writes;
+* producer LDS payload writes;
 * producer release fence;
 * relaxed atomic publication;
 * relaxed or acquire atomic observation;
 * consumer acquire fence;
-* consumer payload reads.
+* consumer LDS payload reads.
 
 This stage should be driven by corpus evidence. The generic Stream-K comments
 in RocJITsu's vendored `hip-matmul/matmul.hip` and the earlier
@@ -262,7 +350,7 @@ Exit criteria:
 * docs clearly state how the HIP/Clang builtins map to the LLVM IR memory
   model being approximated.
 
-## Stage 7: Stream-K Integration Tests
+## Stage 9: Stream-K Integration Tests
 
 Goal: stop testing only distilled handoffs and cover matmul-shaped control
 flow.
@@ -278,6 +366,11 @@ Preferred order:
 Keep these as correctness tests first. Add benchmarks only when the semantic
 behavior is stable enough that performance numbers are interpretable.
 
+Because hip-moi's source-level diagnostic payload is LDS, these tests should be
+clear about what they are validating. RocJITsu-derived Stream-K tests validate
+the atomic synchronization protocol and its effect on LDS diagnostics. They do
+not claim that hip-moi diagnoses races in Stream-K global partial buffers.
+
 Exit criteria:
 
 * at least one realistic Stream-K-shaped test passes without diagnostics;
@@ -285,7 +378,7 @@ Exit criteria:
   handoff;
 * the test README says which source corpus each test came from.
 
-## Stage 8: DBI-Oriented Atomic Instruction Seeds
+## Stage 10: DBI-Oriented Atomic Instruction Seeds
 
 Goal: preserve the bridge to rocjitsu and future dynamic binary
 instrumentation.
@@ -318,7 +411,9 @@ Exit criteria:
 2. Add compile-only negative reference shapes for plain and relaxed flag
    handoffs.
 3. Add the `hip_moi::context` atomic API skeleton as pass-through wrappers.
-4. Add the first global payload access API and tests that prove pass-through
-   correctness.
+4. Add pass-through tests that use global atomics to order LDS payload code,
+   while still checking ordinary kernel results.
 5. Design and document the first atomic object metadata layout before enabling
    diagnostics.
+6. Implement release/acquire ordering for LDS conflict suppression, then add
+   the release/acquire fast path before widening to RMW protocols.

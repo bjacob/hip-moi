@@ -249,8 +249,10 @@ READMEs now describe the current detector scope.
    or Stream-K-tree `atomicOr` bitmasks. The immediate next sessions are:
    add `tests/reference/atomic_reference_kernels.hip`, add compile-only broken
    handoff shapes, add pass-through `hip_moi::context` atomic wrappers, add
-   global payload access wrappers, then design the first atomic object metadata
-   layout before enabling diagnostics.
+   tests that use global atomics to order LDS payload code, then design the
+   first atomic object metadata layout before enabling diagnostics. The
+   diagnostic payload remains LDS access; global atomics are synchronization
+   operations, not a request to diagnose ordinary global load/store races.
 
 ## Non-Goals
 

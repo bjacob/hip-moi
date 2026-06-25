@@ -30,6 +30,9 @@ The priority rule is RocJITsu-first. Prefer
 tests. Use `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` only for
 Stream-K examples that go beyond what RocJITsu currently provides, especially
 RDNA4 WMMA arrival counters and Stream-K-tree bitmasks.
+For hip-moi's source-level detector, extracted diagnostic tests should keep the
+race payload in LDS; global atomics are synchronization seeds, not an expansion
+to ordinary global load/store race detection.
 
 ### RocJITsu Test Corpus: hip-stream-k Release/Acquire Flags
 
