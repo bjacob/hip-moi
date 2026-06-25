@@ -29,8 +29,8 @@ benchmarks, documentation, and diligence notes have landed.
 | 2. Public atomic API skeleton | Complete | `hip_moi::context` has pass-through atomic load/store/fetch-add/fetch-or wrappers, `019_atomic_api_test.hip` verifies device behavior, and `019_atomic_flag_handoff_benchmark.hip` records wrapper codegen/latency. |
 | 3. Atomic object metadata | Complete | `context::atomic_object_record` is allocated from the host byte budget, release-style atomics populate a bounded generation-separated table, and `020_atomic_metadata_test.hip` / `020_atomic_metadata_benchmark.hip` cover saturation, generation reuse, and codegen cost. |
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
-| 5. Release/acquire fast path | In progress | Two optimizations have landed: byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
-| 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
+| 5. Release/acquire fast path | Complete | Byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
+| 6. RMW atomics | In progress | First rung landed: `023_atomic_rmw_happens_before_test.hip` and matching benchmark cover release `fetch_add` publishing LDS payload to an acquire `fetch_add` consumer. Full `acq_rel` RMW chains remain open. |
 | 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
 | 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
 | 9. Stream-K integration tests | Not started | Starts after the relevant atomic protocols are supported. |
@@ -230,12 +230,12 @@ Here, a participant should be the unit that hip-moi currently diagnoses:
 subgroup within a workgroup. The exact representation can change, but the
 diagnostic message must name what it can actually know.
 
-The first supported operations:
+The first metadata-recording operations:
 
 * release `atomic_store`;
 * acquire `atomic_load`;
-* acquire-release `atomic_fetch_add` as a recorded RMW, without yet depending
-  on Stream-K final-arriver logic.
+* release-capable RMWs such as `atomic_fetch_add`, without yet claiming full
+  Stream-K final-arriver semantics.
 
 Exit criteria:
 
@@ -256,7 +256,7 @@ diagnostic carrying the atomic address, byte size, and source site.
 This stage intentionally does not suppress LDS diagnostics. The metadata is
 recorded but not yet queried by the LDS conflict predicate. The Stage 3
 benchmark shows the first cost baseline: `atomic-metadata-release-store` is
-3.43 µs pass-through and 13.4 µs through `context` on the local RDNA4 machine,
+3.40 µs pass-through and 16.2 µs through `context` on the local RDNA4 machine,
 with 23 VGPRs, 34 SGPRs, no private segment, and no spills in the `context`
 kernel.
 
@@ -367,7 +367,8 @@ Exit criteria:
 * a microbenchmark can compare the correctness-first path and the fast path on
   the same RocJITsu-derived flag handoff.
 
-Status: in progress. The first fast-path change targets the atomic-object table
+Status: complete for the current release/acquire handoff scope. The first
+fast-path change targets the atomic-object table
 probe itself. Auto-derived atomic-object capacities now round up to a power of
 two, and the device probe-start mapping uses `hash & (capacity - 1)` instead of
 runtime modulo. A deliberately bad intermediate experiment rounded capacity
@@ -379,9 +380,9 @@ The second fast-path change targets acquire-side misses. Atomic metadata records
 are never deleted within one generation, so a stale slot terminates an
 open-addressing probe chain unless another thread is actively claiming that
 slot. This mainly helps spin loops before the releasing subgroup has published
-metadata. Current local RDNA4 numbers are 14.9 µs for
-`atomic-metadata-release-store_context`, 30.8 µs for
-`atomic-flag-handoff_context`, and 8.87 µs for
+metadata. Current local RDNA4 numbers after the Stage 6 metadata publication
+ordering change are 16.2 µs for `atomic-metadata-release-store_context`, 31.4
+µs for `atomic-flag-handoff_context`, and 8.65 µs for
 `atomic-hb-lds-handoff_context`.
 
 ## Stage 6: RMW Atomics As Both Access And Synchronization
@@ -416,6 +417,23 @@ Exit criteria:
   reducer subgroup reads them;
 * an `atomicOr` bitmask test proves that old-value-dependent control flow is
   represented.
+
+Status: in progress. The first arrival-counter rung has landed:
+`023_atomic_rmw_happens_before_test.hip` and
+`023_atomic_rmw_happens_before_benchmark.hip` cover a producer subgroup that
+stores LDS payload, publishes it with a release `fetch_add`, and a consumer
+subgroup that observes the counter with an acquire `fetch_add` before reading
+the payload. The context row is 8.65 µs on the local RDNA4 machine, with 8 B
+LDS, 23 VGPRs, 56 SGPRs, no private segment, and no spills.
+
+The deliberately deferred RMW case is a full `acq_rel` chain, where consecutive
+RMW values on the same atomic object must coexist in metadata. A single
+per-address atomic-object record is not enough for that shape: if the later RMW
+publishes its release metadata before acquiring the earlier RMW's value, it can
+overwrite the value needed for the acquire; if it waits to acquire first, the
+earlier RMW's metadata can itself be delayed. The next Stage 6 step should
+introduce value-sensitive RMW metadata or another representation that can model
+multiple observed counter values without losing the immediate predecessor.
 
 ## Stage 7: RMW Fast Paths
 

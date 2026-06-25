@@ -253,15 +253,17 @@ READMEs now describe the current detector scope.
    metadata table and records release-style atomic operations. Stage 4 has
    connected release/acquire observations to the LDS conflict predicate through
    a per-subgroup acquired-epoch matrix, so an actually ordered LDS handoff does
-   not diagnose while broken handoffs still do. The immediate next work is
-   Stage 5: reduce the overhead of the release/acquire path without weakening
-   those diagnostics. The first Stage 5 optimization has started by making
-   atomic-object capacities powers of two and using masked probe starts instead
-   of runtime modulo; acquire lookups also now terminate on the first stale
-   open-addressing slot. The diagnostic payload remains LDS access; global atomics
-   are synchronization operations, not a request to diagnose ordinary global
-   load/store races. Each atomics stage must satisfy the completion checklist in
-   `docs/atomics_plan.md`: instrumented test, matching benchmark,
+   not diagnose while broken handoffs still do. Stage 5 has reduced the
+   release/acquire metadata overhead by making atomic-object capacities powers
+   of two, using masked probe starts, and terminating acquire lookups at the
+   first stale open-addressing slot. Stage 6 is now in progress: the first RMW
+   rung covers a release `fetch_add` arrival counter consumed by an acquire
+   `fetch_add`; full `acq_rel` RMW chains remain a separate next step because
+   they need metadata for multiple observed counter values to coexist. The
+   diagnostic payload remains LDS access; global atomics are synchronization
+   operations, not a request to diagnose ordinary global load/store races. Each
+   atomics stage must satisfy the completion checklist in `docs/atomics_plan.md`:
+   instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence
    before the next stage starts.
 

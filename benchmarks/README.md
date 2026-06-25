@@ -88,6 +88,11 @@ atomics benchmark. A global release/acquire flag orders an instrumented LDS
 payload handoff, and the `context` row uses the acquired-epoch matrix to avoid
 reporting the ordered LDS access pair.
 
+`023_atomic_rmw_happens_before_benchmark.hip` is the first RMW atomics
+benchmark. A producer subgroup publishes an LDS payload with a release
+`fetch_add`, and a consumer subgroup observes the arrival counter with an
+acquire `fetch_add` before reading that payload.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -110,6 +115,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 24 VGPRs, no spills |
 | `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a; `context` row is 23 VGPRs, no spills |
 | `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a; `context` row is 21 VGPRs, no spills |
+| `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a; `context` row is 23 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -135,6 +141,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-flag-handoff` | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B, <0.1% | 3 |
 | `atomic-metadata-release-store` | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B, 0.0% | 2 |
 | `atomic-hb-lds-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B, <0.1% | 3 |
+| `atomic-rmw-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, release/acquire `fetch_add` arrival counter orders instrumented LDS payload | 8 B, <0.1% | 4 |
 
 ## Benchmark Modes
 
@@ -180,9 +187,10 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 
 | Key | pass-through | `context` |
 | --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.24 µs | 30.8 µs |
-| `atomic-metadata-release-store` | 3.43 µs | 14.9 µs |
-| `atomic-hb-lds-handoff` | 3.39 µs | 8.87 µs |
+| `atomic-flag-handoff` | 7.22 µs | 31.4 µs |
+| `atomic-metadata-release-store` | 3.40 µs | 16.2 µs |
+| `atomic-hb-lds-handoff` | 3.36 µs | 8.65 µs |
+| `atomic-rmw-arrival-counter` | 3.40 µs | 8.65 µs |
 
 ## Reading The Suite
 
@@ -239,3 +247,11 @@ VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 4 B LDS, 21 VGPRs,
 fresh generation kernel argument for each measured launch so the exact-shadow
 entries and atomic-object records remain launch-separated without timing
 host-side metadata copies.
+
+The atomic RMW arrival-counter row is the first RMW synchronization row. The
+pass-through kernel reports 8 B LDS, 4 VGPRs, 10 SGPRs, and no spills. The
+`context` kernel reports 8 B LDS, 23 VGPRs, 56 SGPRs, no scratch/private
+segment, and no spills. This row intentionally covers one release `fetch_add`
+followed by one acquire `fetch_add`. Full `acq_rel` RMW chains are a separate
+next step because they need metadata for multiple observed counter values to
+coexist.

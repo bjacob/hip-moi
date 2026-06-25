@@ -133,3 +133,5 @@ hip_moi_add_gtest(hip_moi_instrumented_atomic_happens_before_test
                   instrumented/021_atomic_happens_before_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_atomic_fast_path_test
                   instrumented/022_atomic_fast_path_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_atomic_rmw_happens_before_test
+                  instrumented/023_atomic_rmw_happens_before_test.hip)

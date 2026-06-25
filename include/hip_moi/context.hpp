@@ -267,7 +267,11 @@ namespace hip_moi
             T old_value = detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
             if(detail::atomic_order_has_acquire(order))
             {
-                record_atomic_acquire(ptr, static_cast<uint64_t>(old_value));
+                // RMW release metadata is recorded after the hardware atomic,
+                // so an acquiring RMW can observe the new value before the
+                // producer has published its metadata.
+                record_atomic_acquire(
+                    ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
             }
             if(detail::atomic_order_has_release(order))
             {
@@ -291,7 +295,10 @@ namespace hip_moi
             T old_value = detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
             if(detail::atomic_order_has_acquire(order))
             {
-                record_atomic_acquire(ptr, static_cast<uint64_t>(old_value));
+                // See atomic_fetch_add: acquiring RMWs may need to wait for
+                // release metadata from the immediately preceding RMW.
+                record_atomic_acquire(
+                    ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
             }
             if(detail::atomic_order_has_release(order))
             {
@@ -401,6 +408,7 @@ namespace hip_moi
 
     private:
         static constexpr uint64_t kAtomicObjectClaimedGeneration = ~uint64_t{0};
+        static constexpr int      kAtomicRmwAcquireRetryCount    = 1024;
 
         __device__ backend_kind selected_backend() const
         {
@@ -537,31 +545,32 @@ namespace hip_moi
                 return;
             }
 
-            record->value                 = value;
             record->releasing_subgroup_id = subgroup_id();
             record->releasing_epoch       = detail::current_epoch(storage_, subgroup_id());
             record->release_site_id       = site.value();
             __threadfence();
+            record->value = value;
+            __threadfence();
         }
 
-        __device__ void record_atomic_acquire(const void* ptr, uint64_t observed_value) const
+        __device__ bool try_record_atomic_acquire(const void* ptr, uint64_t observed_value) const
         {
             if(!storage_.acquired_subgroup_epoch_tokens || storage_.subgroup_capacity <= 0)
             {
-                return;
+                return true;
             }
 
             atomic_object_record* record
                 = find_atomic_object_record(reinterpret_cast<uintptr_t>(ptr));
             if(!record)
             {
-                return;
+                return false;
             }
 
             uint64_t released_value = *reinterpret_cast<volatile uint64_t*>(&record->value);
             if(released_value != observed_value)
             {
-                return;
+                return false;
             }
 
             uint32_t producer
@@ -570,7 +579,7 @@ namespace hip_moi
             uint32_t capacity = static_cast<uint32_t>(storage_.subgroup_capacity);
             if(producer >= capacity || consumer >= capacity)
             {
-                return;
+                return true;
             }
 
             uint32_t released_epoch
@@ -578,6 +587,32 @@ namespace hip_moi
             uint32_t token = released_epoch + 1u;
             uint32_t index = consumer * capacity + producer;
             (void)atomicMax(&storage_.acquired_subgroup_epoch_tokens[index], token);
+            return true;
+        }
+
+        __device__ void atomic_acquire_retry_delay() const
+        {
+            for(int delay = 0; delay < 16; ++delay)
+            {
+                __builtin_amdgcn_s_sleep(1);
+            }
+        }
+
+        __device__ void record_atomic_acquire(const void* ptr,
+                                              uint64_t    observed_value,
+                                              int         retry_count = 1) const
+        {
+            for(int attempt = 0; attempt < retry_count; ++attempt)
+            {
+                if(try_record_atomic_acquire(ptr, observed_value))
+                {
+                    return;
+                }
+                if(attempt + 1 < retry_count)
+                {
+                    atomic_acquire_retry_delay();
+                }
+            }
         }
 
         __device__ bool

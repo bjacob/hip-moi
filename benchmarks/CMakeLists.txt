@@ -87,3 +87,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_metadata
                             020_atomic_metadata_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_happens_before
                             021_atomic_happens_before_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_rmw_happens_before
+                            023_atomic_rmw_happens_before_benchmark.hip)
