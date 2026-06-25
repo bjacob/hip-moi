@@ -86,6 +86,12 @@ storage budgets can track more distinct atomic objects before emitting
 table. There is no separate user-facing atomic-object capacity knob in the
 ordinary API.
 
+Release/acquire atomics also use an internal acquired-epoch matrix whose size is
+derived from `subgroup_capacity`. This matrix records which producer subgroup
+epochs each consumer subgroup has acquired, and the exact-shadow backend uses
+it to suppress LDS conflicts that are ordered by a tracked release/acquire
+handoff.
+
 ## Backend Storage
 
 The current device context has two backends:

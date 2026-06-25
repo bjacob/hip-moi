@@ -72,6 +72,7 @@ namespace hip_moi
             uint32_t              sampled_watchpoint_report_conflicts = 1;
             atomic_object_record* atomic_objects                      = nullptr;
             int                   atomic_object_capacity              = 0;
+            uint32_t*             acquired_subgroup_epoch_tokens      = nullptr;
         };
 
         template <int DiagnosticCapacity,
@@ -133,6 +134,12 @@ namespace hip_moi
                 for(int i = 0; storage_.subgroup_states && i < storage_.subgroup_capacity; ++i)
                 {
                     storage_.subgroup_states[i].epoch = 0;
+                }
+                int acquired_epoch_count = storage_.subgroup_capacity * storage_.subgroup_capacity;
+                for(int i = 0; storage_.acquired_subgroup_epoch_tokens && i < acquired_epoch_count;
+                    ++i)
+                {
+                    storage_.acquired_subgroup_epoch_tokens[i] = 0;
                 }
                 if(detail::configured_subgroup_count(cfg_) > static_cast<uint32_t>(
                        storage_.subgroup_capacity > 0 ? storage_.subgroup_capacity : 0))
@@ -218,8 +225,16 @@ namespace hip_moi
             static_assert(detail::is_supported_atomic_value<T>::value,
                           "hip_moi::context::atomic_load currently supports "
                           "4-byte and 8-byte integral values");
-            (void)site;
-            return detail::atomic_load_dispatch(ptr, order, scope);
+            T value = detail::atomic_load_dispatch(ptr, order, scope);
+            if(detail::atomic_order_has_acquire(order))
+            {
+                record_atomic_acquire(ptr, static_cast<uint64_t>(value));
+            }
+            else
+            {
+                (void)site;
+            }
+            return value;
         }
 
         template <typename T>
@@ -250,6 +265,10 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_add currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_acquire(order))
+            {
+                record_atomic_acquire(ptr, static_cast<uint64_t>(old_value));
+            }
             if(detail::atomic_order_has_release(order))
             {
                 uint64_t released_value
@@ -270,6 +289,10 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_or currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_acquire(order))
+            {
+                record_atomic_acquire(ptr, static_cast<uint64_t>(old_value));
+            }
             if(detail::atomic_order_has_release(order))
             {
                 uint64_t released_value
@@ -457,6 +480,43 @@ namespace hip_moi
             return nullptr;
         }
 
+        __device__ atomic_object_record* find_atomic_object_record(uintptr_t address) const
+        {
+            if(!storage_.atomic_objects || storage_.atomic_object_capacity <= 0)
+            {
+                return nullptr;
+            }
+
+            uint64_t generation = storage_.generation;
+            uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
+            uint32_t seed
+                = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
+            uint32_t start = detail::mix32(seed) % capacity;
+            for(uint32_t probe = 0; probe < capacity; ++probe)
+            {
+                uint32_t index = start + probe;
+                if(index >= capacity)
+                {
+                    index -= capacity;
+                }
+
+                atomic_object_record* record = &storage_.atomic_objects[index];
+                uint64_t              slot_generation
+                    = *reinterpret_cast<volatile uint64_t*>(&record->generation);
+                if(slot_generation != generation)
+                {
+                    continue;
+                }
+
+                uintptr_t slot_address = *reinterpret_cast<volatile uintptr_t*>(&record->address);
+                if(slot_address == address)
+                {
+                    return record;
+                }
+            }
+            return nullptr;
+        }
+
         __device__ void record_atomic_release(const void* ptr,
                                               uint32_t    byte_count,
                                               uint64_t    value,
@@ -475,6 +535,63 @@ namespace hip_moi
             record->releasing_epoch       = detail::current_epoch(storage_, subgroup_id());
             record->release_site_id       = site.value();
             __threadfence();
+        }
+
+        __device__ void record_atomic_acquire(const void* ptr, uint64_t observed_value) const
+        {
+            if(!storage_.acquired_subgroup_epoch_tokens || storage_.subgroup_capacity <= 0)
+            {
+                return;
+            }
+
+            atomic_object_record* record
+                = find_atomic_object_record(reinterpret_cast<uintptr_t>(ptr));
+            if(!record)
+            {
+                return;
+            }
+
+            uint64_t released_value = *reinterpret_cast<volatile uint64_t*>(&record->value);
+            if(released_value != observed_value)
+            {
+                return;
+            }
+
+            uint32_t producer
+                = *reinterpret_cast<volatile uint32_t*>(&record->releasing_subgroup_id);
+            uint32_t consumer = subgroup_id();
+            uint32_t capacity = static_cast<uint32_t>(storage_.subgroup_capacity);
+            if(producer >= capacity || consumer >= capacity)
+            {
+                return;
+            }
+
+            uint32_t released_epoch
+                = *reinterpret_cast<volatile uint32_t*>(&record->releasing_epoch);
+            uint32_t token = released_epoch + 1u;
+            uint32_t index = consumer * capacity + producer;
+            (void)atomicMax(&storage_.acquired_subgroup_epoch_tokens[index], token);
+        }
+
+        __device__ bool
+            current_access_acquired_prior_epoch(const detail::exact_shadow_entry& prior,
+                                                const detail::exact_shadow_entry& current) const
+        {
+            if(!storage_.acquired_subgroup_epoch_tokens || storage_.subgroup_capacity <= 0)
+            {
+                return false;
+            }
+
+            uint32_t capacity = static_cast<uint32_t>(storage_.subgroup_capacity);
+            if(current.owner_id >= capacity || prior.owner_id >= capacity)
+            {
+                return false;
+            }
+
+            uint32_t index = current.owner_id * capacity + prior.owner_id;
+            uint32_t token = *reinterpret_cast<volatile uint32_t*>(
+                &storage_.acquired_subgroup_epoch_tokens[index]);
+            return token >= prior.epoch + 1u;
         }
 
         __device__ void record_access_at(const void* ptr,
@@ -579,7 +696,8 @@ namespace hip_moi
                 uint64_t prior_value
                     = atomic_exchange_shadow_entry(&storage_.exact_shadow_entries[cell], packed);
                 detail::exact_shadow_entry prior = detail::decode_exact_shadow_entry(prior_value);
-                if(detail::exact_shadow_entries_conflict(current, prior))
+                if(detail::exact_shadow_entries_conflict(current, prior)
+                   && !current_access_acquired_prior_epoch(prior, current))
                 {
                     emit_shadow_conflict(prior, current, byte_count, lds_byte_offset, cell);
                 }

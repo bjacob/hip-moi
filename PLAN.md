@@ -250,12 +250,13 @@ READMEs now describe the current detector scope.
    kernels and compile-only broken handoff shapes. Stage 2 has landed the
    pass-through `hip_moi::context` atomic API and its first test/benchmark
    guardrail. Stage 3 has landed the bounded, byte-budget-derived atomic-object
-   metadata table and records release-style atomic operations without yet using
-   them to suppress LDS diagnostics. The immediate next work is Stage 4:
-   connect release/acquire observations to the LDS conflict predicate so an
-   actually ordered LDS handoff does not diagnose while broken handoffs still
-   do. The diagnostic payload remains LDS access; global atomics are
-   synchronization operations, not a request to diagnose ordinary global
+   metadata table and records release-style atomic operations. Stage 4 has
+   connected release/acquire observations to the LDS conflict predicate through
+   a per-subgroup acquired-epoch matrix, so an actually ordered LDS handoff does
+   not diagnose while broken handoffs still do. The immediate next work is
+   Stage 5: reduce the overhead of the release/acquire path without weakening
+   those diagnostics. The diagnostic payload remains LDS access; global atomics
+   are synchronization operations, not a request to diagnose ordinary global
    load/store races. Each atomics stage must satisfy the completion checklist in
    `docs/atomics_plan.md`: instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence

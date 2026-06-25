@@ -147,6 +147,7 @@ namespace hip_moi
                 options_.sampled_watchpoint_reports ? 1u : 0u,
                 atomic_objects_,
                 atomic_object_capacity_,
+                acquired_subgroup_epoch_tokens_,
             };
         }
 
@@ -342,6 +343,12 @@ namespace hip_moi
             *offset += static_cast<std::size_t>(capacity) * sizeof(T);
         }
 
+        std::size_t acquired_subgroup_epoch_token_count() const
+        {
+            return static_cast<std::size_t>(subgroup_capacity_)
+                   * static_cast<std::size_t>(subgroup_capacity_);
+        }
+
         uint64_t next_generation()
         {
             ++generation_;
@@ -432,6 +439,8 @@ namespace hip_moi
             append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
             append_slice_size<int>(&offset, 2);
             append_slice_size<context::atomic_object_record>(&offset, atomic_object_capacity_);
+            append_slice_size<uint32_t>(
+                &offset, checked_capacity(acquired_subgroup_epoch_token_count(), "acquired_epoch"));
             append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
             append_slice_size<uint64_t>(&offset, sampled_watchpoint_capacity_);
             return offset;
@@ -447,6 +456,11 @@ namespace hip_moi
             assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
             assign_slice<context::atomic_object_record>(
                 device_storage_, atomic_object_capacity_, &offset, &atomic_objects_);
+            assign_slice<uint32_t>(
+                device_storage_,
+                checked_capacity(acquired_subgroup_epoch_token_count(), "acquired_epoch"),
+                &offset,
+                &acquired_subgroup_epoch_tokens_);
             assign_slice<uint64_t>(
                 device_storage_, exact_shadow_entry_capacity_, &offset, &exact_shadow_entries_);
             assign_slice<uint64_t>(
@@ -606,6 +620,10 @@ namespace hip_moi
                                 0,
                                 atomic_object_capacity_ * sizeof(context::atomic_object_record),
                                 "atomic_objects");
+            hip_memset_or_abort(acquired_subgroup_epoch_tokens_,
+                                0,
+                                acquired_subgroup_epoch_token_count() * sizeof(uint32_t),
+                                "acquired_subgroup_epoch_tokens");
             hip_memset_or_abort(exact_shadow_entries_,
                                 0,
                                 exact_shadow_entry_capacity_ * sizeof(uint64_t),
@@ -743,6 +761,7 @@ namespace hip_moi
             exact_shadow_entries_            = nullptr;
             sampled_watchpoints_             = nullptr;
             atomic_objects_                  = nullptr;
+            acquired_subgroup_epoch_tokens_  = nullptr;
         }
 
         host_context_options           options_;
@@ -767,6 +786,7 @@ namespace hip_moi
         uint64_t*                      exact_shadow_entries_            = nullptr;
         uint64_t*                      sampled_watchpoints_             = nullptr;
         context::atomic_object_record* atomic_objects_                  = nullptr;
+        uint32_t*                      acquired_subgroup_epoch_tokens_  = nullptr;
     };
 
     inline void check_or_abort(host_context& context, const char* file, int line)

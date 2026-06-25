@@ -83,6 +83,11 @@ hip-moi does not yet use that metadata to suppress LDS diagnostics.
 workgroup release-stores one unique global flag, and the `context` row records
 that atomic object in the bounded metadata table.
 
+`021_atomic_happens_before_benchmark.hip` is the first diagnostic-semantics
+atomics benchmark. A global release/acquire flag orders an instrumented LDS
+payload handoff, and the `context` row uses the acquired-epoch matrix to avoid
+reporting the ordered LDS access pair.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -104,6 +109,7 @@ segment notes are included when that fast row is not spill-free.
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
 | `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 24 VGPRs, no spills |
 | `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a; `context` row is 23 VGPRs, no spills |
+| `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a; `context` row is 21 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -128,6 +134,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `pingpong-wide-cooperative-lds` | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B, 9.4% | 24 |
 | `atomic-flag-handoff` | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B, <0.1% | 3 |
 | `atomic-metadata-release-store` | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B, 0.0% | 2 |
+| `atomic-hb-lds-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B, <0.1% | 3 |
 
 ## Benchmark Modes
 
@@ -173,8 +180,9 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 
 | Key | pass-through | `context` |
 | --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.26 µs | 36.7 µs |
-| `atomic-metadata-release-store` | 3.45 µs | 23.9 µs |
+| `atomic-flag-handoff` | 7.24 µs | 43.4 µs |
+| `atomic-metadata-release-store` | 3.42 µs | 18.7 µs |
+| `atomic-hb-lds-handoff` | 3.33 µs | 12.5 µs |
 
 ## Reading The Suite
 
@@ -207,7 +215,7 @@ them.
 The atomic flag handoff row is no longer a pure API-wrapper guardrail: the
 `context` kernel records release-side atomic-object metadata. The pass-through
 kernel reports 4 B LDS, 3 VGPRs, 10 SGPRs, and no spills. The `context` kernel
-reports 4 B LDS, 24 VGPRs, 40 SGPRs, no scratch/private segment, and no spills.
+reports 4 B LDS, 24 VGPRs, 42 SGPRs, no scratch/private segment, and no spills.
 It is still not a diagnostic benchmark because Stage 3 does not query this
 metadata from the LDS conflict check.
 
@@ -219,3 +227,11 @@ probe/claim path, including global loads and a 64-bit compare-and-swap for
 claiming stale slots. The first implementation uses address hashing before
 linear probing; a previous all-probes-from-zero prototype was rejected because
 it made table fill effectively quadratic.
+
+The atomic happens-before LDS handoff row is the first row where atomic
+metadata affects LDS diagnostics. The pass-through kernel reports 4 B LDS, 3
+VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 4 B LDS, 21 VGPRs,
+55 SGPRs, no scratch/private segment, and no spills. This benchmark uses a
+fresh generation kernel argument for each measured launch so the exact-shadow
+entries and atomic-object records remain launch-separated without timing
+host-side metadata copies.
