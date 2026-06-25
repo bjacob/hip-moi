@@ -166,6 +166,8 @@ Current entry points:
 * `docs/context.md`: context allocation and usage examples;
 * `docs/tutorial/README.md`: tested tutorial sequence with local definitions,
   per-example intent, and links to deeper model/context docs;
+* `docs/pingpong.md`: source survey and scope decision for ping-pong
+  scheduling, `setprio`, `sched_barrier`, and RDNA4 suitability;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
@@ -186,26 +188,42 @@ READMEs now describe the current detector scope.
 
 ## Next Work
 
-1. Write a Loom/RFC comparison document.
+1. Add one controlled ping-pong-shaped HIP test.
+
+   This should be RDNA4-gated, use WMMA, multiple subgroups, LDS
+   double-buffering, `__builtin_amdgcn_s_setprio`, and
+   `__builtin_amdgcn_sched_barrier`, while keeping full-workgroup barriers as
+   the only epoch boundaries. The purpose is to prove that hip-moi can
+   instrument `setprio`-using code and to inspect code generation, not to claim
+   production RDNA4 ping-pong performance.
+
+2. Add a matching ping-pong benchmark only if the test shape is stable.
+
+   The benchmark should be added after generated-code inspection confirms that
+   the expected `s_setprio` instructions remain in the kernel. Benchmark
+   documentation must state that hip-moi treats `setprio` and `sched_barrier` as
+   scheduling operations, not synchronization edges.
+
+3. Write a Loom/RFC comparison document.
 
    This should map hip-moi concepts to real Loom, Jakub-Sampled-Loom, and the
    RFC vocabulary: metadata layout, ownership, epoch advancement, access-time
    checking, sampling, false-negative sources, and diagnostic capabilities.
 
-2. Write a benchmark interpretation document.
+4. Write a benchmark interpretation document.
 
    The benchmark README records numbers. A separate delivery document should
    explain what those numbers imply for Loom and the RFC: which overheads come
    from metadata traffic, which come from register pressure, which paths spill,
    and which workload shapes are most informative.
 
-3. Tighten source comments around benchmark-local Jakub-Sampled-Loom code.
+5. Tighten source comments around benchmark-local Jakub-Sampled-Loom code.
 
    The benchmark sources contain a local comparison implementation. Comments
    should make clear that this is Jakub's HIP prototype shape, not upstream
    Loom itself.
 
-4. Plan the next semantic expansion: atomics.
+6. Plan the next semantic expansion: atomics.
 
    Atomics belong first in `hip_moi::context`, not in
    `sampled_watchpoint_context`. The design should state exactly which LLVM/HIP

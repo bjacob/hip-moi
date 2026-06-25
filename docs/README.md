@@ -34,7 +34,13 @@ interpreted.
    States the active scope boundaries, the diagnostic versus publish-only split,
    and the next semantic expansion.
 
-5. [Benchmark README](../benchmarks/README.md)
+5. [Ping-Pong Scheduling And `setprio`](pingpong.md)
+
+   Records the current source survey and explains why `setprio` is a
+   scheduling operation, not a memory-ordering operation, for hip-moi's current
+   detector.
+
+6. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 
