@@ -1,12 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// benchmarks/016_rdna4_pingpong_att_probe.hip
+// benchmarks/018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip
 //
-// Optimized RDNA4 ping-pong-shaped kernels for ATT scheduling validation and
-// timing. The one-shot modes launch enough workgroups for ROCprof ATT to
-// capture real waves on the selected target CU. The benchmark mode uses the
-// same kernels with HIP event timing.
+// RDNA4 ping-pong-shaped benchmark with real cross-subgroup LDS sharing. Four
+// subgroups are arranged as two cooperating pairs; the even subgroup in each
+// pair stages B fragments in LDS and both subgroups in the pair consume them.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
@@ -26,7 +25,8 @@ namespace
     using f32x8_t = float __attribute__((ext_vector_type(8)));
 
     constexpr int kWaveSize           = 32;
-    constexpr int kSubgroupCount      = 2;
+    constexpr int kSubgroupCount      = 4;
+    constexpr int kSubgroupPairCount  = kSubgroupCount / 2;
     constexpr int kThreadCount        = kWaveSize * kSubgroupCount;
     constexpr int kThreadsPerSubgroup = kWaveSize;
     constexpr int kTileM              = 16;
@@ -40,10 +40,10 @@ namespace
     constexpr uint32_t kBSharedByteOffset
         = kBufferCount * kSubgroupCount * kWaveSize * sizeof(f16x8_t);
 
-    constexpr hip_moi::site_id kAStoreSite(0x1601);
-    constexpr hip_moi::site_id kBStoreSite(0x1602);
-    constexpr hip_moi::site_id kALoadSite(0x1603);
-    constexpr hip_moi::site_id kBLoadSite(0x1604);
+    constexpr hip_moi::site_id kAStoreSite(0x1801);
+    constexpr hip_moi::site_id kBStoreSite(0x1802);
+    constexpr hip_moi::site_id kALoadSite(0x1803);
+    constexpr hip_moi::site_id kBLoadSite(0x1804);
 
     using FastPublishOnlyPolicy = hip_moi::sampled_watchpoint_policy<
         /*SampleSkip=*/1,
@@ -53,9 +53,9 @@ namespace
 
     enum class Mode
     {
-        PrivatePassThrough,
-        PrivateContextSampled,
-        PrivateSampled,
+        WidePassThrough,
+        WideContextSampled,
+        WideSampled,
         Benchmark,
     };
 
@@ -173,10 +173,18 @@ namespace
         return elem + 8 * (lane >> 4);
     }
 
-    __host__ __device__ std::size_t fragment_index(int block, int subgroup, int k_tile, int lane)
+    __host__ __device__ std::size_t a_fragment_index(int block, int subgroup, int k_tile, int lane)
     {
         return (((static_cast<std::size_t>(block) * kKTileCount + k_tile) * kSubgroupCount
                  + subgroup)
+                * kWaveSize)
+               + lane;
+    }
+
+    __host__ __device__ std::size_t b_fragment_index(int block, int pair, int k_tile, int lane)
+    {
+        return (((static_cast<std::size_t>(block) * kKTileCount + k_tile) * kSubgroupPairCount
+                 + pair)
                 * kWaveSize)
                + lane;
     }
@@ -194,10 +202,10 @@ namespace
                                      * sizeof(f16x8_t));
     }
 
-    __host__ __device__ uint32_t b_shared_offset(int buffer, int subgroup, int lane)
+    __host__ __device__ uint32_t b_shared_offset(int buffer, int pair, int lane)
     {
         return kBSharedByteOffset
-               + static_cast<uint32_t>(((buffer * kSubgroupCount + subgroup) * kWaveSize + lane)
+               + static_cast<uint32_t>(((buffer * kSubgroupPairCount + pair) * kWaveSize + lane)
                                        * sizeof(f16x8_t));
     }
 
@@ -237,7 +245,7 @@ namespace
         return storage;
     }
 
-    __device__ __forceinline__ hip_moi::context make_context()
+    __device__ __forceinline__ hip_moi::context make_general_context()
     {
         hip_moi::context::config cfg{
             /*thread_count=*/kThreadCount,
@@ -255,163 +263,164 @@ namespace
         return hip_moi::make_sampled_watchpoint_context(current_storage_ref(), cfg);
     }
 
-    __global__ void private_pingpong_pass_through_kernel(const f16x8_t* __restrict__ a_fragments,
-                                                         const f16x8_t* __restrict__ b_fragments,
-                                                         float* __restrict__ out)
+    struct PassThroughPolicy
     {
-        __shared__ f16x8_t a_shared[kBufferCount][kSubgroupCount][kWaveSize];
-        __shared__ f16x8_t b_shared[kBufferCount][kSubgroupCount][kWaveSize];
-
-        int tid      = static_cast<int>(threadIdx.x);
-        int subgroup = tid / kWaveSize;
-        int lane     = tid & (kWaveSize - 1);
-        int block    = static_cast<int>(blockIdx.x);
-
-        f32x8_t acc = zero_f32x8();
-#pragma unroll
-        for(int k_tile = 0; k_tile < kKTileCount; ++k_tile)
+        struct context_type
         {
-            int         buffer = k_tile & (kBufferCount - 1);
-            std::size_t index  = fragment_index(block, subgroup, k_tile, lane);
+        };
 
-            set_pingpong_priority(subgroup, k_tile);
-            a_shared[buffer][subgroup][lane] = a_fragments[index];
-            b_shared[buffer][subgroup][lane] = b_fragments[index];
-
-            __builtin_amdgcn_sched_barrier(0);
-
-            f16x8_t a_fragment = a_shared[buffer][subgroup][lane];
-            f16x8_t b_fragment = b_shared[buffer][subgroup][lane];
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_setprio(0);
-            acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_fragment, b_fragment, acc);
+        __device__ static context_type make_context()
+        {
+            return {};
         }
 
-        __builtin_amdgcn_s_setprio(0);
+        __device__ static void init_workgroup(context_type&) {}
 
-        int col = lane & 15;
-#pragma unroll
-        for(int elem = 0; elem < kFragmentElements; ++elem)
+        template <typename T>
+        __device__ static void store(context_type&, T* ptr, T value, uint32_t, hip_moi::site_id)
         {
-            int row                                      = rdna4_wmma_acc_m(lane, elem);
-            out[output_index(block, subgroup, row, col)] = acc[elem];
+            *ptr = value;
         }
-    }
 
-    __global__ void private_pingpong_context_sampled_kernel(const f16x8_t* __restrict__ a_fragments,
-                                                            const f16x8_t* __restrict__ b_fragments,
-                                                            float* __restrict__ out)
-    {
-        __shared__ f16x8_t a_shared[kBufferCount][kSubgroupCount][kWaveSize];
-        __shared__ f16x8_t b_shared[kBufferCount][kSubgroupCount][kWaveSize];
-
-        hip_moi::context ctx = make_context();
-        ctx.init_workgroup();
-
-        int tid      = static_cast<int>(threadIdx.x);
-        int subgroup = tid / kWaveSize;
-        int lane     = tid & (kWaveSize - 1);
-        int block    = static_cast<int>(blockIdx.x);
-
-        f32x8_t acc = zero_f32x8();
-#pragma unroll
-        for(int k_tile = 0; k_tile < kKTileCount; ++k_tile)
+        template <typename T>
+        __device__ static T load(context_type&, const T* ptr, uint32_t, hip_moi::site_id)
         {
-            int         buffer = k_tile & (kBufferCount - 1);
-            std::size_t index  = fragment_index(block, subgroup, k_tile, lane);
+            return *ptr;
+        }
 
-            set_pingpong_priority(subgroup, k_tile);
+        __device__ static void syncthreads(context_type&)
+        {
+            __syncthreads();
+        }
+    };
+
+    struct ContextSampledPolicy
+    {
+        using context_type = hip_moi::context;
+
+        __device__ static context_type make_context()
+        {
+            return make_general_context();
+        }
+
+        __device__ static void init_workgroup(context_type& ctx)
+        {
+            ctx.init_workgroup();
+        }
+
+        template <typename T>
+        __device__ static void
+            store(context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+        {
             ctx.template lds_store_at<hip_moi::backend_kind::sampled_watchpoint,
-                                      FastPublishOnlyPolicy>(
+                                      FastPublishOnlyPolicy>(ptr, value, offset, site);
+        }
+
+        template <typename T>
+        __device__ static T
+            load(context_type& ctx, const T* ptr, uint32_t offset, hip_moi::site_id site)
+        {
+            return ctx.template lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
+                                            FastPublishOnlyPolicy>(ptr, offset, site);
+        }
+
+        __device__ static void syncthreads(context_type& ctx)
+        {
+            ctx.syncthreads();
+        }
+    };
+
+    struct SampledContextPolicy
+    {
+        using context_type = hip_moi::sampled_watchpoint_context;
+
+        __device__ static context_type make_context()
+        {
+            return make_sampled_context();
+        }
+
+        __device__ static void init_workgroup(context_type& ctx)
+        {
+            ctx.init_workgroup();
+        }
+
+        template <typename T>
+        __device__ static void
+            store(context_type& ctx, T* ptr, T value, uint32_t offset, hip_moi::site_id site)
+        {
+            ctx.template lds_store_at<FastPublishOnlyPolicy>(ptr, value, offset, site);
+        }
+
+        template <typename T>
+        __device__ static T
+            load(context_type& ctx, const T* ptr, uint32_t offset, hip_moi::site_id site)
+        {
+            return ctx.template lds_load_at<FastPublishOnlyPolicy>(ptr, offset, site);
+        }
+
+        __device__ static void syncthreads(context_type& ctx)
+        {
+            ctx.syncthreads();
+        }
+    };
+
+    template <typename InstrumentationPolicy>
+    __global__ void wide_cooperative_pingpong_kernel(const f16x8_t* __restrict__ a_fragments,
+                                                     const f16x8_t* __restrict__ b_fragments,
+                                                     float* __restrict__ out)
+    {
+        __shared__ f16x8_t a_shared[kBufferCount][kSubgroupCount][kWaveSize];
+        __shared__ f16x8_t b_shared[kBufferCount][kSubgroupPairCount][kWaveSize];
+
+        typename InstrumentationPolicy::context_type ctx = InstrumentationPolicy::make_context();
+        InstrumentationPolicy::init_workgroup(ctx);
+
+        int tid      = static_cast<int>(threadIdx.x);
+        int subgroup = tid / kWaveSize;
+        int lane     = tid & (kWaveSize - 1);
+        int pair     = subgroup / 2;
+        int block    = static_cast<int>(blockIdx.x);
+
+        f32x8_t acc = zero_f32x8();
+#pragma unroll
+        for(int k_tile = 0; k_tile < kKTileCount; ++k_tile)
+        {
+            int buffer = k_tile & (kBufferCount - 1);
+
+            set_pingpong_priority(subgroup, k_tile);
+            InstrumentationPolicy::store(
+                ctx,
                 &a_shared[buffer][subgroup][lane],
-                a_fragments[index],
+                a_fragments[a_fragment_index(block, subgroup, k_tile, lane)],
                 a_shared_offset(buffer, subgroup, lane),
                 kAStoreSite);
-            ctx.template lds_store_at<hip_moi::backend_kind::sampled_watchpoint,
-                                      FastPublishOnlyPolicy>(
-                &b_shared[buffer][subgroup][lane],
-                b_fragments[index],
-                b_shared_offset(buffer, subgroup, lane),
-                kBStoreSite);
+            if((subgroup & 1) == 0)
+            {
+                InstrumentationPolicy::store(
+                    ctx,
+                    &b_shared[buffer][pair][lane],
+                    b_fragments[b_fragment_index(block, pair, k_tile, lane)],
+                    b_shared_offset(buffer, pair, lane),
+                    kBStoreSite);
+            }
 
             __builtin_amdgcn_sched_barrier(0);
+            InstrumentationPolicy::syncthreads(ctx);
 
-            f16x8_t a_fragment = ctx.template lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
-                                                          FastPublishOnlyPolicy>(
-                &a_shared[buffer][subgroup][lane],
-                a_shared_offset(buffer, subgroup, lane),
-                kALoadSite);
-            f16x8_t b_fragment = ctx.template lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
-                                                          FastPublishOnlyPolicy>(
-                &b_shared[buffer][subgroup][lane],
-                b_shared_offset(buffer, subgroup, lane),
-                kBLoadSite);
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_setprio(0);
-            acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_fragment, b_fragment, acc);
-        }
-
-        __builtin_amdgcn_s_setprio(0);
-
-        int col = lane & 15;
-#pragma unroll
-        for(int elem = 0; elem < kFragmentElements; ++elem)
-        {
-            int row                                      = rdna4_wmma_acc_m(lane, elem);
-            out[output_index(block, subgroup, row, col)] = acc[elem];
-        }
-    }
-
-    __global__ void private_pingpong_sampled_kernel(const f16x8_t* __restrict__ a_fragments,
-                                                    const f16x8_t* __restrict__ b_fragments,
-                                                    float* __restrict__ out)
-    {
-        __shared__ f16x8_t a_shared[kBufferCount][kSubgroupCount][kWaveSize];
-        __shared__ f16x8_t b_shared[kBufferCount][kSubgroupCount][kWaveSize];
-
-        hip_moi::sampled_watchpoint_context ctx = make_sampled_context();
-        ctx.init_workgroup();
-
-        int tid      = static_cast<int>(threadIdx.x);
-        int subgroup = tid / kWaveSize;
-        int lane     = tid & (kWaveSize - 1);
-        int block    = static_cast<int>(blockIdx.x);
-
-        f32x8_t acc = zero_f32x8();
-#pragma unroll
-        for(int k_tile = 0; k_tile < kKTileCount; ++k_tile)
-        {
-            int         buffer = k_tile & (kBufferCount - 1);
-            std::size_t index  = fragment_index(block, subgroup, k_tile, lane);
-
-            set_pingpong_priority(subgroup, k_tile);
-            ctx.template lds_store_at<FastPublishOnlyPolicy>(
-                &a_shared[buffer][subgroup][lane],
-                a_fragments[index],
-                a_shared_offset(buffer, subgroup, lane),
-                kAStoreSite);
-            ctx.template lds_store_at<FastPublishOnlyPolicy>(
-                &b_shared[buffer][subgroup][lane],
-                b_fragments[index],
-                b_shared_offset(buffer, subgroup, lane),
-                kBStoreSite);
-
-            __builtin_amdgcn_sched_barrier(0);
-
-            f16x8_t a_fragment = ctx.template lds_load_at<FastPublishOnlyPolicy>(
-                &a_shared[buffer][subgroup][lane],
-                a_shared_offset(buffer, subgroup, lane),
-                kALoadSite);
-            f16x8_t b_fragment = ctx.template lds_load_at<FastPublishOnlyPolicy>(
-                &b_shared[buffer][subgroup][lane],
-                b_shared_offset(buffer, subgroup, lane),
-                kBLoadSite);
+            f16x8_t a_fragment
+                = InstrumentationPolicy::load(ctx,
+                                              &a_shared[buffer][subgroup][lane],
+                                              a_shared_offset(buffer, subgroup, lane),
+                                              kALoadSite);
+            f16x8_t b_fragment = InstrumentationPolicy::load(ctx,
+                                                             &b_shared[buffer][pair][lane],
+                                                             b_shared_offset(buffer, pair, lane),
+                                                             kBLoadSite);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_setprio(0);
             acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_fragment, b_fragment, acc);
+            InstrumentationPolicy::syncthreads(ctx);
         }
 
         __builtin_amdgcn_s_setprio(0);
@@ -456,12 +465,12 @@ namespace
     {
         switch(mode)
         {
-        case Mode::PrivatePassThrough:
-            return "private-pass-through";
-        case Mode::PrivateContextSampled:
-            return "private-context-sampled";
-        case Mode::PrivateSampled:
-            return "private-sampled";
+        case Mode::WidePassThrough:
+            return "wide-pass-through";
+        case Mode::WideContextSampled:
+            return "wide-context-sampled";
+        case Mode::WideSampled:
+            return "wide-sampled";
         case Mode::Benchmark:
             return "benchmark";
         }
@@ -470,17 +479,17 @@ namespace
 
     Mode parse_mode(const char* mode)
     {
-        if(std::strcmp(mode, "private-pass-through") == 0)
+        if(std::strcmp(mode, "wide-pass-through") == 0)
         {
-            return Mode::PrivatePassThrough;
+            return Mode::WidePassThrough;
         }
-        if(std::strcmp(mode, "private-context-sampled") == 0)
+        if(std::strcmp(mode, "wide-context-sampled") == 0)
         {
-            return Mode::PrivateContextSampled;
+            return Mode::WideContextSampled;
         }
-        if(std::strcmp(mode, "private-sampled") == 0)
+        if(std::strcmp(mode, "wide-sampled") == 0)
         {
-            return Mode::PrivateSampled;
+            return Mode::WideSampled;
         }
         if(std::strcmp(mode, "benchmark") == 0)
         {
@@ -488,8 +497,8 @@ namespace
         }
 
         std::fprintf(stderr,
-                     "usage: pingpong_att_probe "
-                     "[private-pass-through|private-context-sampled|private-sampled|benchmark]\n");
+                     "usage: pingpong_wide_cooperative_lds_benchmark "
+                     "[wide-pass-through|wide-context-sampled|wide-sampled|benchmark]\n");
         std::exit(EXIT_FAILURE);
     }
 
@@ -497,10 +506,12 @@ namespace
                         std::vector<f16x8_t>* a_fragments,
                         std::vector<f16x8_t>* b_fragments)
     {
-        std::size_t fragment_count
+        std::size_t a_fragment_count
             = static_cast<std::size_t>(blocks) * kKTileCount * kSubgroupCount * kWaveSize;
-        a_fragments->resize(fragment_count);
-        b_fragments->resize(fragment_count);
+        std::size_t b_fragment_count
+            = static_cast<std::size_t>(blocks) * kKTileCount * kSubgroupPairCount * kWaveSize;
+        a_fragments->resize(a_fragment_count);
+        b_fragments->resize(b_fragment_count);
         for(int block = 0; block < blocks; ++block)
         {
             for(int k_tile = 0; k_tile < kKTileCount; ++k_tile)
@@ -510,14 +521,26 @@ namespace
                     for(int lane = 0; lane < kWaveSize; ++lane)
                     {
                         int row = subgroup * kTileM + (lane & 15);
+                        for(int elem = 0; elem < kFragmentElements; ++elem)
+                        {
+                            int k = k_tile * kKTile + rdna4_wmma_f16_k(lane, elem);
+                            (*a_fragments)[a_fragment_index(block, subgroup, k_tile, lane)][elem]
+                                = static_cast<half_t>(input_value(block, row, k, /*seed=*/1));
+                        }
+                    }
+                }
+
+                for(int pair = 0; pair < kSubgroupPairCount; ++pair)
+                {
+                    for(int lane = 0; lane < kWaveSize; ++lane)
+                    {
                         int col = lane & 15;
                         for(int elem = 0; elem < kFragmentElements; ++elem)
                         {
                             int k = k_tile * kKTile + rdna4_wmma_f16_k(lane, elem);
-                            (*a_fragments)[fragment_index(block, subgroup, k_tile, lane)][elem]
-                                = static_cast<half_t>(input_value(block, row, k, /*seed=*/1));
-                            (*b_fragments)[fragment_index(block, subgroup, k_tile, lane)][elem]
-                                = static_cast<half_t>(input_value(block, k, col, /*seed=*/2));
+                            (*b_fragments)[b_fragment_index(block, pair, k_tile, lane)][elem]
+                                = static_cast<half_t>(
+                                    input_value(block, k, pair * kTileN + col, /*seed=*/2));
                         }
                     }
                 }
@@ -530,17 +553,18 @@ namespace
                               int                         blocks)
     {
         DeviceBuffers buffers;
-        std::size_t   fragment_bytes = a_fragments.size() * sizeof(a_fragments[0]);
+        std::size_t   a_fragment_bytes = a_fragments.size() * sizeof(a_fragments[0]);
+        std::size_t   b_fragment_bytes = b_fragments.size() * sizeof(b_fragments[0]);
         std::size_t   output_bytes
             = static_cast<std::size_t>(blocks) * kSubgroupCount * kTileM * kTileN * sizeof(float);
 
-        HIP_MOI_ATT_HIP_CHECK(hipMalloc(&buffers.a_fragments, fragment_bytes));
-        HIP_MOI_ATT_HIP_CHECK(hipMalloc(&buffers.b_fragments, fragment_bytes));
+        HIP_MOI_ATT_HIP_CHECK(hipMalloc(&buffers.a_fragments, a_fragment_bytes));
+        HIP_MOI_ATT_HIP_CHECK(hipMalloc(&buffers.b_fragments, b_fragment_bytes));
         HIP_MOI_ATT_HIP_CHECK(hipMalloc(&buffers.output, output_bytes));
         HIP_MOI_ATT_HIP_CHECK(hipMemcpy(
-            buffers.a_fragments, a_fragments.data(), fragment_bytes, hipMemcpyHostToDevice));
+            buffers.a_fragments, a_fragments.data(), a_fragment_bytes, hipMemcpyHostToDevice));
         HIP_MOI_ATT_HIP_CHECK(hipMemcpy(
-            buffers.b_fragments, b_fragments.data(), fragment_bytes, hipMemcpyHostToDevice));
+            buffers.b_fragments, b_fragments.data(), b_fragment_bytes, hipMemcpyHostToDevice));
         HIP_MOI_ATT_HIP_CHECK(hipMemset(buffers.output, 0, output_bytes));
         return buffers;
     }
@@ -603,9 +627,9 @@ namespace
     {
         dim3 grid(static_cast<unsigned>(blocks));
         dim3 block(kThreadCount);
-        if(mode == Mode::PrivatePassThrough)
+        if(mode == Mode::WidePassThrough)
         {
-            hipLaunchKernelGGL(private_pingpong_pass_through_kernel,
+            hipLaunchKernelGGL((wide_cooperative_pingpong_kernel<PassThroughPolicy>),
                                grid,
                                block,
                                0,
@@ -614,9 +638,9 @@ namespace
                                buffers.b_fragments,
                                buffers.output);
         }
-        else if(mode == Mode::PrivateContextSampled)
+        else if(mode == Mode::WideContextSampled)
         {
-            hipLaunchKernelGGL(private_pingpong_context_sampled_kernel,
+            hipLaunchKernelGGL((wide_cooperative_pingpong_kernel<ContextSampledPolicy>),
                                grid,
                                block,
                                0,
@@ -625,9 +649,9 @@ namespace
                                buffers.b_fragments,
                                buffers.output);
         }
-        else if(mode == Mode::PrivateSampled)
+        else if(mode == Mode::WideSampled)
         {
-            hipLaunchKernelGGL(private_pingpong_sampled_kernel,
+            hipLaunchKernelGGL((wide_cooperative_pingpong_kernel<SampledContextPolicy>),
                                grid,
                                block,
                                0,
@@ -652,7 +676,7 @@ namespace
     {
         std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
         HipMoiStorageRefs                                   storage_refs;
-        if(mode == Mode::PrivateContextSampled || mode == Mode::PrivateSampled)
+        if(mode == Mode::WideContextSampled || mode == Mode::WideSampled)
         {
             storage_refs = install_storage_refs(blocks, &contexts);
         }
@@ -783,7 +807,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-    Mode   mode      = parse_mode(argc >= 2 ? argv[1] : "private-pass-through");
+    Mode   mode      = parse_mode(argc >= 2 ? argv[1] : "wide-pass-through");
     int    blocks    = get_int_env("HIP_MOI_ATT_BLOCKS", kDefaultBlocks);
     double min_ms    = get_double_env("MIN_MS", 100.0);
     double warmup_ms = get_double_env("WARMUP_MS", min_ms);
@@ -811,27 +835,28 @@ int main(int argc, char** argv)
     if(mode == Mode::Benchmark)
     {
         print_device();
-        std::printf("pingpong_private_lds: blocks=%d waves=%d k_tiles=%d"
+        std::printf("pingpong_wide_cooperative_lds: blocks=%d waves=%d pairs=%d k_tiles=%d"
                     " min_ms=%.1f warmup_ms=%.1f\n",
                     blocks,
                     kSubgroupCount,
+                    kSubgroupPairCount,
                     kKTileCount,
                     min_ms,
                     warmup_ms);
-        run_one("pingpong_private_lds_pass_through",
-                Mode::PrivatePassThrough,
+        run_one("pingpong_wide_cooperative_lds_pass_through",
+                Mode::WidePassThrough,
                 buffers,
                 blocks,
                 min_ms,
                 warmup_ms);
-        run_one("pingpong_private_lds_context_sampled_watchpoint",
-                Mode::PrivateContextSampled,
+        run_one("pingpong_wide_cooperative_lds_context_sampled_watchpoint",
+                Mode::WideContextSampled,
                 buffers,
                 blocks,
                 min_ms,
                 warmup_ms);
-        run_one("pingpong_private_lds_sampled_watchpoint_context",
-                Mode::PrivateSampled,
+        run_one("pingpong_wide_cooperative_lds_sampled_watchpoint_context",
+                Mode::WideSampled,
                 buffers,
                 blocks,
                 min_ms,
@@ -841,7 +866,7 @@ int main(int argc, char** argv)
 
     std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
     HipMoiStorageRefs                                   storage_refs;
-    if(mode == Mode::PrivateContextSampled || mode == Mode::PrivateSampled)
+    if(mode == Mode::WideContextSampled || mode == Mode::WideSampled)
     {
         storage_refs = install_storage_refs(blocks, &contexts);
     }

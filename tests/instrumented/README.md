@@ -59,6 +59,9 @@ Current files:
   WMMA test where subgroup 0 stages B fragments in LDS for every subgroup to
   consume; the synchronized case is clean and the unsynchronized case reports
   diagnostics.
+* `018_rdna4_pingpong_wide_cooperative_lds_test.hip`: RDNA4-only four-subgroup
+  ping-pong-shaped WMMA test where each pair has an even subgroup stage shared
+  B fragments for both subgroups in the pair.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

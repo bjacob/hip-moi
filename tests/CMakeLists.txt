@@ -120,4 +120,6 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/016_rdna4_pingpong_private_lds_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_pingpong_cooperative_lds_test
                     instrumented/017_rdna4_pingpong_cooperative_lds_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_pingpong_wide_cooperative_lds_test
+                    instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip)
 endif()

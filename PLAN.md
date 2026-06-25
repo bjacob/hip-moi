@@ -133,9 +133,10 @@ Current stable conclusions:
 * Dense attention benchmarks are scalar-LDS stress tests and remain expensive.
 * No-score/register-handoff attention benchmarks are closer to production
   attention structure and much closer to the pass-through baseline.
-* The private-LDS ping-pong benchmark is now a scheduling-sensitive RDNA4 row:
-  it uses the same optimized `setprio`/`sched_barrier`/WMMA kernel shape that
-  the ATT probe validates, then times pass-through versus
+* The ping-pong benchmarks are scheduling-sensitive RDNA4 rows. The private-LDS
+  row uses the same optimized `setprio`/`sched_barrier`/WMMA kernel shape that
+  the ATT probe validates. The wide cooperative row adds real cross-subgroup
+  LDS sharing. Both now time pass-through, `context + sampled_watchpoint`, and
   `sampled_watchpoint_context`.
 * LDS pressure alone is not sufficient to characterize overhead; VGPR pressure,
   spills, private segment size, and code size are first-class metrics.
@@ -155,9 +156,10 @@ The instrumented suite now focuses on:
 * exact-shadow diagnostics;
 * sampled-watchpoint diagnostics and publish-only fast execution;
 * RDNA4 matmul and attention-shaped correctness tests;
-* RDNA4 ping-pong-shaped correctness tests with private LDS staging,
-  cooperative LDS staging, `setprio`, `sched_barrier`, WMMA, and exact-shadow
-  diagnostics for the intentionally unsynchronized cooperative shape.
+* RDNA4 ping-pong-shaped correctness tests with private LDS staging, minimal
+  cooperative LDS staging, wider pairwise cooperative LDS staging, `setprio`,
+  `sched_barrier`, WMMA, and exact-shadow diagnostics for intentionally
+  unsynchronized cooperative shapes.
 * an optimized RDNA4 ping-pong ATT probe and timing benchmark that validates
   dynamic `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace
   output, including complementary LDS-priority signatures across representative
