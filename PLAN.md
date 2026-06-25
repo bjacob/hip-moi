@@ -258,11 +258,12 @@ READMEs now describe the current detector scope.
    of two, using masked probe starts, and terminating acquire lookups at the
    first stale open-addressing slot. Stage 6 is now in progress: the first RMW
    rung covers a release `fetch_add` arrival counter consumed by an acquire
-   `fetch_add`; full `acq_rel` RMW chains remain a separate next step because
-   they need metadata for multiple observed counter values to coexist. The
-   diagnostic payload remains LDS access; global atomics are synchronization
-   operations, not a request to diagnose ordinary global load/store races. Each
-   atomics stage must satisfy the completion checklist in `docs/atomics_plan.md`:
+   `fetch_add`, and the next rung covers a two-RMW `acq_rel fetch_add` chain by
+   making atomic metadata value-sensitive. The remaining Stage 6 gap is
+   `atomicOr` bitmask control flow. The diagnostic payload remains LDS access;
+   global atomics are synchronization operations, not a request to diagnose
+   ordinary global load/store races. Each atomics stage must satisfy the
+   completion checklist in `docs/atomics_plan.md`:
    instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence
    before the next stage starts.

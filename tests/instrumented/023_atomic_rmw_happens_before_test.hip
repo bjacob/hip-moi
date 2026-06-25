@@ -138,6 +138,38 @@ TEST(HipMoiAtomicRmwHappensBefore, ReleaseAcquireFetchAddOrdersEarlierSubgroupPa
     HIP_MOI_TEST_HIP_ASSERT(hipFree(device_counter));
 }
 
+TEST(HipMoiAtomicRmwHappensBefore, AcqRelFetchAddChainOrdersEarlierSubgroupPayload)
+{
+    hip_moi::host_context moi(atomic_rmw_options());
+    int*                  device_counter = nullptr;
+    int*                  device_output  = nullptr;
+    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_counter, sizeof(int)));
+    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+    reset_counter_and_output(device_counter, device_output);
+
+    hipLaunchKernelGGL(
+        (atomic_fetch_add_arrival_counter_kernel<hip_moi::atomic_memory_order::acq_rel,
+                                                 hip_moi::atomic_memory_order::acq_rel>),
+        dim3(1),
+        dim3(kThreadCount),
+        0,
+        0,
+        moi.launch_ref(),
+        device_counter,
+        device_output);
+    HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+    HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+    int output = 0;
+    HIP_MOI_TEST_HIP_ASSERT(
+        hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+    EXPECT_EQ(output, kFirstPayload + kSecondPayload);
+    EXPECT_TRUE(moi.check(nullptr));
+
+    HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    HIP_MOI_TEST_HIP_ASSERT(hipFree(device_counter));
+}
+
 TEST(HipMoiAtomicRmwHappensBefore, RelaxedFetchAddDoesNotOrderEarlierSubgroupPayload)
 {
     hip_moi::host_context moi(atomic_rmw_options());

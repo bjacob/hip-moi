@@ -265,6 +265,12 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_add currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                uint64_t released_value
+                    = static_cast<uint64_t>(old_value) + static_cast<uint64_t>(value);
+                record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
             if(detail::atomic_order_has_acquire(order))
             {
                 // RMW release metadata is recorded after the hardware atomic,
@@ -272,12 +278,6 @@ namespace hip_moi
                 // producer has published its metadata.
                 record_atomic_acquire(
                     ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
-            }
-            if(detail::atomic_order_has_release(order))
-            {
-                uint64_t released_value
-                    = static_cast<uint64_t>(old_value) + static_cast<uint64_t>(value);
-                record_atomic_release(ptr, sizeof(T), released_value, site);
             }
             return old_value;
         }
@@ -293,18 +293,18 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_or currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                uint64_t released_value
+                    = static_cast<uint64_t>(old_value) | static_cast<uint64_t>(value);
+                record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
             if(detail::atomic_order_has_acquire(order))
             {
                 // See atomic_fetch_add: acquiring RMWs may need to wait for
                 // release metadata from the immediately preceding RMW.
                 record_atomic_acquire(
                     ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
-            }
-            if(detail::atomic_order_has_release(order))
-            {
-                uint64_t released_value
-                    = static_cast<uint64_t>(old_value) | static_cast<uint64_t>(value);
-                record_atomic_release(ptr, sizeof(T), released_value, site);
             }
             return old_value;
         }
@@ -408,15 +408,24 @@ namespace hip_moi
 
     private:
         static constexpr uint64_t kAtomicObjectClaimedGeneration = ~uint64_t{0};
-        static constexpr int      kAtomicRmwAcquireRetryCount    = 1024;
+        static constexpr int      kAtomicRmwAcquireRetryCount    = 4;
 
         __device__ backend_kind selected_backend() const
         {
             return static_cast<backend_kind>(storage_.backend);
         }
 
+        __device__ uint32_t atomic_record_seed(uintptr_t address, uint64_t value) const
+        {
+            uint32_t seed
+                = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
+            seed ^= static_cast<uint32_t>(value) ^ static_cast<uint32_t>(value >> 32);
+            return seed;
+        }
+
         __device__ atomic_object_record* find_or_claim_atomic_object_record(uintptr_t address,
                                                                             uint32_t  byte_count,
+                                                                            uint64_t  value,
                                                                             site_id   site) const
         {
             if(!storage_.atomic_objects || storage_.atomic_object_capacity <= 0)
@@ -427,9 +436,7 @@ namespace hip_moi
 
             uint64_t generation = storage_.generation;
             uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
-            uint32_t seed
-                = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
-            uint32_t start = detail::mix32(seed) & (capacity - 1u);
+            uint32_t start = detail::mix32(atomic_record_seed(address, value)) & (capacity - 1u);
             for(int attempt = 0; attempt < 4; ++attempt)
             {
                 bool saw_claimed_slot = false;
@@ -447,7 +454,8 @@ namespace hip_moi
                     {
                         uintptr_t slot_address
                             = *reinterpret_cast<volatile uintptr_t*>(&record->address);
-                        if(slot_address == address)
+                        uint64_t slot_value = *reinterpret_cast<volatile uint64_t*>(&record->value);
+                        if(slot_address == address && slot_value == value)
                         {
                             return record;
                         }
@@ -467,12 +475,10 @@ namespace hip_moi
                     if(prior == static_cast<unsigned long long>(slot_generation))
                     {
                         record->address               = address;
-                        record->value                 = 0;
+                        record->value                 = value;
                         record->releasing_subgroup_id = 0;
                         record->releasing_epoch       = 0;
                         record->release_site_id       = 0;
-                        __threadfence();
-                        record->generation = generation;
                         return record;
                     }
                     saw_claimed_slot = true;
@@ -488,7 +494,8 @@ namespace hip_moi
             return nullptr;
         }
 
-        __device__ atomic_object_record* find_atomic_object_record(uintptr_t address) const
+        __device__ atomic_object_record* find_atomic_object_record(uintptr_t address,
+                                                                   uint64_t  value) const
         {
             if(!storage_.atomic_objects || storage_.atomic_object_capacity <= 0)
             {
@@ -497,9 +504,7 @@ namespace hip_moi
 
             uint64_t generation = storage_.generation;
             uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
-            uint32_t seed
-                = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
-            uint32_t start = detail::mix32(seed) & (capacity - 1u);
+            uint32_t start = detail::mix32(atomic_record_seed(address, value)) & (capacity - 1u);
             for(uint32_t probe = 0; probe < capacity; ++probe)
             {
                 uint32_t index = start + probe;
@@ -524,7 +529,8 @@ namespace hip_moi
                 }
 
                 uintptr_t slot_address = *reinterpret_cast<volatile uintptr_t*>(&record->address);
-                if(slot_address == address)
+                uint64_t  slot_value   = *reinterpret_cast<volatile uint64_t*>(&record->value);
+                if(slot_address == address && slot_value == value)
                 {
                     return record;
                 }
@@ -539,18 +545,19 @@ namespace hip_moi
         {
             uintptr_t             address = reinterpret_cast<uintptr_t>(ptr);
             atomic_object_record* record
-                = find_or_claim_atomic_object_record(address, byte_count, site);
+                = find_or_claim_atomic_object_record(address, byte_count, value, site);
             if(!record)
             {
                 return;
             }
 
+            record->address               = address;
             record->releasing_subgroup_id = subgroup_id();
             record->releasing_epoch       = detail::current_epoch(storage_, subgroup_id());
             record->release_site_id       = site.value();
+            record->value                 = value;
             __threadfence();
-            record->value = value;
-            __threadfence();
+            record->generation = storage_.generation;
         }
 
         __device__ bool try_record_atomic_acquire(const void* ptr, uint64_t observed_value) const
@@ -561,14 +568,8 @@ namespace hip_moi
             }
 
             atomic_object_record* record
-                = find_atomic_object_record(reinterpret_cast<uintptr_t>(ptr));
+                = find_atomic_object_record(reinterpret_cast<uintptr_t>(ptr), observed_value);
             if(!record)
-            {
-                return false;
-            }
-
-            uint64_t released_value = *reinterpret_cast<volatile uint64_t*>(&record->value);
-            if(released_value != observed_value)
             {
                 return false;
             }

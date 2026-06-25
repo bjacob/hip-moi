@@ -3,9 +3,9 @@
 //
 // benchmarks/023_atomic_rmw_happens_before_benchmark.hip
 //
-// Stage 6 atomics benchmark. A global release/acquire fetch-add arrival counter
-// orders an instrumented LDS payload handoff: the subgroup that observes itself
-// as the last arrival reads payload written by an earlier subgroup.
+// Stage 6 atomics benchmark. Global fetch-add arrival counters order an
+// instrumented LDS payload handoff: the subgroup that observes itself as the
+// last arrival reads payload written by an earlier subgroup.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
@@ -72,6 +72,7 @@ namespace
         return 29 + ((block * 7) & 255);
     }
 
+    template <int ProducerOrder, int ConsumerOrder>
     __global__ void atomic_rmw_arrival_counter_pass_through(int* counters, int* out)
     {
         __shared__ int payloads[2];
@@ -88,7 +89,7 @@ namespace
         {
             payloads[0] = first_payload_value(block);
             (void)__hip_atomic_fetch_add(
-                &counters[block], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+                &counters[block], 1, ProducerOrder, __HIP_MEMORY_SCOPE_AGENT);
         }
 
         if(tid == kThreadsPerSubgroup)
@@ -99,7 +100,7 @@ namespace
             }
             payloads[1] = second_payload_value(block);
             int old_value = __hip_atomic_fetch_add(
-                &counters[block], 1, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+                &counters[block], 1, ConsumerOrder, __HIP_MEMORY_SCOPE_AGENT);
             if(old_value == 1)
             {
                 out[block] = payloads[0] + payloads[1];
@@ -107,6 +108,8 @@ namespace
         }
     }
 
+    template <hip_moi::atomic_memory_order ProducerOrder,
+              hip_moi::atomic_memory_order ConsumerOrder>
     __global__ void
         atomic_rmw_arrival_counter_context(hip_moi::context::storage_ref* storage_refs,
                                            uint64_t                       generation,
@@ -144,7 +147,7 @@ namespace
                              HIP_MOI_SITE_ID());
             (void)ctx.atomic_fetch_add(&counters[block],
                                        1,
-                                       hip_moi::atomic_memory_order::release,
+                                       ProducerOrder,
                                        hip_moi::atomic_memory_scope::agent,
                                        HIP_MOI_SITE_ID());
         }
@@ -161,7 +164,7 @@ namespace
                              HIP_MOI_SITE_ID());
             int old_value = ctx.atomic_fetch_add(&counters[block],
                                                  1,
-                                                 hip_moi::atomic_memory_order::acquire,
+                                                 ConsumerOrder,
                                                  hip_moi::atomic_memory_scope::agent,
                                                  HIP_MOI_SITE_ID());
             if(old_value == 1)
@@ -339,34 +342,71 @@ int main()
     ContextStorageSet context_storage(blocks);
     uint64_t          generation = 1;
 
-    auto pass_through_launch = [&]() {
-        hipLaunchKernelGGL(atomic_rmw_arrival_counter_pass_through,
-                           dim3(blocks),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           buffers.counters,
-                           buffers.out);
+    auto release_acquire_pass_through_launch = [&]() {
+        hipLaunchKernelGGL(
+            (atomic_rmw_arrival_counter_pass_through<__ATOMIC_RELEASE, __ATOMIC_ACQUIRE>),
+            dim3(blocks),
+            dim3(kThreadCount),
+            0,
+            0,
+            buffers.counters,
+            buffers.out);
     };
-    auto context_launch = [&]() {
+    auto release_acquire_context_launch = [&]() {
         ++generation;
-        hipLaunchKernelGGL(atomic_rmw_arrival_counter_context,
-                           dim3(blocks),
-                           dim3(kThreadCount),
-                           0,
-                           0,
-                           context_storage.device_refs,
-                           generation,
-                           buffers.counters,
-                           buffers.out);
+        hipLaunchKernelGGL(
+            (atomic_rmw_arrival_counter_context<hip_moi::atomic_memory_order::release,
+                                                hip_moi::atomic_memory_order::acquire>),
+            dim3(blocks),
+            dim3(kThreadCount),
+            0,
+            0,
+            context_storage.device_refs,
+            generation,
+            buffers.counters,
+            buffers.out);
+    };
+    auto acq_rel_pass_through_launch = [&]() {
+        hipLaunchKernelGGL(
+            (atomic_rmw_arrival_counter_pass_through<__ATOMIC_ACQ_REL, __ATOMIC_ACQ_REL>),
+            dim3(blocks),
+            dim3(kThreadCount),
+            0,
+            0,
+            buffers.counters,
+            buffers.out);
+    };
+    auto acq_rel_context_launch = [&]() {
+        ++generation;
+        hipLaunchKernelGGL(
+            (atomic_rmw_arrival_counter_context<hip_moi::atomic_memory_order::acq_rel,
+                                                hip_moi::atomic_memory_order::acq_rel>),
+            dim3(blocks),
+            dim3(kThreadCount),
+            0,
+            0,
+            context_storage.device_refs,
+            generation,
+            buffers.counters,
+            buffers.out);
     };
 
-    pass_through_launch();
+    release_acquire_pass_through_launch();
     HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipGetLastError());
     HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipDeviceSynchronize());
     verify_outputs(buffers.out, blocks);
 
-    context_launch();
+    release_acquire_context_launch();
+    HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipGetLastError());
+    HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipDeviceSynchronize());
+    verify_outputs(buffers.out, blocks);
+
+    acq_rel_pass_through_launch();
+    HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipGetLastError());
+    HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipDeviceSynchronize());
+    verify_outputs(buffers.out, blocks);
+
+    acq_rel_context_launch();
     HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipGetLastError());
     HIP_MOI_ATOMIC_RMW_BENCH_HIP_CHECK(hipDeviceSynchronize());
     verify_outputs(buffers.out, blocks);
@@ -375,9 +415,20 @@ int main()
                 blocks,
                 warmup_ms,
                 measure_ms);
+    benchmark_mode("atomic-rmw-arrival-counter_pass-through",
+                   release_acquire_pass_through_launch,
+                   warmup_ms,
+                   measure_ms);
+    benchmark_mode("atomic-rmw-arrival-counter_context",
+                   release_acquire_context_launch,
+                   warmup_ms,
+                   measure_ms);
+    benchmark_mode("atomic-rmw-acq-rel-chain_pass-through",
+                   acq_rel_pass_through_launch,
+                   warmup_ms,
+                   measure_ms);
     benchmark_mode(
-        "atomic-rmw-arrival-counter_pass-through", pass_through_launch, warmup_ms, measure_ms);
-    benchmark_mode("atomic-rmw-arrival-counter_context", context_launch, warmup_ms, measure_ms);
+        "atomic-rmw-acq-rel-chain_context", acq_rel_context_launch, warmup_ms, measure_ms);
 
     if(!context_storage.check_all())
     {
