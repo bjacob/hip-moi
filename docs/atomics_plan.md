@@ -25,8 +25,8 @@ benchmarks, documentation, and diligence notes have landed.
 | Stage | Status | Current note |
 | --- | --- | --- |
 | 0. Freeze the corpus map | Complete | `atomics_corpus.md` identifies RocJITsu-first seeds and limits `matmul_rdna4.hip` to missing Stream-K variants. |
-| 1. Reference kernels before instrumentation | Next | No atomics reference kernels have been added to `tests/reference` yet. |
-| 2. Public atomic API skeleton | Not started | Waiting for Stage 1 reference shapes. |
+| 1. Reference kernels before instrumentation | Complete | `tests/reference/atomic_reference_kernels.hip` adds RocJITsu-derived safe and compile-only atomics source shapes. |
+| 2. Public atomic API skeleton | Next | Add pass-through `hip_moi::context` atomic methods, then matching instrumented tests and a benchmark. |
 | 3. Atomic object metadata | Not started | Waiting for pass-through API tests. |
 | 4. Happens-before for LDS payload handoffs | Not started | First diagnostic-capable release/acquire stage. |
 | 5. Release/acquire fast path | Not started | Starts immediately after Stage 4 works. |

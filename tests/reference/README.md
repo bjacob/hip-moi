@@ -19,6 +19,10 @@ The active files are:
 * `mvp_reference_kernels.hip`: the original broad reference corpus, including
   scalar LDS patterns, cooperative array patterns, looped epochs, 2D tiling,
   pseudorandom LDS layouts, and matmul-inspired kernels.
+* `atomic_reference_kernels.hip`: RocJITsu-derived atomics source shapes,
+  including a tiny global `atomicAdd` reduction, global release/acquire flags
+  ordering LDS payload accesses, and compile-only broken flag handoffs for
+  later instrumented diagnostics.
 * `rdna4_jakub_matmul_reference.hip`: a `gfx12`-gated RDNA4 WMMA reference
   derived from Jakub's `sanitizer-strategy/rdna4_matmul` corpus.
 
@@ -46,11 +50,13 @@ The launched no-diagnostic corpus includes:
 * chunked, double-buffered, skewed-layout, and multi-workgroup matmul-inspired
   kernels;
 * Jakub-derived RDNA4 packed FP16 WMMA matmul schedules: no-pipeline,
-  pipelined, and double-buffered.
+  pipelined, and double-buffered;
+* RocJITsu-derived atomics cases that establish the first source shapes for
+  the atomics plan.
 
-The reference corpus does not yet contain target workload atomics. The seed
-kernels and extraction plan for that next expansion are tracked in
-[`../../docs/atomics_corpus.md`](../../docs/atomics_corpus.md).
+The atomics roadmap is tracked in
+[`../../docs/atomics_plan.md`](../../docs/atomics_plan.md), with source-corpus
+details in [`../../docs/atomics_corpus.md`](../../docs/atomics_corpus.md).
 
 ## Compile-Only Diagnostic Shapes
 
@@ -61,7 +67,9 @@ The compile-only corpus includes:
 * all-thread same-index array conflicts;
 * divergent-barrier hard cases;
 * Jakub-derived RDNA4 WMMA missing-barrier variants for load/compute and
-  compute/load reuse mistakes.
+  compute/load reuse mistakes;
+* plain and relaxed flag handoffs derived from RocJITsu hip-stream-k, kept
+  compile-only until the instrumented atomics API can diagnose them.
 
 These kernels are deliberately not launched by the reference self-test. The
 corresponding instrumented tests should exercise the shape through hip-moi and

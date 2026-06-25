@@ -81,6 +81,8 @@ endforeach()
 
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
+hip_moi_add_gtest(hip_moi_reference_atomic
+                  reference/atomic_reference_kernels.hip)
 if(_hip_moi_build_rdna4_tests)
   hip_moi_add_gtest(hip_moi_reference_rdna4_jakub_matmul
                     reference/rdna4_jakub_matmul_reference.hip)
