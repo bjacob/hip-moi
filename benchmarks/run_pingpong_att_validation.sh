@@ -30,6 +30,7 @@ ATT_TARGET_CU="${ATT_TARGET_CU:-0}"
 ATT_SIMD_SELECT="${ATT_SIMD_SELECT:-0x0}"
 ATT_SHADER_ENGINE_MASK="${ATT_SHADER_ENGINE_MASK:-0xffffffff}"
 ATT_SERIALIZE_ALL="${ATT_SERIALIZE_ALL:-true}"
+EXPECTED_LDS_PRIORITY_SIGNATURE="${EXPECTED_LDS_PRIORITY_SIGNATURE:-}"
 
 PROBE="$(HIP_MOI_BUILD_ONLY=1 "${SCRIPT_DIR}/build_pingpong_att_probe.sh")"
 
@@ -37,6 +38,9 @@ echo "probe=${PROBE}"
 echo "mode=${MODE}"
 echo "att_output=${OUT_DIR}"
 echo "att_serialize_all=${ATT_SERIALIZE_ALL}"
+if [[ -n "${EXPECTED_LDS_PRIORITY_SIGNATURE}" ]]; then
+  echo "expected_lds_priority_signature=${EXPECTED_LDS_PRIORITY_SIGNATURE}"
+fi
 
 HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
   "${ROCPROFV3}" \
@@ -49,4 +53,9 @@ HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}" \
     -d "${OUT_DIR}" \
     -- "${PROBE}" "${MODE}"
 
-"${REPO_ROOT}/benchmarks/validate_pingpong_att.py" "${OUT_DIR}"
+VALIDATOR_ARGS=("${OUT_DIR}")
+if [[ -n "${EXPECTED_LDS_PRIORITY_SIGNATURE}" ]]; then
+  VALIDATOR_ARGS+=("--expected-lds-priority-signature" "${EXPECTED_LDS_PRIORITY_SIGNATURE}")
+fi
+
+"${REPO_ROOT}/benchmarks/validate_pingpong_att.py" "${VALIDATOR_ARGS[@]}"

@@ -50,9 +50,8 @@ namespace
 
     constexpr uint32_t kBSharedByteOffset
         = kBufferCount * kSubgroupCount * kWaveSize * sizeof(f16x8_t);
-    constexpr int kSharedBytes
-        = static_cast<int>(kBSharedByteOffset
-                           + kBufferCount * kSubgroupCount * kWaveSize * sizeof(f16x8_t));
+    constexpr int kSharedBytes = static_cast<int>(
+        kBSharedByteOffset + kBufferCount * kSubgroupCount * kWaveSize * sizeof(f16x8_t));
     constexpr int kExactShadowEntries
         = (kSharedBytes + static_cast<int>(hip_moi::detail::exact_shadow::granule_bytes) - 1)
           / static_cast<int>(hip_moi::detail::exact_shadow::granule_bytes);
@@ -93,15 +92,15 @@ namespace
 
     __host__ __device__ uint32_t a_shared_offset(int buffer, int subgroup, int lane)
     {
-        return static_cast<uint32_t>(
-            ((buffer * kSubgroupCount + subgroup) * kWaveSize + lane) * sizeof(f16x8_t));
+        return static_cast<uint32_t>(((buffer * kSubgroupCount + subgroup) * kWaveSize + lane)
+                                     * sizeof(f16x8_t));
     }
 
     __host__ __device__ uint32_t b_shared_offset(int buffer, int subgroup, int lane)
     {
         return kBSharedByteOffset
-               + static_cast<uint32_t>(
-                   ((buffer * kSubgroupCount + subgroup) * kWaveSize + lane) * sizeof(f16x8_t));
+               + static_cast<uint32_t>(((buffer * kSubgroupCount + subgroup) * kWaveSize + lane)
+                                       * sizeof(f16x8_t));
     }
 
     __device__ f32x8_t zero_f32x8()
@@ -117,7 +116,9 @@ namespace
 
     __device__ __forceinline__ void set_pingpong_priority(int subgroup, int k_tile)
     {
-        if(((subgroup + k_tile) & 1) == 0)
+        // s_setprio is scalar, so make the wave-uniform condition scalar before branching.
+        int uniform_subgroup = __builtin_amdgcn_readfirstlane(subgroup);
+        if(((uniform_subgroup + k_tile) & 1) == 0)
         {
             __builtin_amdgcn_s_setprio(1);
         }
@@ -222,19 +223,20 @@ namespace
 
             __builtin_amdgcn_sched_barrier(0);
 
-            f16x8_t a_fragment = InstrumentationPolicy::load(ctx,
-                                                             &a_shared[buffer][subgroup][lane],
-                                                             a_shared_offset(buffer, subgroup, lane),
-                                                             kALoadSite);
-            f16x8_t b_fragment = InstrumentationPolicy::load(ctx,
-                                                             &b_shared[buffer][subgroup][lane],
-                                                             b_shared_offset(buffer, subgroup, lane),
-                                                             kBLoadSite);
+            f16x8_t a_fragment
+                = InstrumentationPolicy::load(ctx,
+                                              &a_shared[buffer][subgroup][lane],
+                                              a_shared_offset(buffer, subgroup, lane),
+                                              kALoadSite);
+            f16x8_t b_fragment
+                = InstrumentationPolicy::load(ctx,
+                                              &b_shared[buffer][subgroup][lane],
+                                              b_shared_offset(buffer, subgroup, lane),
+                                              kBLoadSite);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_setprio(0);
-            acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
-                a_fragment, b_fragment, acc);
+            acc = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_fragment, b_fragment, acc);
         }
 
         __builtin_amdgcn_s_setprio(0);
@@ -243,7 +245,7 @@ namespace
 #pragma unroll
         for(int elem = 0; elem < kFragmentElements; ++elem)
         {
-            int row = subgroup * kTileM + rdna4_wmma_acc_m(lane, elem);
+            int row                 = subgroup * kTileM + rdna4_wmma_acc_m(lane, elem);
             out[row * kTileN + col] = acc[elem];
         }
     }
@@ -356,7 +358,7 @@ namespace
 
     template <typename InstrumentationPolicy>
     void run_private_pingpong_test(const std::vector<float>&              expected,
-                                   hip_moi::context::storage_ref         storage_ref,
+                                   hip_moi::context::storage_ref          storage_ref,
                                    hip_moi::test::device_context_storage* storage)
     {
         std::vector<f16x8_t> a_fragments;

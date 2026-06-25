@@ -155,7 +155,9 @@ The instrumented suite now focuses on:
   cooperative LDS staging, `setprio`, `sched_barrier`, WMMA, and exact-shadow
   diagnostics for the intentionally unsynchronized cooperative shape.
 * An optimized RDNA4 ping-pong ATT probe that validates dynamic
-  `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace output.
+  `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace output,
+  including complementary LDS-priority signatures across representative SIMD
+  selections.
 
 The reference suite remains useful as concrete uninstrumented HIP code for
 safe-kernel validation and benchmark-shape provenance. Racy reference kernels
@@ -217,9 +219,13 @@ READMEs now describe the current detector scope.
    resumes.
 
    The optimized probe now validates pass-through and sampled hip-moi dynamic
-   instruction streams through ROCprof UI JSON. Any future ping-pong timing
-   benchmark should first pass the same generated-code and ATT checks before
-   latency numbers are treated as meaningful.
+   instruction streams through ROCprof UI JSON. SIMD 0/1 traces validate the
+   `1010` LDS-priority role and SIMD 2/3 traces validate the complementary
+   `0101` role. On gfx10+ the local ATT workflow selects one SIMD ID per run,
+   so this confirms complementary role schedules but not same-cycle activity of
+   both roles in one trace. Any future ping-pong timing benchmark should first
+   pass the same generated-code and ATT checks before latency numbers are
+   treated as meaningful.
 
 5. Plan the next semantic expansion: atomics.
 

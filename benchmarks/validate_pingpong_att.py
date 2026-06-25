@@ -109,6 +109,7 @@ class Event:
 
 @dataclass
 class DecodedWave:
+    location: str
     cu: int
     simd: int
     wave_id: int
@@ -303,6 +304,7 @@ def decode_att(att_files: list[Path], instruction_maps: dict[int, dict[int, Inst
                 )
             waves.append(
                 DecodedWave(
+                    location=f"cu{int(wave.cu)}_simd{int(wave.simd)}_slot{int(wave.wave_id)}",
                     cu=int(wave.cu),
                     simd=int(wave.simd),
                     wave_id=int(wave.wave_id),
@@ -377,6 +379,7 @@ def decode_ui_json(att_dir: Path) -> list[DecodedWave]:
                 )
             waves.append(
                 DecodedWave(
+                    location=wave_path.stem,
                     cu=int(wave_info.get("cu", 0)),
                     simd=int(wave_info.get("simd", 0)),
                     wave_id=int(wave_info.get("slot", wave_info.get("id", 0))),
@@ -460,7 +463,29 @@ def high_priority_lds_regions(events: list[Event]) -> int:
     return regions
 
 
-def validate_wave(wave: DecodedWave) -> list[str]:
+def lds_priority_signature(events: list[Event]) -> str:
+    signature = []
+    current_priority = "?"
+    in_lds_cluster = False
+    for event in events:
+        current = marker(event)
+        if current == "P1":
+            current_priority = "1"
+            continue
+        if current == "P0":
+            current_priority = "0"
+            continue
+        if current in {"LDS-W", "LDS-R"}:
+            if not in_lds_cluster:
+                signature.append(current_priority)
+                in_lds_cluster = True
+            continue
+        if current == "WMMA":
+            in_lds_cluster = False
+    return "".join(signature)
+
+
+def validate_wave(wave: DecodedWave, expected_lds_priority_signature: str | None) -> list[str]:
     failures = []
     events = wave.events
     wmma_indexes = [
@@ -484,6 +509,12 @@ def validate_wave(wave: DecodedWave) -> list[str]:
     if high_priority_lds_regions(events) == 0:
         failures.append("wave executes WMMA but no s_setprio 1 region covers visible LDS traffic")
 
+    signature = lds_priority_signature(events)
+    if expected_lds_priority_signature and signature != expected_lds_priority_signature:
+        failures.append(
+            f"LDS priority signature is {signature}, expected {expected_lds_priority_signature}"
+        )
+
     for wmma_index in wmma_indexes:
         last_priority = None
         last_priority_index = None
@@ -501,16 +532,16 @@ def validate_wave(wave: DecodedWave) -> list[str]:
     return failures
 
 
-def summarize(waves: list[DecodedWave], max_waves: int) -> int:
+def summarize(waves: list[DecodedWave], max_waves: int, expected_lds_priority_signature: str | None) -> int:
     wmma_waves = [wave for wave in waves if any(marker(event) == "WMMA" for event in wave.events)]
     print(f"decoded_waves={len(waves)} wmma_waves={len(wmma_waves)}")
 
     failures = []
     for wave in wmma_waves:
-        wave_failures = validate_wave(wave)
+        wave_failures = validate_wave(wave, expected_lds_priority_signature)
         for failure in wave_failures:
             failures.append(
-                f"cu={wave.cu} simd={wave.simd} wave={wave.wave_id} "
+                f"{wave.location} cu={wave.cu} simd={wave.simd} wave={wave.wave_id} "
                 f"workgroup={wave.workgroup_id}: {failure}"
             )
 
@@ -532,12 +563,13 @@ def summarize(waves: list[DecodedWave], max_waves: int) -> int:
             lambda inst: inst.mnemonic.startswith("global_load") or inst.mnemonic.startswith("flat_load"),
         )
         scratch = count(wave.events, lambda inst: inst.mnemonic.startswith("scratch_"))
+        signature = lds_priority_signature(wave.events)
         print(
-            f"wave cu={wave.cu} simd={wave.simd} slot={wave.wave_id} "
+            f"wave {wave.location} cu={wave.cu} simd={wave.simd} slot={wave.wave_id} "
             f"workgroup={wave.workgroup_id} inst={len(wave.events)} "
             f"setprio1={setprio1} setprio0={setprio0} wmma={wmma} "
             f"lds_write={lds_write} lds_read={lds_read} high_prio_lds={high_priority_lds} "
-            f"load={global_load} scratch={scratch}"
+            f"lds_priority_signature={signature} load={global_load} scratch={scratch}"
         )
         print("  markers: " + " ".join(compact_markers(wave.events)[:80]))
 
@@ -562,6 +594,10 @@ def main() -> int:
     parser.add_argument("--arch", default=os.environ.get("OFFLOAD_ARCH", "gfx1201"))
     parser.add_argument("--max-waves", type=int, default=6)
     parser.add_argument(
+        "--expected-lds-priority-signature",
+        help="fail if WMMA waves do not use this per-LDS-cluster priority signature, such as 1010",
+    )
+    parser.add_argument(
         "--raw-decoder",
         action="store_true",
         help="use librocprof-trace-decoder directly instead of ROCprof UI JSON",
@@ -578,7 +614,7 @@ def main() -> int:
         print("source=raw-att-decoder")
         instruction_maps = load_instruction_maps(args.att_dir, args.arch)
         waves = decode_att(att_files, instruction_maps)
-    return summarize(waves, args.max_waves)
+    return summarize(waves, args.max_waves, args.expected_lds_priority_signature)
 
 
 if __name__ == "__main__":

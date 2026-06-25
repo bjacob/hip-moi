@@ -202,11 +202,13 @@ by other subgroups. It has two shapes:
   must diagnose a same-epoch cross-subgroup LDS conflict.
 
 Both tests use a small helper around `__builtin_amdgcn_s_setprio`. That helper
-is marked `__forceinline__`. Without forced inlining in the current test build
-configuration, Clang can leave the helper out of line and the target kernel may
-only show the priority reset while the priority raise lives in a callee. That is
-valid code, but it is a poor test shape for inspecting whether the clustered
-kernel itself contains the intended `s_setprio` instructions.
+is marked `__forceinline__`, and it scalarizes the subgroup selector with
+`__builtin_amdgcn_readfirstlane` before branching to `s_setprio`. That
+scalarization is important. `s_setprio` is a scalar instruction; a branch that
+the compiler if-converts with EXEC-mask manipulation can still leave both
+scalar `s_setprio` arms executing in a single traced wave. In that shape, the
+source appears to choose one priority per subgroup, but the machine code can
+overwrite the priority immediately and defeat the intended scheduling test.
 
 ## Generated-Code Inspection
 
@@ -302,28 +304,49 @@ requires each traced WMMA wave to show:
 * at least one `s_setprio 1` region covering visible LDS traffic;
 * `s_setprio 0` as the last priority-setting instruction before each WMMA.
 
+It can also validate an LDS-priority signature with
+`--expected-lds-priority-signature`. The signature has one digit per LDS
+cluster: `1` means the cluster ran under `s_setprio 1`; `0` means it ran under
+`s_setprio 0`. For the four-tile probe, SIMD 0 and SIMD 1 should report
+`1010`, while SIMD 2 and SIMD 3 should report `0101`.
+
 On the current RDNA4 machine, fresh traces validated both probe modes. The
-pass-through trace reported representative WMMA waves with:
+pass-through trace on SIMD 0 reported representative WMMA waves with:
 
 ```text
-inst=115 setprio1=4 setprio0=9 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2
+inst=122 setprio1=2 setprio0=7 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2 lds_priority_signature=1010
 ```
 
-The sampled hip-moi trace reported representative WMMA waves with:
+The sampled hip-moi trace on SIMD 0 reported representative WMMA waves with:
 
 ```text
-inst=1515 setprio1=3 setprio0=8 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2
+inst=1522 setprio1=2 setprio0=7 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2 lds_priority_signature=1010
 ```
+
+Separate fresh traces on SIMD 2 validated the complementary `0101` signature
+for both pass-through and sampled hip-moi modes. Together, those traces confirm
+that the optimized probe produces the intended alternating priority roles:
+SIMD 0 and SIMD 1 trace waves whose high-priority LDS clusters are tiles 0 and
+2, while SIMD 2 and SIMD 3 trace waves whose high-priority LDS clusters are
+tiles 1 and 3.
 
 Those counts are not benchmark numbers. They are scheduling evidence for the
-controlled optimized probe: the traced waves still execute LDS traffic in
-priority-raised regions and reset priority before WMMA.
+controlled optimized probe: the traced waves execute LDS traffic in
+priority-raised regions, reset priority before WMMA, and use complementary
+priority signatures across representative SIMD selections.
 
 The raw `.att` files remain useful, but relying only on collection success is
 not enough. A focused kernel-name ATT filter was unreliable in local testing:
 it could produce captured code objects without producing usable `.att` traces.
 The current script therefore uses broad serialized capture and lets the
 validator select the WMMA-executing waves from ROCprof's decoded output.
+
+One limitation remains. On gfx10+ targets, ROCprof's `--att-simd-select` option
+selects a single SIMD ID, not a SIMD mask. The local ATT workflow therefore
+cannot capture SIMD 0/1 and SIMD 2/3 in the same run. It validates the two
+complementary role schedules in separate traces. It does not directly prove,
+from one timestamped trace, that both roles were simultaneously active at a
+specific cycle.
 
 ## RDNA4 Suitability
 

@@ -63,15 +63,16 @@ The current ping-pong inspection scripts are:
 
 ```bash
 benchmarks/inspect_pingpong_codegen.sh
-benchmarks/run_pingpong_att_validation.sh private-pass-through
-benchmarks/run_pingpong_att_validation.sh private-sampled
+EXPECTED_LDS_PRIORITY_SIGNATURE=1010 benchmarks/run_pingpong_att_validation.sh private-pass-through
+ATT_SIMD_SELECT=0x2 EXPECTED_LDS_PRIORITY_SIGNATURE=0101 benchmarks/run_pingpong_att_validation.sh private-pass-through
 ```
 
 `inspect_pingpong_codegen.sh` targets the RDNA4 ping-pong GTest executables.
 `run_pingpong_att_validation.sh` builds an optimized RDNA4 ATT probe and checks
 ROCprof's decoded per-wave instruction stream for the expected
-`s_setprio`/LDS/WMMA ordering. See [`docs/pingpong.md`](../docs/pingpong.md)
-for the `setprio`, `sched_barrier`, and ATT-trace caveats.
+`s_setprio`/LDS/WMMA ordering and, optionally, the expected LDS-priority
+signature. See [`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`,
+`sched_barrier`, and ATT-trace caveats.
 
 ## Benchmark Catalog
 

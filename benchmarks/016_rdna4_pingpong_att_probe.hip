@@ -158,7 +158,9 @@ namespace
 
     __device__ __forceinline__ void set_pingpong_priority(int subgroup, int k_tile)
     {
-        if(((subgroup + k_tile) & 1) == 0)
+        // s_setprio is scalar, so make the wave-uniform condition scalar before branching.
+        int uniform_subgroup = __builtin_amdgcn_readfirstlane(subgroup);
+        if(((uniform_subgroup + k_tile) & 1) == 0)
         {
             __builtin_amdgcn_s_setprio(1);
         }
