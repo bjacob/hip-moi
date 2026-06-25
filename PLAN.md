@@ -239,15 +239,18 @@ READMEs now describe the current detector scope.
    Atomics belong first in `hip_moi::context`, not in
    `sampled_watchpoint_context`. The design should state exactly which LLVM/HIP
    operations create synchronization, how epochs or happens-before state are
-   represented, and how diagnostics remain explainable. The corpus inventory
-   has started in `docs/atomics_corpus.md`: `tests/reference` currently has no
-   target workload atomics; `~/workspace/hip-matmul` provides Split-K,
-   Stream-K, and Stream-K-tree seed kernels using `atomicAdd`, `atomicOr`, and
-   explicit agent-scope fences; and
-   `~/workspace/rocjitsu-test-corpus/corpus/fuzz-targets/third_party/hip-stream-k`
-   provides the clearest first Stream-K release/acquire flag seed. The next
-   atomics sessions should first extract small uninstrumented reference kernels,
-   then add instrumented counterparts only as the semantic API becomes concrete.
+   represented, and how diagnostics remain explainable. The active roadmap is
+   `docs/atomics_plan.md`; the corpus inventory is `docs/atomics_corpus.md`.
+   The plan is RocJITsu-first: use
+   `~/workspace/rocjitsu-test-corpus` for the tiny `atomicAdd` seed, the
+   release/acquire flag handoff, and the first Stream-K-like tests. Use
+   `~/workspace/hip-matmul/matmul_rdna4.hip` only for Stream-K examples that go
+   beyond what RocJITsu currently provides, such as RDNA4 WMMA arrival counters
+   or Stream-K-tree `atomicOr` bitmasks. The immediate next sessions are:
+   add `tests/reference/atomic_reference_kernels.hip`, add compile-only broken
+   handoff shapes, add pass-through `hip_moi::context` atomic wrappers, add
+   global payload access wrappers, then design the first atomic object metadata
+   layout before enabling diagnostics.
 
 ## Non-Goals
 

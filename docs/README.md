@@ -41,12 +41,17 @@ interpreted.
    detector. Also records the current RDNA4 ping-pong test shapes,
    generated-code inspection workflow, and ATT trace smoke test.
 
-6. [Atomics Corpus](atomics_corpus.md)
+6. [Atomics Support Plan](atomics_plan.md)
 
-   Tracks the seed kernels and extraction plan for the next semantic expansion:
-   user-kernel atomics and the memory ordering they create.
+   Gives the staged implementation plan for user-kernel atomics: reference
+   kernels, public API, atomic metadata, release/acquire handoffs, RMW
+   operations, fence-plus-atomic patterns, Stream-K integration, and DBI seeds.
 
-7. [Benchmark README](../benchmarks/README.md)
+7. [Atomics Corpus](atomics_corpus.md)
+
+   Tracks the seed kernels for the atomics plan.
+
+8. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 

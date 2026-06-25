@@ -86,7 +86,9 @@ lesson is narrower:
 
 The next semantic expansion is atomics. It belongs first in
 `hip_moi::context`, because atomics require a real synchronization model beyond
-the local epoch used by `sampled_watchpoint_context`.
+the local epoch used by `sampled_watchpoint_context`. The concrete staged plan
+is [`atomics_plan.md`](atomics_plan.md), and the source corpus inventory is
+[`atomics_corpus.md`](atomics_corpus.md).
 
 The atomics design should specify:
 

@@ -25,6 +25,12 @@ as the existing reference corpus.
 
 ## Seed Sources
 
+The priority rule is RocJITsu-first. Prefer
+`/home/benoit/workspace/rocjitsu-test-corpus` for reference and instrumented
+tests. Use `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` only for
+Stream-K examples that go beyond what RocJITsu currently provides, especially
+RDNA4 WMMA arrival counters and Stream-K-tree bitmasks.
+
 ### RocJITsu Test Corpus: hip-stream-k Release/Acquire Flags
 
 Source:
@@ -225,25 +231,28 @@ The broad search also found many host-side or non-HIP atomics in vendored
 CPU/SYCL/Metal/WebGPU/Vulkan sources. Those are not hip-moi source-level HIP
 atomics seeds.
 
-## Extraction Plan
+## Corpus Extraction Priorities
 
-The atomics corpus should grow in stages.
+The implementation roadmap is in [`atomics_plan.md`](atomics_plan.md). This
+section only records the corpus order that should feed that plan.
 
-1. Add tiny reference kernels.
+1. Add RocJITsu-derived tiny reference kernels.
 
    Start with full-kernel HIP examples that isolate one semantic question at a
-   time: global `atomicAdd` arrival counter, shared-memory `atomicAdd`, global
-   `atomicOr` bit publication, and an `atomicCAS` lock or flag. Each should
-   have a host-side oracle and no hip-moi instrumentation.
+   time. The first two should come from RocJITsu: llama.cpp `count-equal.cu`
+   for a tiny global `atomicAdd`, and hip-stream-k `device_locks.hpp` for a
+   release/acquire flag handoff. Each safe case should have a host-side oracle
+   and no hip-moi instrumentation.
 
-2. Add fence-plus-atomic publication kernels.
+2. Add RocJITsu-derived release/acquire publication kernels.
 
    These should make the intended synchronizes-with edge explicit: producer
    writes payload, producer performs release operation, consumer observes that
    operation with acquire semantics, consumer reads payload. Include incorrect
    variants that omit the ordering operation or use a non-atomic flag.
 
-3. Extract a small hip-stream-k-style release/acquire flag reference.
+3. Extract a small hip-stream-k-style release/acquire flag reference from
+   RocJITsu.
 
    Use the RocJITsu `hip-stream-k` extract as the source shape. The first
    version should preserve only the core protocol: helper writes payload,
@@ -251,32 +260,39 @@ The atomics corpus should grow in stages.
    payload. This is the best bridge from tiny atomics tests to real Stream-K
    synchronization.
 
-4. Extract a small RDNA4 Split-K reference.
+4. Extract a RocJITsu two-helper or two-tile Stream-K reference.
+
+   Preserve the original flag indexing and owner/helper relationship from
+   `simple_streamk` or `two_tile_streamk`, while keeping the math small.
+
+5. Add `matmul_rdna4.hip` Split-K only if RDNA4 WMMA arrival counters become
+   the next missing Stream-K shape.
 
    Use `Rdna4WmmaF16SplitKAtomics` as the source shape, but keep the first
    extraction smaller than the production benchmark corpus. The goal is to
    preserve the atomic handoff and final-reducer behavior while keeping
    compile time and debugging cost low.
 
-5. Extract a small RDNA4 Stream-K reference.
+6. Add `matmul_rdna4.hip` Stream-K only if RocJITsu's flag-based Stream-K
+   corpus is no longer enough.
 
    Preserve the work-centric K-iteration distribution and the last-arriver
    `atomicAdd` reduction.
 
-6. Extract a small RDNA4 Stream-K-tree reference.
+7. Add `matmul_rdna4.hip` Stream-K-tree after `atomicOr` support exists.
 
    Preserve the `atomicOr` bitmask protocol and sibling-publication logic.
    This is the first reference that should force the design to reason about
    read-modify-write atomics as both reads and writes.
 
-7. Add instruction-level DBI-oriented atomic seeds.
+8. Add instruction-level DBI-oriented atomic seeds from RocJITsu.
 
    Keep these separate from source-level semantic tests. The first candidates
    are HipKittens `buffer_atomic_pk_add_bf16` and any future Tensile artifacts
    whose disassembly actually contains `buffer_atomic`, `flat_atomic`,
    `global_atomic`, `ds_*atomic`, or `s_atomic`.
 
-8. Add instrumented counterparts only after the semantic API is designed.
+9. Add instrumented counterparts only after the semantic API is designed.
 
    Instrumented tests should not blindly mirror the whole reference corpus at
    first. Each new instrumented case should correspond to one implemented
