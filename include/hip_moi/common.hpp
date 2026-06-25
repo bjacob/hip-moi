@@ -321,6 +321,72 @@ namespace hip_moi
             return __hip_atomic_fetch_or(ptr, value, __ATOMIC_SEQ_CST, Scope);
         }
 
+        __device__ inline void atomic_fence_workgroup(atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return;
+            case atomic_memory_order::acquire:
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+                return;
+            case atomic_memory_order::release:
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                return;
+            case atomic_memory_order::acq_rel:
+                __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "workgroup");
+                return;
+            case atomic_memory_order::seq_cst:
+                __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
+                return;
+            }
+            __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
+        }
+
+        __device__ inline void atomic_fence_agent(atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return;
+            case atomic_memory_order::acquire:
+                __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                return;
+            case atomic_memory_order::release:
+                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+                return;
+            case atomic_memory_order::acq_rel:
+                __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent");
+                return;
+            case atomic_memory_order::seq_cst:
+                __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
+                return;
+            }
+            __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
+        }
+
+        __device__ inline void atomic_fence_system(atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return;
+            case atomic_memory_order::acquire:
+                __threadfence_system();
+                return;
+            case atomic_memory_order::release:
+                __threadfence_system();
+                return;
+            case atomic_memory_order::acq_rel:
+                __threadfence_system();
+                return;
+            case atomic_memory_order::seq_cst:
+                __threadfence_system();
+                return;
+            }
+            __threadfence_system();
+        }
+
         template <typename T>
         __device__ inline T
             atomic_load_dispatch(T* ptr, atomic_memory_order order, atomic_memory_scope scope)
@@ -392,6 +458,24 @@ namespace hip_moi
                 return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
             }
             return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+        }
+
+        __device__ inline void atomic_fence_dispatch(atomic_memory_order order,
+                                                     atomic_memory_scope scope)
+        {
+            switch(scope)
+            {
+            case atomic_memory_scope::workgroup:
+                atomic_fence_workgroup(order);
+                return;
+            case atomic_memory_scope::agent:
+                atomic_fence_agent(order);
+                return;
+            case atomic_memory_scope::system:
+                atomic_fence_system(order);
+                return;
+            }
+            atomic_fence_agent(order);
         }
     } // namespace detail
 } // namespace hip_moi

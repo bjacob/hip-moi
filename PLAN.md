@@ -259,9 +259,11 @@ READMEs now describe the current detector scope.
    first stale open-addressing slot. Stage 6 is complete: `fetch_add`
    arrival-counter handoffs, two-RMW `acq_rel fetch_add` chains, and
    old-value-dependent `atomicOr` bitmask handoffs all have instrumented tests
-   and matching benchmarks. The next atomics step is Stage 7, adding
-   protocol-specific fast paths only where the measured Stage 6 rows justify
-   them. The diagnostic payload remains LDS access; global atomics are
+   and matching benchmarks. Stage 7 RMW fast paths are deliberately deferred
+   until a realistic Stream-K integration row shows which protocol deserves a
+   specialized path. Stage 8 has landed the first standard fence-plus-atomic
+   shape: release fence before relaxed publication, relaxed observation before
+   acquire fence. The diagnostic payload remains LDS access; global atomics are
    synchronization operations, not a request to diagnose ordinary global
    load/store races. Each atomics stage must satisfy the
    completion checklist in `docs/atomics_plan.md`:

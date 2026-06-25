@@ -31,8 +31,8 @@ benchmarks, documentation, and diligence notes have landed.
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
 | 5. Release/acquire fast path | Complete | Byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
 | 6. RMW atomics | Complete | `023_atomic_rmw_happens_before_test.hip` covers release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `024_atomic_or_bitmask_happens_before_test.hip` covers old-value-dependent `atomicOr` bitmask control flow. Both have matching benchmarks and RDNA4 resource notes. |
-| 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
-| 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
+| 7. RMW fast paths | Deferred | Stage 6 rows are measurable and spill-free; do not add benchmark-specific shortcuts until a realistic Stream-K integration row shows which RMW protocol needs a fast path. |
+| 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
 | 9. Stream-K integration tests | Not started | Starts after the relevant atomic protocols are supported. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
 
@@ -464,6 +464,14 @@ Exit criteria:
 * unsupported or capacity-exceeded RMW shapes fall back deterministically;
 * the docs say exactly which RMW protocols are optimized.
 
+Status: deferred. The completed Stage 6 microbenchmarks are all spill-free and
+cluster around 7 to 9 µs through `context`. That is slow relative to
+pass-through but not yet enough evidence to justify a source API that bakes in
+a benchmark-specific arrival-counter or bitmask shortcut. The next fast-path
+attempt should be driven by a realistic Stream-K integration row: if a concrete
+counter or bitmask protocol dominates that row, add a protocol-specific API and
+benchmark it there.
+
 ## Stage 8: Fences Paired With Atomics
 
 Goal: cover the source patterns that use relaxed atomics plus explicit fences.
@@ -489,6 +497,24 @@ Exit criteria:
 * one missing-fence variant diagnoses;
 * docs clearly state how the HIP/Clang builtins map to the LLVM IR memory
   model being approximated.
+
+Status: complete for the first standard fence-plus-atomic shape.
+`025_atomic_fence_happens_before_test.hip` adds a release fence sequenced before
+a relaxed flag store and an acquire fence sequenced after a relaxed flag load.
+The fenced variant suppresses the ordered LDS handoff diagnostic; the same
+relaxed flag handoff without fences still diagnoses.
+`025_atomic_fence_happens_before_benchmark.hip` measures 3.12 µs pass-through
+and 10.2 µs through `context` on the local RDNA4 machine. Resource usage is 4 B
+LDS, 3 VGPRs, 10 SGPRs, no spills for pass-through, and 4 B LDS, 23 VGPRs, 56
+SGPRs, no spills for `context`.
+
+The implementation records only the simple source-level pattern described
+above. A release fence arms the next relaxed atomic publication made through
+that `context`; an acquire fence consumes the last relaxed atomic observation
+made through that `context`. Some corpus helpers use a relaxed RMW followed by
+AMDGPU fences. That pattern is not claimed by this first Stage 8 rung because
+its status under the source-level HIP/LLVM memory model needs separate
+analysis; it may still be a legitimate target for the later hardware/DBI model.
 
 ## Stage 9: Stream-K Integration Tests
 

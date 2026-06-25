@@ -96,6 +96,10 @@ two-RMW `acq_rel` counter chain before the final subgroup reads LDS payload.
 benchmark. It uses an `atomicOr` old value to decide whether the second subgroup
 reads LDS payload written by the first subgroup.
 
+`025_atomic_fence_happens_before_benchmark.hip` is the first fence-plus-atomic
+benchmark. It models a release fence before relaxed atomic publication and an
+acquire fence after relaxed atomic observation.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -121,6 +125,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a; `context` row is 23 VGPRs, no spills |
 | `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a; `context` row is 25 VGPRs, no spills |
 | `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a; `context` row is 24 VGPRs, no spills |
+| `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a; `context` row is 23 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -149,6 +154,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-rmw-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, release/acquire `fetch_add` arrival counter orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-rmw-acq-rel-chain` | 256 workgroups, 2 subgroups/workgroup, two-RMW `acq_rel fetch_add` chain orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-or-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `atomicOr` bitmask orders instrumented LDS payload | 8 B, <0.1% | 4 |
+| `atomic-fence-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed atomic flag operations around instrumented LDS payload | 4 B, <0.1% | 3 |
 
 ## Benchmark Modes
 
@@ -200,6 +206,7 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-rmw-arrival-counter` | 3.47 µs | 7.16 µs |
 | `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.59 µs |
 | `atomic-or-bitmask-handoff` | 3.24 µs | 8.52 µs |
+| `atomic-fence-handoff` | 3.12 µs | 10.2 µs |
 
 ## Reading The Suite
 
@@ -273,3 +280,13 @@ VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 8 B LDS, 24 VGPRs,
 54 SGPRs, no scratch/private segment, and no spills. The disassembly has no
 scratch instructions; the remaining cost is the generic atomic metadata
 publication/acquire path and exact-shadow LDS checking.
+
+The atomic fence handoff row is the first fence-plus-atomic row. It supports
+the standard shape where a release fence is sequenced before a relaxed atomic
+store, and an acquire fence is sequenced after a relaxed atomic load that
+observed that store. The pass-through kernel reports 4 B LDS, 3 VGPRs, 10
+SGPRs, and no spills. The `context` kernel reports 4 B LDS, 23 VGPRs, 56 SGPRs,
+no scratch/private segment, and no spills. The first implementation keeps fence
+state in the per-thread device context object: release fences arm the next
+relaxed atomic publication, and acquire fences consume the last relaxed atomic
+observation made through that context.

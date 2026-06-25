@@ -234,6 +234,7 @@ namespace hip_moi
             {
                 (void)site;
             }
+            remember_observed_atomic(ptr, static_cast<uint32_t>(sizeof(T)), value);
             return value;
         }
 
@@ -251,6 +252,10 @@ namespace hip_moi
             {
                 record_atomic_release(ptr, sizeof(T), static_cast<uint64_t>(value), site);
             }
+            else
+            {
+                consume_pending_release_fence(ptr, static_cast<uint32_t>(sizeof(T)), value, site);
+            }
             detail::atomic_store_dispatch(ptr, value, order, scope);
         }
 
@@ -265,11 +270,16 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_add currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_add_dispatch(ptr, value, order, scope);
+            uint64_t released_value
+                = static_cast<uint64_t>(old_value) + static_cast<uint64_t>(value);
             if(detail::atomic_order_has_release(order))
             {
-                uint64_t released_value
-                    = static_cast<uint64_t>(old_value) + static_cast<uint64_t>(value);
                 record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
+            else
+            {
+                consume_pending_release_fence(
+                    ptr, static_cast<uint32_t>(sizeof(T)), released_value, site);
             }
             if(detail::atomic_order_has_acquire(order))
             {
@@ -279,6 +289,7 @@ namespace hip_moi
                 record_atomic_acquire(
                     ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
             }
+            remember_observed_atomic(ptr, static_cast<uint32_t>(sizeof(T)), old_value);
             return old_value;
         }
 
@@ -293,11 +304,16 @@ namespace hip_moi
                           "hip_moi::context::atomic_fetch_or currently supports "
                           "4-byte and 8-byte integral values");
             T old_value = detail::atomic_fetch_or_dispatch(ptr, value, order, scope);
+            uint64_t released_value
+                = static_cast<uint64_t>(old_value) | static_cast<uint64_t>(value);
             if(detail::atomic_order_has_release(order))
             {
-                uint64_t released_value
-                    = static_cast<uint64_t>(old_value) | static_cast<uint64_t>(value);
                 record_atomic_release(ptr, sizeof(T), released_value, site);
+            }
+            else
+            {
+                consume_pending_release_fence(
+                    ptr, static_cast<uint32_t>(sizeof(T)), released_value, site);
             }
             if(detail::atomic_order_has_acquire(order))
             {
@@ -306,7 +322,27 @@ namespace hip_moi
                 record_atomic_acquire(
                     ptr, static_cast<uint64_t>(old_value), kAtomicRmwAcquireRetryCount);
             }
+            remember_observed_atomic(ptr, static_cast<uint32_t>(sizeof(T)), old_value);
             return old_value;
+        }
+
+        __device__ void atomic_fence(atomic_memory_order order,
+                                     atomic_memory_scope scope,
+                                     site_id             site = no_site_id) const
+        {
+            if(detail::atomic_order_has_release(order))
+            {
+                pending_release_fence_epoch_token_
+                    = detail::current_epoch(storage_, subgroup_id()) + 1u;
+                pending_release_fence_site_id_ = site.value();
+            }
+            detail::atomic_fence_dispatch(order, scope);
+            if(detail::atomic_order_has_acquire(order) && last_observed_atomic_valid_)
+            {
+                record_atomic_acquire(reinterpret_cast<const void*>(last_observed_atomic_address_),
+                                      last_observed_atomic_value_,
+                                      kAtomicRmwAcquireRetryCount);
+            }
         }
 
         __device__ void simulate_syncthreads(bool participates, site_id site = no_site_id)
@@ -543,6 +579,16 @@ namespace hip_moi
                                               uint64_t    value,
                                               site_id     site) const
         {
+            record_atomic_release_at_epoch(
+                ptr, byte_count, value, detail::current_epoch(storage_, subgroup_id()), site);
+        }
+
+        __device__ void record_atomic_release_at_epoch(const void* ptr,
+                                                       uint32_t    byte_count,
+                                                       uint64_t    value,
+                                                       uint32_t    releasing_epoch,
+                                                       site_id     site) const
+        {
             uintptr_t             address = reinterpret_cast<uintptr_t>(ptr);
             atomic_object_record* record
                 = find_or_claim_atomic_object_record(address, byte_count, value, site);
@@ -553,11 +599,44 @@ namespace hip_moi
 
             record->address               = address;
             record->releasing_subgroup_id = subgroup_id();
-            record->releasing_epoch       = detail::current_epoch(storage_, subgroup_id());
+            record->releasing_epoch       = releasing_epoch;
             record->release_site_id       = site.value();
             record->value                 = value;
             __threadfence();
             record->generation = storage_.generation;
+        }
+
+        template <typename T>
+        __device__ void
+            remember_observed_atomic(const void* ptr, uint32_t byte_count, T value) const
+        {
+            last_observed_atomic_address_    = reinterpret_cast<uintptr_t>(ptr);
+            last_observed_atomic_value_      = static_cast<uint64_t>(value);
+            last_observed_atomic_byte_count_ = byte_count;
+            last_observed_atomic_valid_      = true;
+        }
+
+        template <typename T>
+        __device__ void consume_pending_release_fence(const void* ptr,
+                                                      uint32_t    byte_count,
+                                                      T           value,
+                                                      site_id     site) const
+        {
+            if(pending_release_fence_epoch_token_ == 0)
+            {
+                return;
+            }
+
+            uint64_t release_site = pending_release_fence_site_id_ != 0
+                                        ? pending_release_fence_site_id_
+                                        : site.value();
+            record_atomic_release_at_epoch(ptr,
+                                           byte_count,
+                                           static_cast<uint64_t>(value),
+                                           pending_release_fence_epoch_token_ - 1u,
+                                           site_id(release_site));
+            pending_release_fence_epoch_token_ = 0;
+            pending_release_fence_site_id_     = 0;
         }
 
         __device__ bool try_record_atomic_acquire(const void* ptr, uint64_t observed_value) const
@@ -1248,6 +1327,13 @@ namespace hip_moi
 
         storage_ref storage_;
         config      cfg_;
+
+        mutable uintptr_t last_observed_atomic_address_      = 0;
+        mutable uint64_t  last_observed_atomic_value_        = 0;
+        mutable uint32_t  last_observed_atomic_byte_count_   = 0;
+        mutable bool      last_observed_atomic_valid_        = false;
+        mutable uint32_t  pending_release_fence_epoch_token_ = 0;
+        mutable uint64_t  pending_release_fence_site_id_     = 0;
     };
 } // namespace hip_moi
 
