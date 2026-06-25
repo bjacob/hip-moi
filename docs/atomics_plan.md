@@ -59,6 +59,9 @@ For each implementation stage, complete the following before moving on:
    interpretation in the benchmark README or a linked note.
 5. Update the Current Status table above, including whether the stage is
    complete, in progress, or blocked.
+6. Commit at least once for each completed stage. Finer-grained commits are
+   allowed and encouraged when they make review easier, but a stage must not be
+   marked complete without a commit that records that completed state.
 
 The intent is to avoid accumulating semantic features that work only as tests
 but have obviously poor generated code, unmeasured cost, or undocumented
