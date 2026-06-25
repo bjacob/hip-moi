@@ -48,6 +48,10 @@ The launched no-diagnostic corpus includes:
 * Jakub-derived RDNA4 packed FP16 WMMA matmul schedules: no-pipeline,
   pipelined, and double-buffered.
 
+The reference corpus does not yet contain target workload atomics. The seed
+kernels and extraction plan for that next expansion are tracked in
+[`../../docs/atomics_corpus.md`](../../docs/atomics_corpus.md).
+
 ## Compile-Only Diagnostic Shapes
 
 The compile-only corpus includes:
@@ -73,4 +77,3 @@ shapes and sanity checks. The detector contract is documented in
 When an instrumented test adopts a reference shape, every LDS access in the
 instrumented kernel should go through hip-moi unless the test is explicitly
 comparing against a plain-HIP kernel.
-

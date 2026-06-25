@@ -41,7 +41,12 @@ interpreted.
    detector. Also records the current RDNA4 ping-pong test shapes,
    generated-code inspection workflow, and ATT trace smoke test.
 
-6. [Benchmark README](../benchmarks/README.md)
+6. [Atomics Corpus](atomics_corpus.md)
+
+   Tracks the seed kernels and extraction plan for the next semantic expansion:
+   user-kernel atomics and the memory ordering they create.
+
+7. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 

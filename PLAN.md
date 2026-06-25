@@ -239,7 +239,13 @@ READMEs now describe the current detector scope.
    Atomics belong first in `hip_moi::context`, not in
    `sampled_watchpoint_context`. The design should state exactly which LLVM/HIP
    operations create synchronization, how epochs or happens-before state are
-   represented, and how diagnostics remain explainable.
+   represented, and how diagnostics remain explainable. The corpus inventory
+   has started in `docs/atomics_corpus.md`: `tests/reference` currently has no
+   target workload atomics, while `~/workspace/hip-matmul` provides Split-K,
+   Stream-K, and Stream-K-tree seed kernels using `atomicAdd`, `atomicOr`, and
+   explicit agent-scope fences. The next atomics sessions should first extract
+   small uninstrumented reference kernels, then add instrumented counterparts
+   only as the semantic API becomes concrete.
 
 ## Non-Goals
 
