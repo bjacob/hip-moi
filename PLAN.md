@@ -253,6 +253,10 @@ READMEs now describe the current detector scope.
    first atomic object metadata layout before enabling diagnostics. The
    diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races.
+   Each atomics stage must satisfy the completion checklist in
+   `docs/atomics_plan.md`: instrumented test, matching benchmark,
+   `benchmarks/README.md` update, and generated-code/performance diligence
+   before the next stage starts.
 
 ## Non-Goals
 

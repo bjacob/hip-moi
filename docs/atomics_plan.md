@@ -16,6 +16,54 @@ examples. Use `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` only for
 Stream-K shapes that go beyond what the RocJITsu corpus currently provides,
 especially RDNA4 WMMA Stream-K arrival counters and Stream-K-tree bitmasks.
 
+## Current Status
+
+This table must be updated at the end of each atomics session. A stage is not
+complete merely because code exists; it is complete only when its tests,
+benchmarks, documentation, and diligence notes have landed.
+
+| Stage | Status | Current note |
+| --- | --- | --- |
+| 0. Freeze the corpus map | Complete | `atomics_corpus.md` identifies RocJITsu-first seeds and limits `matmul_rdna4.hip` to missing Stream-K variants. |
+| 1. Reference kernels before instrumentation | Next | No atomics reference kernels have been added to `tests/reference` yet. |
+| 2. Public atomic API skeleton | Not started | Waiting for Stage 1 reference shapes. |
+| 3. Atomic object metadata | Not started | Waiting for pass-through API tests. |
+| 4. Happens-before for LDS payload handoffs | Not started | First diagnostic-capable release/acquire stage. |
+| 5. Release/acquire fast path | Not started | Starts immediately after Stage 4 works. |
+| 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
+| 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
+| 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
+| 9. Stream-K integration tests | Not started | Starts after the relevant atomic protocols are supported. |
+| 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
+
+## Stage Completion Checklist
+
+For each implementation stage, complete the following before moving on:
+
+1. Add at least one new instrumented test that exercises the capability added
+   in that stage. Reference-only Stage 1 is the sole exception; it must add
+   concrete uninstrumented tests that the following implementation stages will
+   instrument.
+2. Add a matching benchmark for the same source shape. The benchmark must
+   include at least:
+   * a pass-through mode that performs the same user work without hip-moi
+     diagnostics;
+   * a `hip_moi::context` mode that exercises the new diagnostic path;
+   * any applicable hip-moi fast path once such a fast path exists.
+3. Update `benchmarks/README.md` in the same commit so the new benchmark is in
+   the catalog, the mode table, the resource-pressure table when applicable,
+   and the current RDNA4 results table.
+4. Perform generated-code and performance diligence before declaring the stage
+   complete. At minimum, inspect resource usage and generated code for the hot
+   path, compare benchmark results against pass-through, and record the
+   interpretation in the benchmark README or a linked note.
+5. Update the Current Status table above, including whether the stage is
+   complete, in progress, or blocked.
+
+The intent is to avoid accumulating semantic features that work only as tests
+but have obviously poor generated code, unmeasured cost, or undocumented
+performance trade-offs.
+
 ## Scope
 
 Atomics belong first in `hip_moi::context`. They require a real
@@ -114,7 +162,10 @@ Exit criteria:
 
 * reference tests compile and safe cases run under CTest;
 * compile-only negative shapes are present for later instrumented diagnostics;
-* the reference README links to the atomics plan.
+* the reference README links to the atomics plan;
+* the Current Status table marks Stage 1 complete and Stage 2 next. The
+  instrumented-test and benchmark obligations begin with Stage 2, where the
+  first atomics API exists.
 
 ## Stage 2: Public Atomic API Skeleton
 
