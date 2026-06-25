@@ -277,7 +277,10 @@ READMEs now describe the current detector scope.
    WMMA K-slice partials, and uses an `acq_rel fetch_add` arrival counter to
    order the final fold. It is spill-free but costs 27.4 µs through `context`
    against a 3.47 µs pass-through baseline, with 51 VGPRs and 70 SGPRs in the
-   `context` kernel. The
+   `context` kernel. `docs/atomics_fast_paths.md` now records the fast-path
+   decision point; its current recommendation is a small direct-mapped RMW
+   metadata cache behind the existing API, with fallback to the generic
+   value-keyed table. The
    diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the

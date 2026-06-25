@@ -7,8 +7,10 @@ SPDX-License-Identifier: MIT
 
 This document is the staged implementation plan for adding user-kernel atomics
 to hip-moi. The corpus inventory lives in
-[`atomics_corpus.md`](atomics_corpus.md). This document says what to build, in
-which order, and what each stage must prove before the next one starts.
+[`atomics_corpus.md`](atomics_corpus.md). The fast-path design notes live in
+[`atomics_fast_paths.md`](atomics_fast_paths.md). This document says what to
+build, in which order, and what each stage must prove before the next one
+starts.
 
 The plan is RocJITsu-first. Use
 `/home/benoit/workspace/rocjitsu-test-corpus` as the default source for
@@ -618,9 +620,11 @@ Exit criteria:
    optimizing. The distilled `atomicOr` row already exists; the remaining
    question is whether preserving WMMA arithmetic and tree control flow changes
    register pressure enough to guide the fast-path design.
-2. Decide whether Stage 7 now needs a protocol-specific fast path. The
-   two-tile flag row is spill-free but reaches 59 VGPRs and 85 SGPRs in
-   `context`; the WMMA arrival-counter row is spill-free at 51 VGPRs and 70
+2. Decide whether Stage 7 now needs a protocol-specific fast path. The current
+   recommendation in `atomics_fast_paths.md` is to try a small direct-mapped
+   RMW metadata cache behind the existing API, with fallback to the generic
+   table. The two-tile flag row is spill-free but reaches 59 VGPRs and 85 SGPRs
+   in `context`; the WMMA arrival-counter row is spill-free at 51 VGPRs and 70
    SGPRs but has a 27.4 µs `context` latency against a 3.47 µs pass-through
    baseline.
 3. If a fast path is pursued, keep it source-model honest: it may specialize

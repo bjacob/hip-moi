@@ -51,7 +51,12 @@ interpreted.
 
    Tracks the seed kernels for the atomics plan.
 
-8. [Benchmark README](../benchmarks/README.md)
+8. [Atomics Fast-Path Notes](atomics_fast_paths.md)
+
+   Interprets the first Stream-K-shaped atomics benchmark rows and lays out the
+   current fast-path candidates.
+
+9. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 
