@@ -110,6 +110,11 @@ integration row. It keeps the flag protocol distilled to LDS partials, but
 splits the work into two independent tile fixups, each with its own owner
 subgroup and helper subgroup.
 
+`028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` is the first
+WMMA-flavored Stream-K integration row. It keeps the diagnostic payload in LDS,
+but adds RDNA4 WMMA arithmetic and an arrival-counter-style `fetch_add` before
+the final subgroup folds LDS partials.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -138,6 +143,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a; `context` row is 23 VGPRs, no spills |
 | `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a; `context` row is 25 VGPRs, no spills |
 | `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a; `context` row is 59 VGPRs, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a; `context` row is 51 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -169,6 +175,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-fence-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed atomic flag operations around instrumented LDS payload | 4 B, <0.1% | 3 |
 | `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
 | `streamk-two-tile-flag-fixup` | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B, <0.1% | 3 |
+| `rdna4-wmma-streamk-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, arrival counter, final subgroup folds LDS partials | 4096 B, 6.3% | 21 |
 
 ## Benchmark Modes
 
@@ -223,6 +230,7 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-fence-handoff` | 3.12 µs | 10.2 µs |
 | `streamk-flag-fixup` | 3.35 µs | 11.2 µs |
 | `streamk-two-tile-flag-fixup` | 3.20 µs | 11.1 µs |
+| `rdna4-wmma-streamk-arrival-counter` | 3.47 µs | 27.4 µs |
 
 ## Reading The Suite
 
@@ -324,3 +332,15 @@ and no spills. The `context` kernel reports 16 B LDS, 59 VGPRs, 85 SGPRs, no
 scratch/private segment, and no spills. This row shows that widening the
 Stream-K control-flow shape can substantially increase live register pressure
 even when latency remains close to the previous integration row.
+
+The RDNA4 WMMA Stream-K arrival-counter row is the first atomics integration
+row with WMMA arithmetic. It is not a direct global-partial Stream-K GEMM: the
+diagnostic payload is intentionally kept in LDS so hip-moi can test whether an
+arrival-counter synchronization edge orders the final fold of the partials.
+The pass-through kernel reports 4096 B LDS, 21 VGPRs, 14 SGPRs, and no spills.
+The `context` kernel reports 4096 B LDS, 51 VGPRs, 70 SGPRs, no
+scratch/private segment, and no spills. An earlier single-lane reduction draft
+was rejected because it produced an unrepresentative 209 µs `context` latency
+by making one lane perform every instrumented partial load. The committed row
+uses lane-parallel reduction and is the better signal for the next fast-path
+decision.

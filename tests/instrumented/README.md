@@ -79,6 +79,9 @@ Current files:
   owner/helper flag fixup distilled to LDS partial payloads.
 * `027_streamk_two_tile_flag_protocol_test.hip`: two independent
   Stream-K-style owner/helper tile fixups, one release/acquire flag per tile.
+* `028_rdna4_wmma_streamk_arrival_counter_test.hip`: RDNA4-only WMMA
+  Stream-K-shaped arrival-counter test where two subgroups publish K-slice LDS
+  partials and the final subgroup folds them.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

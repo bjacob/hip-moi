@@ -33,7 +33,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 6. RMW atomics | Complete | `023_atomic_rmw_happens_before_test.hip` covers release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `024_atomic_or_bitmask_happens_before_test.hip` covers old-value-dependent `atomicOr` bitmask control flow. Both have matching benchmarks and RDNA4 resource notes. |
 | 7. RMW fast paths | Deferred | Stage 6 rows are measurable and spill-free; do not add benchmark-specific shortcuts until a realistic Stream-K integration row shows which RMW protocol needs a fast path. |
 | 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
-| 9. Stream-K integration tests | In progress | `026_streamk_flag_protocol_test.hip` and `027_streamk_two_tile_flag_protocol_test.hip` add RocJITsu hip-stream-k-shaped flag-fixup rows. The next rung is an RDNA4 WMMA Stream-K shape. |
+| 9. Stream-K integration tests | In progress | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, and `028_rdna4_wmma_streamk_arrival_counter_test.hip` add Stream-K-shaped flag, ownership, and RDNA4 WMMA arrival-counter rows. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
 
 ## Stage Completion Checklist
@@ -568,8 +568,23 @@ spills. The high register pressure is now part of the Stage 9 diligence record:
 the next integration rung should not proceed blindly without checking whether a
 small RDNA4 WMMA Stream-K extraction keeps this pressure acceptable.
 
-The next Stage 9 rung should preserve arithmetic and control flow from a small
-RDNA4 WMMA Stream-K extraction from `matmul_rdna4.hip`.
+The third integration rung landed in
+`028_rdna4_wmma_streamk_arrival_counter_test.hip` and
+`028_rdna4_wmma_streamk_arrival_counter_benchmark.hip`. It is inspired by the
+arrival-counter path in `hip-matmul/matmul_rdna4.hip`: two subgroups compute
+two RDNA4 WMMA K-slice partials, publish their LDS partials with an
+`acq_rel fetch_add` counter, and the final subgroup folds both LDS partials.
+The ordered variant is quiet; the relaxed-counter variant diagnoses the final
+fold. The local RDNA4 benchmark row is 3.47 µs pass-through and 27.4 µs through
+`context`. The pass-through row uses 4096 B LDS, 21 VGPRs, 14 SGPRs, and no
+spills. The `context` row uses 4096 B LDS, 51 VGPRs, 70 SGPRs, no private
+segment, and no spills. An earlier single-lane fold draft was rejected because
+it distorted the benchmark by making one lane perform every instrumented
+partial load; the committed row uses lane-parallel reduction.
+
+The next Stage 9 choice is now explicit: either extract a WMMA Stream-K-tree
+`atomicOr` row, or stop widening and decide whether Stage 7 needs a
+Stream-K-specific fast path for the generic atomic metadata operations.
 
 ## Stage 10: DBI-Oriented Atomic Instruction Seeds
 
@@ -599,19 +614,19 @@ Exit criteria:
 
 ## Immediate Next Sessions
 
-1. Extract a small RDNA4 WMMA Stream-K row from `matmul_rdna4.hip`, preserving
-   enough arithmetic and control flow that register pressure is meaningful.
-   Add the instrumented test first, then the matching pass-through/`context`
-   benchmark.
-2. Inspect the generated code for that WMMA Stream-K row before optimizing:
-   record LDS bytes, VGPRs, SGPRs, spills, private segment size, and the
-   approximate hot-path instruction shape.
-3. Decide whether Stage 7 needs a protocol-specific fast path. The two-tile
-   flag row is spill-free but already at 59 VGPRs and 85 SGPRs in `context`;
-   the WMMA row should decide whether the generic atomic metadata path is still
-   acceptable or whether Stream-K needs a compact specialized synchronization
-   representation.
-4. Keep DBI-oriented atomic instruction seeds separate. If the WMMA extraction
-   exposes interesting atomic instructions, record them in the corpus notes,
-   but do not mix hardware-level DBI semantics into the source-level HIP
-   diagnostic model.
+1. Decide whether to add a WMMA Stream-K-tree `atomicOr` integration row before
+   optimizing. The distilled `atomicOr` row already exists; the remaining
+   question is whether preserving WMMA arithmetic and tree control flow changes
+   register pressure enough to guide the fast-path design.
+2. Decide whether Stage 7 now needs a protocol-specific fast path. The
+   two-tile flag row is spill-free but reaches 59 VGPRs and 85 SGPRs in
+   `context`; the WMMA arrival-counter row is spill-free at 51 VGPRs and 70
+   SGPRs but has a 27.4 µs `context` latency against a 3.47 µs pass-through
+   baseline.
+3. If a fast path is pursued, keep it source-model honest: it may specialize
+   common Stream-K synchronization shapes, but it must not silently replace the
+   HIP/LLVM release/acquire model with hardware folklore.
+4. Keep DBI-oriented atomic instruction seeds separate. If a future WMMA
+   extraction exposes interesting atomic instructions, record them in the
+   corpus notes, but do not mix hardware-level DBI semantics into the
+   source-level HIP diagnostic model.

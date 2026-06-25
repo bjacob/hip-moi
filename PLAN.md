@@ -270,7 +270,14 @@ READMEs now describe the current detector scope.
    relaxed second-tile handoff. That row remains spill-free but raises
    `context` pressure to 59 VGPRs and 85 SGPRs, so the next integration rung
    should preserve arithmetic and control flow from a small RDNA4 WMMA Stream-K
-   extraction while checking register pressure closely. The
+   extraction while checking register pressure closely. The first RDNA4
+   WMMA-flavored Stream-K arrival-counter row has now landed as
+   `028_rdna4_wmma_streamk_arrival_counter_test.hip` and its matching
+   benchmark: it keeps the diagnostic payload in LDS, uses two subgroup-local
+   WMMA K-slice partials, and uses an `acq_rel fetch_add` arrival counter to
+   order the final fold. It is spill-free but costs 27.4 µs through `context`
+   against a 3.47 µs pass-through baseline, with 51 VGPRs and 70 SGPRs in the
+   `context` kernel. The
    diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the
