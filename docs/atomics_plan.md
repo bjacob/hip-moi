@@ -30,7 +30,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 3. Atomic object metadata | Complete | `context::atomic_object_record` is allocated from the host byte budget, release-style atomics populate a bounded generation-separated table, and `020_atomic_metadata_test.hip` / `020_atomic_metadata_benchmark.hip` cover saturation, generation reuse, and codegen cost. |
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
 | 5. Release/acquire fast path | Complete | Byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
-| 6. RMW atomics | In progress | `023_atomic_rmw_happens_before_test.hip` and matching benchmark cover both release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `atomicOr` bitmask control flow remains open. |
+| 6. RMW atomics | Complete | `023_atomic_rmw_happens_before_test.hip` covers release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `024_atomic_or_bitmask_happens_before_test.hip` covers old-value-dependent `atomicOr` bitmask control flow. Both have matching benchmarks and RDNA4 resource notes. |
 | 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
 | 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
 | 9. Stream-K integration tests | Not started | Starts after the relevant atomic protocols are supported. |
@@ -419,13 +419,13 @@ Exit criteria:
 * an `atomicOr` bitmask test proves that old-value-dependent control flow is
   represented.
 
-Status: in progress. The first arrival-counter rungs have landed:
+Status: complete. The arrival-counter rungs landed in
 `023_atomic_rmw_happens_before_test.hip` and
-`023_atomic_rmw_happens_before_benchmark.hip` cover a producer subgroup that
-stores LDS payload, publishes it with a release `fetch_add`, and a consumer
-subgroup that observes the counter with an acquire `fetch_add` before reading
-the payload. The same test and benchmark also cover a two-RMW `acq_rel`
-`fetch_add` chain.
+`023_atomic_rmw_happens_before_benchmark.hip`: they cover a producer subgroup
+that stores LDS payload, publishes it with a release `fetch_add`, and a
+consumer subgroup that observes the counter with an acquire `fetch_add` before
+reading the payload. The same test and benchmark also cover a two-RMW
+`acq_rel` `fetch_add` chain.
 
 Supporting the `acq_rel` chain required changing atomic metadata from an
 address-only key to an `(address, released value)` key. This lets records for
@@ -436,9 +436,14 @@ private segment, and no spills, and 8.59 µs for
 `atomic-rmw-acq-rel-chain_context` with 8 B LDS, 25 VGPRs, 54 SGPRs, no private
 segment, and no spills.
 
-The remaining Stage 6 gap is `atomicOr` bitmask control flow. That should be
-driven by a concrete Stream-K-tree-style example where the returned old value
-determines which subgroup reads which LDS payload.
+The bitmask RMW rung landed in
+`024_atomic_or_bitmask_happens_before_test.hip` and
+`024_atomic_or_bitmask_happens_before_benchmark.hip`. A first subgroup writes
+an LDS payload and publishes one bit with release `atomicOr`; a second subgroup
+uses the old mask returned by an `acq_rel atomicOr` to decide whether to read
+that payload. The relaxed variant still diagnoses. The local RDNA4 benchmark
+row is 8.52 µs for `atomic-or-bitmask-handoff_context`, with 8 B LDS, 24 VGPRs,
+54 SGPRs, no private segment, and no spills.
 
 ## Stage 7: RMW Fast Paths
 

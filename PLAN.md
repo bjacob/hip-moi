@@ -256,13 +256,14 @@ READMEs now describe the current detector scope.
    not diagnose while broken handoffs still do. Stage 5 has reduced the
    release/acquire metadata overhead by making atomic-object capacities powers
    of two, using masked probe starts, and terminating acquire lookups at the
-   first stale open-addressing slot. Stage 6 is now in progress: the first RMW
-   rung covers a release `fetch_add` arrival counter consumed by an acquire
-   `fetch_add`, and the next rung covers a two-RMW `acq_rel fetch_add` chain by
-   making atomic metadata value-sensitive. The remaining Stage 6 gap is
-   `atomicOr` bitmask control flow. The diagnostic payload remains LDS access;
-   global atomics are synchronization operations, not a request to diagnose
-   ordinary global load/store races. Each atomics stage must satisfy the
+   first stale open-addressing slot. Stage 6 is complete: `fetch_add`
+   arrival-counter handoffs, two-RMW `acq_rel fetch_add` chains, and
+   old-value-dependent `atomicOr` bitmask handoffs all have instrumented tests
+   and matching benchmarks. The next atomics step is Stage 7, adding
+   protocol-specific fast paths only where the measured Stage 6 rows justify
+   them. The diagnostic payload remains LDS access; global atomics are
+   synchronization operations, not a request to diagnose ordinary global
+   load/store races. Each atomics stage must satisfy the
    completion checklist in `docs/atomics_plan.md`:
    instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence

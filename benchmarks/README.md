@@ -92,6 +92,10 @@ reporting the ordered LDS access pair.
 benchmark. It covers both a release/acquire `fetch_add` arrival counter and a
 two-RMW `acq_rel` counter chain before the final subgroup reads LDS payload.
 
+`024_atomic_or_bitmask_happens_before_benchmark.hip` is the first bitmask RMW
+benchmark. It uses an `atomicOr` old value to decide whether the second subgroup
+reads LDS payload written by the first subgroup.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -116,6 +120,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a; `context` row is 21 VGPRs, no spills |
 | `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a; `context` row is 23 VGPRs, no spills |
 | `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a; `context` row is 25 VGPRs, no spills |
+| `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a; `context` row is 24 VGPRs, no spills |
 
 ## Shapes and Resource Pressure
 
@@ -143,6 +148,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-hb-lds-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B, <0.1% | 3 |
 | `atomic-rmw-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, release/acquire `fetch_add` arrival counter orders instrumented LDS payload | 8 B, <0.1% | 4 |
 | `atomic-rmw-acq-rel-chain` | 256 workgroups, 2 subgroups/workgroup, two-RMW `acq_rel fetch_add` chain orders instrumented LDS payload | 8 B, <0.1% | 4 |
+| `atomic-or-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `atomicOr` bitmask orders instrumented LDS payload | 8 B, <0.1% | 4 |
 
 ## Benchmark Modes
 
@@ -193,6 +199,7 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-hb-lds-handoff` | 3.33 µs | 8.77 µs |
 | `atomic-rmw-arrival-counter` | 3.47 µs | 7.16 µs |
 | `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.59 µs |
+| `atomic-or-bitmask-handoff` | 3.24 µs | 8.52 µs |
 
 ## Reading The Suite
 
@@ -258,3 +265,11 @@ segment, and no spills. The `acq_rel` chain `context` kernel reports 8 B LDS,
 chain required making atomic metadata value-sensitive: the released counter
 value is part of the metadata key, so records for consecutive RMW values can
 coexist.
+
+The atomicOr bitmask row covers old-value-dependent control flow: the second
+subgroup branches on the old mask returned by `atomic_fetch_or` before reading
+the first subgroup's LDS payload. The pass-through kernel reports 8 B LDS, 4
+VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 8 B LDS, 24 VGPRs,
+54 SGPRs, no scratch/private segment, and no spills. The disassembly has no
+scratch instructions; the remaining cost is the generic atomic metadata
+publication/acquire path and exact-shadow LDS checking.
