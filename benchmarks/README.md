@@ -59,17 +59,19 @@ objects, and report metadata or instruction counts with LLVM tools. They are
 sanity checks for whether a benchmark or test object still has the generated
 code shape that the measurement assumes.
 
-The current ping-pong inspection script is:
+The current ping-pong inspection scripts are:
 
 ```bash
 benchmarks/inspect_pingpong_codegen.sh
+benchmarks/run_pingpong_att_validation.sh private-pass-through
+benchmarks/run_pingpong_att_validation.sh private-sampled
 ```
 
-It currently targets the RDNA4 ping-pong GTest executables. A future
-ping-pong benchmark should get the same inspection treatment on its optimized
-benchmark object before timing numbers are treated as meaningful. See
-[`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`, `sched_barrier`,
-and ATT-trace caveats.
+`inspect_pingpong_codegen.sh` targets the RDNA4 ping-pong GTest executables.
+`run_pingpong_att_validation.sh` builds an optimized RDNA4 ATT probe and checks
+ROCprof's decoded per-wave instruction stream for the expected
+`s_setprio`/LDS/WMMA ordering. See [`docs/pingpong.md`](../docs/pingpong.md)
+for the `setprio`, `sched_barrier`, and ATT-trace caveats.
 
 ## Benchmark Catalog
 

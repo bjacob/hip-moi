@@ -154,6 +154,8 @@ The instrumented suite now focuses on:
 * RDNA4 ping-pong-shaped correctness tests with private LDS staging,
   cooperative LDS staging, `setprio`, `sched_barrier`, WMMA, and exact-shadow
   diagnostics for the intentionally unsynchronized cooperative shape.
+* An optimized RDNA4 ping-pong ATT probe that validates dynamic
+  `s_setprio`/LDS/WMMA ordering in ROCprof's decoded per-wave trace output.
 
 The reference suite remains useful as concrete uninstrumented HIP code for
 safe-kernel validation and benchmark-shape provenance. Racy reference kernels
@@ -171,7 +173,7 @@ Current entry points:
   per-example intent, and links to deeper model/context docs;
 * `docs/pingpong.md`: source survey and scope decision for ping-pong
   scheduling, `setprio`, `sched_barrier`, RDNA4 suitability, generated-code
-  inspection, and ATT smoke tracing;
+  inspection, and optimized ATT validation;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
@@ -192,43 +194,34 @@ READMEs now describe the current detector scope.
 
 ## Next Work
 
-1. Add a benchmark-shaped ping-pong source.
-
-   The controlled GTest kernels now have codegen inspection coverage via
-   `benchmarks/inspect_pingpong_codegen.sh`, and a minimal ATT capture has been
-   proven to work with the local TheRock `rocprofv3` build. The next benchmark
-   should be built separately from the GTest executables, use optimized
-   compilation settings, include pass-through and hip-moi rows, and instrument
-   every LDS access. Generated-code inspection on that optimized benchmark
-   object is a precondition for trusting timing numbers.
-
-2. Use ATT selectively on ping-pong benchmark dispatches.
-
-   ATT is useful when the question is whether traced waves execute the expected
-   clustered instruction stream and where stalls appear. Collection alone is
-   not enough; the decoded stats/UI output or raw trace must be inspected before
-   drawing scheduling conclusions.
-
-3. Write a Loom/RFC comparison document.
+1. Write a Loom/RFC comparison document.
 
    This should map hip-moi concepts to real Loom, Jakub-Sampled-Loom, and the
    RFC vocabulary: metadata layout, ownership, epoch advancement, access-time
    checking, sampling, false-negative sources, and diagnostic capabilities.
 
-4. Write a benchmark interpretation document.
+2. Write a benchmark interpretation document.
 
    The benchmark README records numbers. A separate delivery document should
    explain what those numbers imply for Loom and the RFC: which overheads come
    from metadata traffic, which come from register pressure, which paths spill,
    and which workload shapes are most informative.
 
-5. Tighten source comments around benchmark-local Jakub-Sampled-Loom code.
+3. Tighten source comments around benchmark-local Jakub-Sampled-Loom code.
 
    The benchmark sources contain a local comparison implementation. Comments
    should make clear that this is Jakub's HIP prototype shape, not upstream
    Loom itself.
 
-6. Plan the next semantic expansion: atomics.
+4. Keep ping-pong ATT validation as a guardrail if ping-pong timing work
+   resumes.
+
+   The optimized probe now validates pass-through and sampled hip-moi dynamic
+   instruction streams through ROCprof UI JSON. Any future ping-pong timing
+   benchmark should first pass the same generated-code and ATT checks before
+   latency numbers are treated as meaningful.
+
+5. Plan the next semantic expansion: atomics.
 
    Atomics belong first in `hip_moi::context`, not in
    `sampled_watchpoint_context`. The design should state exactly which LLVM/HIP

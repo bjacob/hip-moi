@@ -253,7 +253,7 @@ instruction scheduling, but it does not necessarily lower to a visible machine
 instruction. Absence of a named `sched_barrier` instruction in disassembly is
 not, by itself, evidence that the source-level scheduling boundary was ignored.
 
-## ATT Trace Smoke Test
+## Optimized ATT Validation
 
 The local TheRock tree can provide `rocprofv3` with advanced thread trace
 support. In this workspace it was built by enabling profiler support:
@@ -277,32 +277,53 @@ from the checked-out TheRock sources. The build may require the staged SQLite
 include directory to be visible to rocprofiler-sdk compilation if the local
 TheRock configuration does not propagate that sysdep include path.
 
-A minimal ATT smoke command for the private ping-pong sampled test is:
+The reproducible validation entry point is:
 
 ```bash
-/home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/bin/rocprofv3 \
-  --att \
-  --att-library-path /home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/lib \
-  --kernel-include-regex private_pingpong_kernel \
-  --att-consecutive-kernels 1 \
-  -d /tmp/hip-moi-att-private-smoke \
-  -- /home/benoit/workspace/hip-moi-build/tests/hip_moi_instrumented_rdna4_pingpong_private_lds_test \
-     --gtest_filter=HipMoiRdna4PingpongPrivateLds.SampledFastContextMatchesHostReference
+benchmarks/run_pingpong_att_validation.sh private-pass-through
+benchmarks/run_pingpong_att_validation.sh private-sampled
 ```
 
-This produces the normal GTest result plus raw ATT output, decoded UI JSON, a
-stats CSV, captured code objects, and a profiler results database. The raw
-`.att` file is SQ thread trace data. The ROCprofiler-SDK documentation says
-that thread trace targets a single CU per shader engine by default; if a
-dispatch does not populate the chosen CU, the stats CSV can be empty even for a
-valid kernel. In that case, launch more waves or adjust the target CU and
-shader-engine mask.
+The script builds `benchmarks/016_rdna4_pingpong_att_probe.hip` with optimized
+`hipcc` settings and runs ROCprof ATT in serialized mode. It intentionally
+launches many workgroups so the selected target CU receives traced work. The
+probe has two modes:
 
-ATT is the right tool for checking whether the traced waves execute the
-expected clustered instruction stream and where stalls appear. It should be
-used as evidence about instruction execution only after the raw and decoded
-outputs have been inspected, not merely after confirming that collection
-succeeds.
+* `private-pass-through`: same kernel shape without hip-moi instrumentation;
+* `private-sampled`: the same LDS accesses through
+  `hip_moi::sampled_watchpoint_context`.
+
+The validator, `benchmarks/validate_pingpong_att.py`, prefers ROCprof's decoded
+UI JSON when it is available. That decoded form is the instruction stream
+reported by ROCprof after stitching the raw SQ thread-trace data. The validator
+requires each traced WMMA wave to show:
+
+* visible LDS stores and LDS loads;
+* at least one `s_setprio 1` region covering visible LDS traffic;
+* `s_setprio 0` as the last priority-setting instruction before each WMMA.
+
+On the current RDNA4 machine, fresh traces validated both probe modes. The
+pass-through trace reported representative WMMA waves with:
+
+```text
+inst=115 setprio1=4 setprio0=9 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2
+```
+
+The sampled hip-moi trace reported representative WMMA waves with:
+
+```text
+inst=1515 setprio1=3 setprio0=8 wmma=4 lds_write=8 lds_read=8 high_prio_lds=2
+```
+
+Those counts are not benchmark numbers. They are scheduling evidence for the
+controlled optimized probe: the traced waves still execute LDS traffic in
+priority-raised regions and reset priority before WMMA.
+
+The raw `.att` files remain useful, but relying only on collection success is
+not enough. A focused kernel-name ATT filter was unreliable in local testing:
+it could produce captured code objects without producing usable `.att` traces.
+The current script therefore uses broad serialized capture and lets the
+validator select the WMMA-executing waves from ROCprof's decoded output.
 
 ## RDNA4 Suitability
 
@@ -330,13 +351,13 @@ The recommended sequence is:
 
 1. Keep the current private and cooperative tests as correctness and codegen
    probes.
-2. Build a benchmark-shaped ping-pong source separately from the GTest
-   executables, with optimized compilation settings and pass-through plus
-   hip-moi rows.
-3. Run generated-code inspection on the benchmark object before trusting
-   benchmark numbers.
-4. Use ATT on selected dispatches when instruction ordering, wave execution, or
-   stalls are the question being asked.
+2. Keep the optimized ATT probe as the instruction-ordering guardrail for any
+   future ping-pong benchmark source.
+3. If ping-pong timing becomes important, build that benchmark separately from
+   the GTest executables, with optimized compilation settings and pass-through
+   plus hip-moi rows.
+4. Run generated-code inspection and ATT validation on the benchmark object
+   before trusting timing numbers.
 5. Document that hip-moi treats `setprio` and `sched_barrier` as scheduling
    operations, not memory synchronization.
 6. Return to atomics for the next real memory-model expansion.
