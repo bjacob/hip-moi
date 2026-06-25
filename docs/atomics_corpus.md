@@ -25,6 +25,52 @@ as the existing reference corpus.
 
 ## Seed Sources
 
+### RocJITsu Test Corpus: hip-stream-k Release/Acquire Flags
+
+Source:
+`/home/benoit/workspace/rocjitsu-test-corpus/corpus/fuzz-targets`.
+
+The strongest new seed is the extracted `hip-stream-k` corpus:
+
+* `cases/hip-stream-k/simple_streamk/case.json`
+* `cases/hip-stream-k/two_tile_streamk/case.json`
+* `third_party/hip-stream-k/include/streamk/device/device_locks.hpp`
+* `third_party/hip-stream-k/include/streamk/kernel/kernel_simple_streamk.hpp`
+* `third_party/hip-stream-k/include/streamk/kernel/kernel_two_tile_streamk.hpp`
+
+Both runnable cases are CDNA3-targeted GEMM cases with shape
+`m=256, n=256, k=256, grid=4` and correctness validation enabled.
+
+The synchronization protocol is small and directly relevant:
+
+* flags are initialized to 1, meaning locked;
+* helper CTAs store partial accumulators to a global partials buffer;
+* helpers execute a full-workgroup barrier so all waves have issued their
+  partial stores;
+* one lane calls `unlock`, which uses `__hip_atomic_store` with
+  `__ATOMIC_RELEASE` and `__HIP_MEMORY_SCOPE_AGENT`;
+* owner CTAs call `wait_for_unlock`, which spins on `__hip_atomic_load` with
+  `__ATOMIC_ACQUIRE` and `__HIP_MEMORY_SCOPE_AGENT`;
+* after the acquire load observes the released flag, the owner reads the
+  helper's partial accumulator and folds it into the final tile.
+
+Useful lines in the source copy:
+
+* `device_locks.hpp:36` defines the release-store `unlock`;
+* `device_locks.hpp:48` defines the acquire-load `wait_for_unlock`;
+* `kernel_simple_streamk.hpp:271` stores partials, synchronizes the block, and
+  calls `unlock`;
+* `kernel_simple_streamk.hpp:290` waits for helper CTAs and reads their
+  partials;
+* `kernel_two_tile_streamk.hpp:267` has the same helper publication path;
+* `simple_streamk.hpp:105` and `two_tile_streamk.hpp:51` document the host-side
+  flag initialization contract.
+
+This is now the preferred first real Stream-K seed. Compared to the
+`hip-matmul` Stream-K classes below, it isolates an explicit release/acquire
+flag protocol rather than hiding synchronization inside an arrival-counter
+helper.
+
 ### RDNA4 Split-K Atomic Counter
 
 Source:
@@ -127,6 +173,58 @@ suite, but they preserve useful design comments and a broader Stream-K shape.
 They should inform the reference extraction, especially if the smaller RDNA4
 versions accidentally erase an important synchronization detail.
 
+### RocJITsu Test Corpus: Additional Atomics Signals
+
+The same `rocjitsu-test-corpus` checkout has several lower-priority atomics
+signals.
+
+`third_party/hip-matmul/matmul.hip` repeats the generic Stream-K seeds already
+listed above: `atomicAdd` for a counter handoff and `atomicOr` for tree-style
+bit publication.
+
+`third_party/llama.cpp/ggml/src/ggml-cuda/count-equal.cu` contains a simple
+device-side `atomicAdd` from one thread per block into an integer output
+counter. This is a useful tiny global-atomic reduction seed, but it is not a
+memory-ordering handoff: the atomic combines counts rather than publishing
+payload data to a consumer.
+
+`third_party/llama.cpp/ggml/src/ggml-cuda/allreduce.cu` is a useful non-atomic
+counterexample. Its comments explicitly choose volatile stores plus
+`__threadfence_system()` for a cross-GPU signal because `atomicAdd_system()` is
+not portable on the target systems discussed there. This should not be treated
+as an atomics seed, but it is relevant once the corpus expands from atomics to
+fences paired with non-atomic signaling.
+
+`third_party/hipkittens/include/common/macros.cuh` defines
+`buffer_atomic_pk_add_bf16` with inline AMDGPU assembly. This is not a
+source-level HIP memory-model seed for the first implementation pass, but it is
+important for the later DBI direction because it gives us a concrete
+instruction-level atomic form to decode.
+
+The `cases/llama.cpp/noncont_batched_matmul_hazard` override contains
+host-side `std::atomic` bookkeeping. That is not a device-kernel atomics seed
+for hip-moi.
+
+The packaged Tensile corpus is useful for RocJITsu coverage but is not
+currently a strong source-level atomics seed:
+
+* generated `TensileLibrary.yaml` files contain 2794 `streamKAtomic` entries,
+  all set to 0 in this checkout;
+* a scan for `buffer_atomic`, `flat_atomic`, `global_atomic`, `ds_*atomic`, and
+  `s_atomic` in the packaged artifacts found no textual generated instruction
+  hits;
+* some sparse and gradient configs use nonzero `GlobalSplitU`, but that does
+  not by itself establish an emitted atomic in these generated artifacts.
+
+The IREE subcorpus contains scatter-shaped MLIR cases, but the checked-in MLIR
+uses `iree_linalg_ext.scatter` with `unique_indices(true)`. That is useful
+general DBI corpus material, but not an atomics seed unless a later lowering
+inspection proves that the generated GPU code emits atomic instructions.
+
+The broad search also found many host-side or non-HIP atomics in vendored
+CPU/SYCL/Metal/WebGPU/Vulkan sources. Those are not hip-moi source-level HIP
+atomics seeds.
+
 ## Extraction Plan
 
 The atomics corpus should grow in stages.
@@ -145,25 +243,40 @@ The atomics corpus should grow in stages.
    operation with acquire semantics, consumer reads payload. Include incorrect
    variants that omit the ordering operation or use a non-atomic flag.
 
-3. Extract a small RDNA4 Split-K reference.
+3. Extract a small hip-stream-k-style release/acquire flag reference.
+
+   Use the RocJITsu `hip-stream-k` extract as the source shape. The first
+   version should preserve only the core protocol: helper writes payload,
+   helper publishes a release flag, owner acquire-loads the flag, owner reads
+   payload. This is the best bridge from tiny atomics tests to real Stream-K
+   synchronization.
+
+4. Extract a small RDNA4 Split-K reference.
 
    Use `Rdna4WmmaF16SplitKAtomics` as the source shape, but keep the first
    extraction smaller than the production benchmark corpus. The goal is to
    preserve the atomic handoff and final-reducer behavior while keeping
    compile time and debugging cost low.
 
-4. Extract a small RDNA4 Stream-K reference.
+5. Extract a small RDNA4 Stream-K reference.
 
    Preserve the work-centric K-iteration distribution and the last-arriver
    `atomicAdd` reduction.
 
-5. Extract a small RDNA4 Stream-K-tree reference.
+6. Extract a small RDNA4 Stream-K-tree reference.
 
    Preserve the `atomicOr` bitmask protocol and sibling-publication logic.
    This is the first reference that should force the design to reason about
    read-modify-write atomics as both reads and writes.
 
-6. Add instrumented counterparts only after the semantic API is designed.
+7. Add instruction-level DBI-oriented atomic seeds.
+
+   Keep these separate from source-level semantic tests. The first candidates
+   are HipKittens `buffer_atomic_pk_add_bf16` and any future Tensile artifacts
+   whose disassembly actually contains `buffer_atomic`, `flat_atomic`,
+   `global_atomic`, `ds_*atomic`, or `s_atomic`.
+
+8. Add instrumented counterparts only after the semantic API is designed.
 
    Instrumented tests should not blindly mirror the whole reference corpus at
    first. Each new instrumented case should correspond to one implemented
