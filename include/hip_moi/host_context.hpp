@@ -317,6 +317,16 @@ namespace hip_moi
             return static_cast<int>(capacity);
         }
 
+        static std::size_t ceil_power_of_two(std::size_t value)
+        {
+            std::size_t result = 1;
+            while(result < value)
+            {
+                result *= 2;
+            }
+            return result;
+        }
+
         template <typename T>
         static void append_slice_size(std::size_t* offset, int capacity)
         {
@@ -429,6 +439,7 @@ namespace hip_moi
             {
                 capacity = 1;
             }
+            capacity = ceil_power_of_two(capacity);
             return checked_capacity(capacity, "atomic_object");
         }
 

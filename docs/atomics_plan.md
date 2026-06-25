@@ -29,7 +29,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 2. Public atomic API skeleton | Complete | `hip_moi::context` has pass-through atomic load/store/fetch-add/fetch-or wrappers, `019_atomic_api_test.hip` verifies device behavior, and `019_atomic_flag_handoff_benchmark.hip` records wrapper codegen/latency. |
 | 3. Atomic object metadata | Complete | `context::atomic_object_record` is allocated from the host byte budget, release-style atomics populate a bounded generation-separated table, and `020_atomic_metadata_test.hip` / `020_atomic_metadata_benchmark.hip` cover saturation, generation reuse, and codegen cost. |
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
-| 5. Release/acquire fast path | Next | Starts from the Stage 4 acquired-epoch matrix and benchmark/codegen data. |
+| 5. Release/acquire fast path | In progress | First optimization landed: byte-budget-derived atomic-object capacities round up to powers of two, and probe starts use a mask instead of runtime division. |
 | 6. RMW atomics | Not started | Starts after the release/acquire model is stable. |
 | 7. RMW fast paths | Not started | Starts only after RMW correctness tests exist. |
 | 8. Fences paired with atomics | Not started | Starts only with corpus-backed relaxed-atomic-plus-fence examples. |
@@ -256,7 +256,7 @@ diagnostic carrying the atomic address, byte size, and source site.
 This stage intentionally does not suppress LDS diagnostics. The metadata is
 recorded but not yet queried by the LDS conflict predicate. The Stage 3
 benchmark shows the first cost baseline: `atomic-metadata-release-store` is
-3.42 µs pass-through and 18.7 µs through `context` on the local RDNA4 machine,
+3.43 µs pass-through and 13.4 µs through `context` on the local RDNA4 machine,
 with 23 VGPRs, 34 SGPRs, no private segment, and no spills in the `context`
 kernel.
 
@@ -325,8 +325,8 @@ release/acquire global flag orders an instrumented LDS payload and reports no
 diagnostic; a relaxed flag store with the same LDS payload still reports a
 deterministic conflict; and releasing one flag does not order a consumer that
 acquires a different relaxed-published flag. Stale value reuse remains a good
-Stage 5/6 guardrail. The first benchmark row is `atomic-hb-lds-handoff`: 3.33
-µs pass-through and 12.5 µs through `context` on the local RDNA4 machine, with
+Stage 5/6 guardrail. The first benchmark row is `atomic-hb-lds-handoff`: 3.34
+µs pass-through and 13.6 µs through `context` on the local RDNA4 machine, with
 21 VGPRs, 55 SGPRs, 4 B LDS, no private segment, and no spills in the `context`
 kernel.
 
@@ -366,6 +366,16 @@ Exit criteria:
 * the hot LDS access path does not perform global atomic metadata lookups;
 * a microbenchmark can compare the correctness-first path and the fast path on
   the same RocJITsu-derived flag handoff.
+
+Status: in progress. The first fast-path change targets the atomic-object table
+probe itself. Auto-derived atomic-object capacities now round up to a power of
+two, and the device probe-start mapping uses `hash & (capacity - 1)` instead of
+runtime modulo. A deliberately bad intermediate experiment rounded capacity
+down to a power of two; it made the 4096-workgroup metadata rows fill the table
+to 100% and regressed `atomic-metadata-release-store_context` to 1.52 ms and
+`atomic-flag-handoff_context` to 4.42 ms. Rounding up keeps those rows around
+50% load and improves the current baselines to 13.4 µs and 30.6 µs,
+respectively. The semantic `atomic-hb-lds-handoff_context` row is 13.6 µs.
 
 ## Stage 6: RMW Atomics As Both Access And Synchronization
 

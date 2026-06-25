@@ -180,9 +180,9 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 
 | Key | pass-through | `context` |
 | --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.24 µs | 43.4 µs |
-| `atomic-metadata-release-store` | 3.42 µs | 18.7 µs |
-| `atomic-hb-lds-handoff` | 3.33 µs | 12.5 µs |
+| `atomic-flag-handoff` | 7.32 µs | 30.6 µs |
+| `atomic-metadata-release-store` | 3.43 µs | 13.4 µs |
+| `atomic-hb-lds-handoff` | 3.34 µs | 13.6 µs |
 
 ## Reading The Suite
 
@@ -226,7 +226,9 @@ segment, and no spills. The disassembly shows the expected bounded metadata
 probe/claim path, including global loads and a 64-bit compare-and-swap for
 claiming stale slots. The first implementation uses address hashing before
 linear probing; a previous all-probes-from-zero prototype was rejected because
-it made table fill effectively quadratic.
+it made table fill effectively quadratic. The current Stage 5 implementation
+derives power-of-two atomic-object capacities and maps the hash with a mask,
+avoiding runtime division in the probe-start calculation.
 
 The atomic happens-before LDS handoff row is the first row where atomic
 metadata affects LDS diagnostics. The pass-through kernel reports 4 B LDS, 3

@@ -421,7 +421,7 @@ namespace hip_moi
             uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
             uint32_t seed
                 = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
-            uint32_t start = detail::mix32(seed) % capacity;
+            uint32_t start = detail::mix32(seed) & (capacity - 1u);
             for(int attempt = 0; attempt < 4; ++attempt)
             {
                 bool saw_claimed_slot = false;
@@ -491,7 +491,7 @@ namespace hip_moi
             uint32_t capacity   = static_cast<uint32_t>(storage_.atomic_object_capacity);
             uint32_t seed
                 = static_cast<uint32_t>(address >> 2) ^ static_cast<uint32_t>(address >> 34);
-            uint32_t start = detail::mix32(seed) % capacity;
+            uint32_t start = detail::mix32(seed) & (capacity - 1u);
             for(uint32_t probe = 0; probe < capacity; ++probe)
             {
                 uint32_t index = start + probe;
