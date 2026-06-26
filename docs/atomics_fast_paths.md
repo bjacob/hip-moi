@@ -22,14 +22,14 @@ The generic atomics implementation is semantically useful now:
   payload diagnostics;
 * deliberately relaxed or otherwise broken variants still diagnose.
 
-The most relevant RDNA4 rows are:
+The most relevant RDNA4 rows after Stage 7 are:
 
 | Benchmark key | Shape | Pass-through | `context` | `context` resources |
 | --- | --- | ---: | ---: | --- |
-| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.38 µs | 13.4 µs | 12 B LDS, 82 SGPR, 25 VGPR, no spills |
-| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.20 µs | 12.6 µs | 16 B LDS, 84 SGPR, 60 VGPR, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.47 µs | 27.5 µs | 4096 B LDS, 73 SGPR, 51 VGPR, no spills |
-| `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.75 µs | 49.2 µs | 8192 B LDS, 78 SGPR, 52 VGPR, no spills |
+| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.37 µs | 13.0 µs | 12 B LDS, 82 SGPR, 25 VGPR, no spills |
+| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.18 µs | 13.2 µs | 16 B LDS, 93 SGPR, 60 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.48 µs | 26.6 µs | 4096 B LDS, 79 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.77 µs | 43.6 µs | 8192 B LDS, 82 SGPR, 52 VGPR, no spills |
 
 The latency and resource signals now point in the same direction: the current
 rows are spill-free, but the generic address-scoped metadata path is expensive
@@ -100,38 +100,51 @@ The fast path should not silently treat every atomic RMW as a workgroup barrier.
 The current acceptable over-approximation is scoped to the atomic object
 address.
 
-## Candidate 1: Direct-Mapped RMW Metadata Cache
+## Implemented Stage 7: Direct-Mapped RMW Address Cache
 
-The least disruptive implementation path is an internal cache behind the
-existing `ctx.atomic_fetch_add` and `ctx.atomic_fetch_or` APIs.
+The implemented fast path is an internal cache behind the existing
+`ctx.atomic_fetch_add` and `ctx.atomic_fetch_or` APIs. It is deliberately
+narrower than the first sketch: only release-capable RMWs in workgroups with
+more than two subgroups populate the cache.
 
-The cache would be keyed by a compact hash of:
+The cache is keyed by a compact hash of:
 
 * atomic object address;
-* producer subgroup for release slots;
 * launch generation.
 
 Each slot would store:
 
 * address tag;
-* releasing subgroup;
-* releasing epoch;
+* producer subgroup bit mask;
 * generation.
 
-On release, the fast path writes the direct slot if it is empty or already
-matches the same key. On collision, it falls back to the existing generic
-open-addressed atomic-object table. On acquire, it checks the direct slot first
-and falls back to the generic lookup on miss.
+The generic `atomic_object_record` table remains authoritative for epochs and
+source sites. The cache is only a prefilter: on release, hip-moi adds the
+producer subgroup bit before publishing the corresponding generic record; on
+acquire, hip-moi checks the direct slot first and probes only the producer bits
+present in that slot. If the slot is absent, stale, claimed, or holds a
+different address, acquire falls back to the generic per-producer table scan.
 
 This preserves the public API and can improve the common case where a benchmark
-uses one or a few counters with predictable values. It does not require users
-to annotate Stream-K protocols. It preserves the current address-scoped
-semantics because the generic path remains the fallback; it does not add
-address+value precision.
+uses one or a few counters with predictable values and more than two subgroups.
+It does not require users to annotate Stream-K protocols. It preserves the
+current address-scoped semantics because the generic table remains the
+authoritative record; it does not add address+value precision.
 
-The risk is live state and code size: checking both the fast slot and the
-generic fallback can increase register pressure unless the fast path is
-carefully factored.
+Two design details matter for overhead:
+
+* release stores and fence-published relaxed stores do not use this cache;
+* the cache storage is laid out immediately after the generic atomic-object
+  table and is derived from that pointer on device, so `storage_ref` did not
+  grow another launch argument.
+
+The first broader cache attempt applied to every release operation and carried
+an explicit cache pointer in `storage_ref`; that raised SGPR pressure in rows
+that did not benefit. The committed version avoids that broader tax. The
+remaining trade-off is visible in the RDNA4 resource rows: the four-subgroup
+`atomicOr` tree gets a clear latency win, but SGPR pressure still rises from
+the pre-Stage-7 78 SGPRs to 82 SGPRs. VGPRs, spills, and private segment size
+do not change.
 
 ## Candidate 2: Explicit Stream-K Counter Slots
 
@@ -164,18 +177,12 @@ separate notes, not smuggled into the HIP memory model.
 
 ## Current Recommendation
 
-The next code experiment should be Candidate 1: add a very small direct-mapped
-RMW metadata cache behind the existing API, with fallback to the current
-generic table on any mismatch or collision.
+Treat the Stage 7 cache as the end of the current source-level atomics fast
+path. It is useful enough to keep for multi-subgroup RMW protocols, but it is
+not a general solution to atomics overhead. The next major optimization should
+come from a new corpus-driven protocol shape or from the future DBI track, not
+from adding address+value keying by default.
 
-Measure it first on:
-
-* `atomic-rmw-arrival-counter`;
-* `atomic-or-bitmask-handoff`;
-* `streamk-flag-fixup`;
-* `streamk-two-tile-flag-fixup`;
-* `rdna4-wmma-streamk-arrival-counter`;
-* `rdna4-wmma-streamk-tree-atomic-or`.
-
-Do not remove the generic table. It remains the correctness fallback and the
-right representation for dynamic atomic patterns that do not fit the cache.
+Do not remove the generic table. It remains the correctness fallback, the
+source-site carrier for diagnostics, and the right representation for dynamic
+atomic patterns that do not fit the direct cache.

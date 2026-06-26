@@ -450,6 +450,8 @@ namespace hip_moi
             append_slice_size<subgroup_state>(&offset, subgroup_capacity_);
             append_slice_size<int>(&offset, 2);
             append_slice_size<context::atomic_object_record>(&offset, atomic_object_capacity_);
+            append_slice_size<context::atomic_address_cache_record>(&offset,
+                                                                    atomic_object_capacity_);
             append_slice_size<uint32_t>(
                 &offset, checked_capacity(acquired_subgroup_epoch_token_count(), "acquired_epoch"));
             append_slice_size<uint64_t>(&offset, exact_shadow_entry_capacity_);
@@ -467,6 +469,8 @@ namespace hip_moi
             assign_slice<int>(device_storage_, 1, &offset, &simulated_barrier_arrival_count_);
             assign_slice<context::atomic_object_record>(
                 device_storage_, atomic_object_capacity_, &offset, &atomic_objects_);
+            assign_slice<context::atomic_address_cache_record>(
+                device_storage_, atomic_object_capacity_, &offset, &atomic_address_cache_);
             assign_slice<uint32_t>(
                 device_storage_,
                 checked_capacity(acquired_subgroup_epoch_token_count(), "acquired_epoch"),
@@ -631,6 +635,11 @@ namespace hip_moi
                                 0,
                                 atomic_object_capacity_ * sizeof(context::atomic_object_record),
                                 "atomic_objects");
+            hip_memset_or_abort(atomic_address_cache_,
+                                0,
+                                atomic_object_capacity_
+                                    * sizeof(context::atomic_address_cache_record),
+                                "atomic_address_cache");
             hip_memset_or_abort(acquired_subgroup_epoch_tokens_,
                                 0,
                                 acquired_subgroup_epoch_token_count() * sizeof(uint32_t),
@@ -772,6 +781,7 @@ namespace hip_moi
             exact_shadow_entries_            = nullptr;
             sampled_watchpoints_             = nullptr;
             atomic_objects_                  = nullptr;
+            atomic_address_cache_            = nullptr;
             acquired_subgroup_epoch_tokens_  = nullptr;
         }
 
@@ -797,6 +807,7 @@ namespace hip_moi
         uint64_t*                      exact_shadow_entries_            = nullptr;
         uint64_t*                      sampled_watchpoints_             = nullptr;
         context::atomic_object_record* atomic_objects_                  = nullptr;
+        context::atomic_address_cache_record* atomic_address_cache_            = nullptr;
         uint32_t*                      acquired_subgroup_epoch_tokens_  = nullptr;
     };
 

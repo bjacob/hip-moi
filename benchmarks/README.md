@@ -226,14 +226,14 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-flag-handoff` | 7.26 µs | 45.5 µs |
 | `atomic-metadata-release-store` | 3.44 µs | 21.1 µs |
 | `atomic-hb-lds-handoff` | 3.33 µs | 8.93 µs |
-| `atomic-rmw-arrival-counter` | 3.45 µs | 8.57 µs |
-| `atomic-rmw-acq-rel-chain` | 3.26 µs | 8.97 µs |
-| `atomic-or-bitmask-handoff` | 3.24 µs | 8.64 µs |
+| `atomic-rmw-arrival-counter` | 3.45 µs | 8.23 µs |
+| `atomic-rmw-acq-rel-chain` | 3.25 µs | 8.93 µs |
+| `atomic-or-bitmask-handoff` | 3.21 µs | 8.75 µs |
 | `atomic-fence-handoff` | 3.12 µs | 6.82 µs |
-| `streamk-flag-fixup` | 3.38 µs | 13.4 µs |
-| `streamk-two-tile-flag-fixup` | 3.20 µs | 12.6 µs |
-| `rdna4-wmma-streamk-arrival-counter` | 3.47 µs | 27.5 µs |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.75 µs | 49.2 µs |
+| `streamk-flag-fixup` | 3.37 µs | 13.0 µs |
+| `streamk-two-tile-flag-fixup` | 3.18 µs | 13.2 µs |
+| `rdna4-wmma-streamk-arrival-counter` | 3.48 µs | 26.6 µs |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.77 µs | 43.6 µs |
 
 ## Reading The Suite
 
@@ -293,17 +293,25 @@ keeps fence state in the per-thread device context object: release fences arm
 the next relaxed atomic publication, and acquire fences consume the last
 relaxed atomic observation made through that context.
 
+The Stage 7 atomics fast path is intentionally narrow: release-capable RMWs in
+workgroups with more than two subgroups populate a direct-mapped
+address-scoped producer-mask cache. Acquires use that cache to skip generic
+per-producer probes when the cache slot matches, and fall back to the generic
+atomic-object table on misses or collisions. Release stores, fence-published
+relaxed stores, and two-subgroup RMWs stay on the generic path because the
+cache did not pay for itself on those shapes.
+
 The Stream-K flag fixup rows are integration rows rather than one-edge
 microbenchmarks. They preserve RocJITsu hip-stream-k owner/helper flag
 protocols but distill the payload to LDS partials so hip-moi can diagnose the
-handoff. The one-owner/two-helper row is now 13.4 µs through `context`; the
-two-tile ownership row is 12.6 µs through `context`.
+handoff. The one-owner/two-helper row is now 13.0 µs through `context`; the
+two-tile ownership row is now 13.2 µs through `context`.
 
 The RDNA4 WMMA Stream-K arrival-counter row is the first atomics integration
 row with WMMA arithmetic. It is not a direct global-partial Stream-K GEMM: the
 diagnostic payload is intentionally kept in LDS so hip-moi can test whether an
 arrival-counter synchronization edge orders the final fold of the partials.
-The current row is 27.5 µs through `context`. An earlier single-lane reduction
+The current row is 26.6 µs through `context`. An earlier single-lane reduction
 draft was rejected because it produced an unrepresentative 209 µs `context`
 latency by making one lane perform every instrumented partial load. The
 committed row uses lane-parallel reduction and is the better signal for the
@@ -313,14 +321,15 @@ The RDNA4 WMMA Stream-K-tree `atomicOr` row is the fourth Stage 9 integration
 row and the first WMMA-shaped bitmask-tree case. Four subgroups compute WMMA
 partials; the first three subgroups publish bits with release `atomicOr`; the
 final subgroup waits for those bits, performs an `acq_rel atomicOr`, and folds
-all four LDS partials. It is 49.2 µs through `context`, the slowest current
-Stage 9 row, which makes it an important fast-path target.
+all four LDS partials. The Stage 7 direct RMW cache lowers this row from the
+previous 49.2 µs `context` result to 43.6 µs, at the cost of higher SGPR
+pressure and no change in VGPRs or spills.
 
 The current Stage 9 `context` resource refresh found no spills:
 
 | Key | Context LDS | Context SGPRs | Context VGPRs | Spills/private |
 | --- | ---: | ---: | ---: | --- |
 | `streamk-flag-fixup` | 12 B | 82 | 25 | none, 0 B |
-| `streamk-two-tile-flag-fixup` | 16 B | 84 | 60 | none, 0 B |
-| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 73 | 51 | none, 0 B |
-| `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 78 | 52 | none, 0 B |
+| `streamk-two-tile-flag-fixup` | 16 B | 93 | 60 | none, 0 B |
+| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 79 | 51 | none, 0 B |
+| `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 82 | 52 | none, 0 B |

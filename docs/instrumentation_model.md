@@ -99,6 +99,7 @@ The host context lays out one device allocation into slices:
 | exact shadow | `uint64_t[]` | One exact-shadow entry per 4-byte LDS cell. |
 | sampled watchpoints | `uint64_t[]` | Software watchpoint records. |
 | atomic objects | `context::atomic_object_record[]` | Address-scoped release metadata, represented as one row per atomic address and producer subgroup. |
+| atomic address cache | `context::atomic_address_cache_record[]` | Direct-mapped producer-mask cache for multi-subgroup release-capable RMWs. This is a prefilter, not the authoritative epoch store. |
 | acquired epoch tokens | `uint32_t[]` | Pairwise ordering evidence created by atomic acquire operations. These are not additional epoch counters. |
 
 The default host storage budget is 16 MiB. `host_context_options` can either set
@@ -274,6 +275,25 @@ join by keeping the maximum released producer epoch. Multiple producer
 subgroups using the same atomic address occupy separate metadata rows. An
 acquire of that address imports all producer rows for that address into the
 consumer subgroup's acquired-epoch tokens.
+
+`context::atomic_address_cache_record` stores:
+
+| Field | Meaning |
+| --- | --- |
+| `generation` | Host launch generation that owns the cache slot. |
+| `address` | Atomic object address for the direct-mapped slot. |
+| `producer_mask` | Bit mask of producer subgroups that have published generic release records for this address. |
+
+The cache is used only for release-capable RMW operations in workgroups with
+more than two subgroups. Release stores and fence-published relaxed stores use
+the generic table directly. The cache storage is laid out immediately after
+the generic atomic-object table and is derived from that pointer on device, so
+`storage_ref` does not carry a separate cache pointer.
+
+The cache never replaces `atomic_object_record`. It lets an acquire skip
+generic probes for producer subgroups that have not published to the atomic
+address. If the direct slot is stale, claimed, empty, or holds a different
+address, the acquire falls back to the generic per-producer scan.
 
 The scalar value stored by a release store, returned by an acquire load, or
 returned/produced by a read-modify-write operation is not part of the current

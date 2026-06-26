@@ -239,83 +239,29 @@ READMEs now describe the current detector scope.
    generated-code and ATT checks before latency numbers are treated as
    meaningful.
 
-5. Plan the next semantic expansion: atomics.
+5. Complete the DBI-oriented atomics bridge.
 
-   Atomics belong first in `hip_moi::context`, not in
-   `sampled_watchpoint_context`. The design should state exactly which LLVM/HIP
-   operations create synchronization, how epochs or happens-before state are
-   represented, and how diagnostics remain explainable. The active roadmap is
-   `docs/atomics_plan.md`; the corpus inventory is `docs/atomics_corpus.md`.
-   The plan is RocJITsu-first: use
-   `~/workspace/rocjitsu-test-corpus` for the tiny `atomicAdd` seed, the
-   release/acquire flag handoff, and the first Stream-K-like tests. Use
-   `~/workspace/hip-matmul/matmul_rdna4.hip` only for Stream-K examples that go
-   beyond what RocJITsu currently provides, such as RDNA4 WMMA arrival counters
-   or Stream-K-tree `atomicOr` bitmasks. Stage 1 has landed the reference
-   kernels and compile-only broken handoff shapes. Stage 2 has landed the
-   pass-through `hip_moi::context` atomic API and its first test/benchmark
-   guardrail. Stage 3 has landed the bounded, byte-budget-derived atomic-object
-   metadata table and records release-style atomic operations. Stage 4 has
-   connected release/acquire observations to the LDS conflict predicate through
-   a per-subgroup acquired-epoch matrix, so an actually ordered LDS handoff does
-   not diagnose while broken handoffs still do. Stage 5 has reduced the
-   release/acquire metadata overhead by making atomic-object capacities powers
-   of two, using masked probe starts, and terminating acquire lookups at the
-   first stale open-addressing slot. Stage 6 is complete: `fetch_add`
-   arrival-counter handoffs, two-RMW `acq_rel fetch_add` chains, and
-   old-value-dependent `atomicOr` bitmask handoffs all have instrumented tests
-   and matching benchmarks. Stage 7 RMW fast paths are deliberately deferred
-   until a realistic Stream-K integration row shows which protocol deserves a
-   specialized path. Stage 8 has landed the first standard fence-plus-atomic
-   shape: release fence before relaxed publication, relaxed observation before
-   acquire fence. Stage 9 has started with a RocJITsu hip-stream-k-shaped
-   owner/helper flag fixup test and benchmark. The two-tile Stream-K-shaped
-   owner/helper fixup test and benchmark have also landed; they are quiet when
-   each tile uses release/acquire publication and diagnose the deliberately
-   relaxed second-tile handoff. Earlier resource inspection showed that this
-   ownership shape can raise register pressure substantially, so resource
-   counts should be refreshed after the address-scoped metadata change before
-   making the next VGPR/SGPR-driven optimization decision. The first RDNA4
-   WMMA-flavored Stream-K arrival-counter row has now landed as
-   `028_rdna4_wmma_streamk_arrival_counter_test.hip` and its matching
-   benchmark: it keeps the diagnostic payload in LDS, uses two subgroup-local
-   WMMA K-slice partials, and uses an `acq_rel fetch_add` arrival counter to
-   order the final fold. The fourth Stage 9 row has landed as
-   `029_rdna4_wmma_streamk_tree_atomic_or_test.hip` and its matching
-   benchmark: four subgroups compute RDNA4 WMMA K-slice partials, the first
-   three publish bits with release `atomicOr`, and the final subgroup folds
-   all LDS partials after an `acq_rel atomicOr` old-mask observation. The
-   current atomics implementation now uses an address-scoped, TSan-like join
-   model: releases record
-   `(atomic address, producer subgroup, generation)`, and acquires import
-   producer records for the atomic address. This intentionally drops
-   address+value keying from the default path to reduce VGPR pressure and to
-   align with the DBI direction. The cost is coarser synchronization and
-   possible false negatives from over-imported releases. `docs/atomics_fast_paths.md`
-   records the next performance question: whether a small direct-mapped cache
-   can accelerate the address-scoped model without changing the public API. The
-   refreshed local latency rows are 45.5 µs for
-   `atomic-flag-handoff_context`, 21.1 µs for
-   `atomic-metadata-release-store_context`, 8.57 to 8.97 µs for the current
-   `fetch_add` RMW rows, 27.5 µs for
-   `rdna4-wmma-streamk-arrival-counter_context`, and 49.2 µs for
-   `rdna4-wmma-streamk-tree-atomic-or_context`. The refreshed Stage 9 resource
-   rows are spill-free; the highest-pressure current row is
-   `streamk-two-tile-flag-fixup_context` at 60 VGPRs and 84 SGPRs. The
-   diagnostic payload remains LDS access; global atomics are synchronization
-   operations, not a request to diagnose ordinary global load/store races. Each
-   atomics stage must satisfy the
-   completion checklist in `docs/atomics_plan.md`:
-   instrumented test, matching benchmark,
-   `benchmarks/README.md` update, and generated-code/performance diligence
-   before the next stage starts.
-   `docs/instrumentation_model.md` now documents the implemented atomics model:
-   atomic synchronization preserves the ordinary per-subgroup barrier epochs
-   and adds pairwise ordering evidence for release/acquire edges. It does not
-   add nested epochs inside the barrier epoch model. Address+value keying is
-   now a possible future precision refinement, not the current implementation;
-   compact hashing of `(address, value)` may help value-distinguishing
-   protocols, but it brings collision risk and value-liveness/codegen cost.
+   The source-level atomics plan is complete through Stage 9 and Stage 7's
+   first fast path. `hip_moi::context` models address-scoped release/acquire
+   synchronization for LDS diagnostics; release records are keyed by atomic
+   address and producer subgroup, and acquires import producer epochs for that
+   address. Address+value keying remains a future precision experiment, not the
+   current path.
+
+   Stage 7 added a narrow internal fast path for release-capable RMWs in
+   workgroups with more than two subgroups. Those RMWs populate a
+   direct-mapped address-scoped producer-mask cache, while release stores,
+   fence-published relaxed stores, and two-subgroup RMWs stay on the generic
+   atomic-object table. The main measured win is
+   `rdna4-wmma-streamk-tree-atomic-or_context`, which moved from 49.2 µs to
+   43.6 µs on the local RDNA4 machine. The trade-off is visible in resource
+   pressure: the tree row is still spill-free, but SGPR pressure rises from 78
+   to 82; VGPRs stay at 52.
+
+   The remaining atomics item is Stage 10 in `docs/atomics_plan.md`: record
+   DBI-oriented atomic instruction seeds from RocJITsu and related corpora,
+   keeping hardware-level DBI semantics separate from the HIP/LLVM source-level
+   diagnostic model.
 
 ## Non-Goals
 

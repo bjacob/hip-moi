@@ -33,7 +33,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 4. Happens-before for LDS payload handoffs | Complete | `021_atomic_happens_before_test.hip` proves release/acquire suppresses an ordered LDS handoff while relaxed publication still diagnoses; `021_atomic_happens_before_benchmark.hip` records the first semantic cost baseline. |
 | 5. Release/acquire fast path | Complete | Byte-budget-derived atomic-object capacities round up to powers of two so probe starts use a mask, and acquire lookups stop at the first stale slot in an open-addressing chain. |
 | 6. RMW atomics | Complete | `023_atomic_rmw_happens_before_test.hip` covers release/acquire `fetch_add` handoff and a two-RMW `acq_rel` `fetch_add` chain. `024_atomic_or_bitmask_happens_before_test.hip` covers old-value-dependent `atomicOr` bitmask control flow. Both have matching benchmarks and RDNA4 resource notes. |
-| 7. RMW fast paths | Deferred | Stage 6 rows are measurable and spill-free; do not add benchmark-specific shortcuts until a realistic Stream-K integration row shows which RMW protocol needs a fast path. |
+| 7. RMW fast paths | Complete | Multi-subgroup release-capable RMWs now populate a direct-mapped address-scoped producer-mask cache with generic-table fallback. It improves the four-subgroup WMMA `atomicOr` tree row while leaving two-subgroup/store/fence paths on the generic table. |
 | 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
 | 9. Stream-K integration tests | Complete for pre-optimization corpus | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, `028_rdna4_wmma_streamk_arrival_counter_test.hip`, and `029_rdna4_wmma_streamk_tree_atomic_or_test.hip` add Stream-K-shaped flag, ownership, RDNA4 WMMA arrival-counter, and RDNA4 WMMA bitmask-tree rows. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
@@ -477,27 +477,50 @@ row is 8.64 µs for `atomic-or-bitmask-handoff_context`.
 Goal: extend the Stage 5 fast-path idea only where the RMW protocol warrants
 it.
 
-Do not optimize all atomics generically up front. Add protocol-specific fast
-paths after correctness tests demonstrate the needed semantics:
-
-* `atomicAdd` arrival counters: cache the release state associated with the
-  counter value or last-arriver observation;
-* `atomicOr` bitmasks: cache the release state associated with published bits
-  and the old value returned by the RMW.
+Do not optimize all atomics generically up front. The first completed fast
+path is address-scoped and internal to the existing API: release-capable RMWs
+in workgroups with more than two subgroups populate a direct-mapped
+producer-mask cache. Release stores, fence-published relaxed stores, and
+two-subgroup RMWs stay on the generic atomic-object table.
 
 Exit criteria:
 
-* each RMW fast path has a correctness-first test and a fast-path test;
+* each RMW fast path is covered by existing correctness tests and matching
+  benchmarks;
 * unsupported or capacity-exceeded RMW shapes fall back deterministically;
 * the docs say exactly which RMW protocols are optimized.
 
-Status: deferred. The completed Stage 6 microbenchmarks are all spill-free and
-cluster around 7 to 9 µs through `context`. That is slow relative to
-pass-through but not yet enough evidence to justify a source API that bakes in
-a benchmark-specific arrival-counter or bitmask shortcut. The next fast-path
-attempt should be driven by a realistic Stream-K integration row: if a concrete
-counter or bitmask protocol dominates that row, add a protocol-specific API and
-benchmark it there.
+Status: complete for the current source-level plan. The direct cache stores an
+atomic address tag, launch generation, and producer subgroup bit mask. The
+generic `atomic_object_record` table remains authoritative for epochs and
+source sites. A release-capable RMW sets its producer bit before publishing the
+matching generic release record. An acquire uses a matching cache slot to
+probe only the producer bits present in that slot, and falls back to the
+generic per-producer scan on a miss, stale slot, claimed slot, or address
+collision.
+
+The committed fast path is deliberately narrower than the first experiment. A
+broader version cached all releases and carried an explicit cache pointer in
+`storage_ref`; that raised SGPR pressure in rows that did not benefit. The
+committed cache storage is laid out immediately after the generic
+atomic-object table and is derived from that pointer on device, so
+`storage_ref` does not grow.
+
+Current local RDNA4 rows are:
+
+| Benchmark key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-rmw-arrival-counter` | 3.45 µs | 8.23 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
+| `atomic-rmw-acq-rel-chain` | 3.25 µs | 8.93 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
+| `atomic-or-bitmask-handoff` | 3.21 µs | 8.75 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | 3.48 µs | 26.6 µs | 4096 B LDS, 79 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.77 µs | 43.6 µs | 8192 B LDS, 82 SGPR, 52 VGPR, no spills |
+
+The main positive result is the four-subgroup `atomicOr` tree row: it improves
+from the previous 49.2 µs `context` result to 43.6 µs. The limit is equally
+important: the cache does not attack exact-shadow LDS instrumentation in the
+final fold, and it raises SGPR pressure in the tree row from the previous 78
+SGPRs to 82 SGPRs. There are still no spills or private segment use.
 
 ## Stage 8: Fences Paired With Atomics
 
@@ -569,14 +592,14 @@ Exit criteria:
   handoff;
 * the test README says which source corpus each test came from.
 
-Status: in progress. The first integration rung landed in
+Status: complete for the pre-DBI source-level corpus. The first integration rung landed in
 `026_streamk_flag_protocol_test.hip` and
 `026_streamk_flag_protocol_benchmark.hip`. It distills RocJITsu hip-stream-k's
 owner/helper release/acquire flag protocol to one owner subgroup looping over
 two helper flags and folding two LDS helper partials. The ordered variant is
 quiet; the broken variant makes the second helper publish with a relaxed store
 and diagnoses the corresponding LDS payload handoff. The local RDNA4 benchmark
-row is 3.38 µs pass-through and 13.4 µs through `context` after the
+row is 3.37 µs pass-through and 13.0 µs through `context` after the
 address-scoped metadata change.
 
 The second integration rung landed in
@@ -586,8 +609,8 @@ RocJITsu two-tile ownership shape: four subgroups form two independent
 owner/helper tile fixups, with one release/acquire flag per tile. The ordered
 variant is quiet; the broken variant makes the second tile's helper publish
 with a relaxed store and diagnoses that tile's LDS payload handoff. The local
-RDNA4 benchmark row is 3.20 µs pass-through and 12.6 µs through `context`.
-The refreshed resource row is 16 B LDS, 84 SGPRs, 60 VGPRs, no spills, and no
+RDNA4 benchmark row is 3.18 µs pass-through and 13.2 µs through `context`.
+The refreshed resource row is 16 B LDS, 93 SGPRs, 60 VGPRs, no spills, and no
 private segment.
 
 The third integration rung landed in
@@ -597,8 +620,8 @@ arrival-counter path in `hip-matmul/matmul_rdna4.hip`: two subgroups compute
 two RDNA4 WMMA K-slice partials, publish their LDS partials with an
 `acq_rel fetch_add` counter, and the final subgroup folds both LDS partials.
 The ordered variant is quiet; the relaxed-counter variant diagnoses the final
-fold. The local RDNA4 benchmark row is 3.47 µs pass-through and 27.5 µs through
-`context`. The refreshed resource row is 4096 B LDS, 73 SGPRs, 51 VGPRs, no
+fold. The local RDNA4 benchmark row is 3.48 µs pass-through and 26.6 µs through
+`context`. The refreshed resource row is 4096 B LDS, 79 SGPRs, 51 VGPRs, no
 spills, and no private segment. An earlier single-lane fold draft was rejected
 because it distorted
 the benchmark by making one lane perform every instrumented partial load; the
@@ -612,13 +635,12 @@ subgroups compute four RDNA4 WMMA K-slice partials; the first three subgroups
 publish bits with release `atomicOr`; the final subgroup waits for those bits,
 uses an `acq_rel atomicOr` old-mask observation, and folds all four LDS
 partials. The ordered variant is quiet; the relaxed-producer variant diagnoses
-the final fold. The local RDNA4 benchmark row is 3.75 µs pass-through and
-49.2 µs through `context`. The refreshed resource row is 8192 B LDS, 78 SGPRs,
+the final fold. The local RDNA4 benchmark row is 3.77 µs pass-through and
+43.6 µs through `context`. The refreshed resource row is 8192 B LDS, 82 SGPRs,
 52 VGPRs, no spills, and no private segment.
 
-Stage 9 now has enough data points to guide Stage 7. The next implementation
-session should optimize the generic address-scoped atomic metadata path rather
-than widen the corpus again.
+Stage 9 has served its purpose for Stage 7. Do not widen this source-level
+corpus again until a new source pattern is needed.
 
 ## Stage 10: DBI-Oriented Atomic Instruction Seeds
 
@@ -648,22 +670,11 @@ Exit criteria:
 
 ## Immediate Next Sessions
 
-1. Start Stage 7 with the least invasive fast path:
-   `docs/atomics_fast_paths.md` recommends a small direct-mapped metadata
-   cache behind the existing API, with fallback to the generic table. The
-   current address-scoped rows put `streamk-two-tile-flag-fixup` at 12.6 µs
-   through `context` against a 3.20 µs pass-through baseline,
-   `rdna4-wmma-streamk-arrival-counter` at 27.5 µs through `context` against a
-   3.47 µs pass-through baseline, and
-   `rdna4-wmma-streamk-tree-atomic-or` at 49.2 µs through `context` against a
-   3.75 µs pass-through baseline.
-2. Keep the first Stage 7 optimization address-scoped. Do not pursue
-   address+value keying unless a later false-negative study makes precision,
-   rather than overhead, the blocking problem.
-3. Keep the fast path source-model honest: it may specialize
-   common Stream-K synchronization shapes, but it must not silently replace the
-   HIP/LLVM release/acquire model with hardware folklore.
-4. Keep DBI-oriented atomic instruction seeds separate. If a future WMMA
+1. Complete Stage 10 by recording DBI-oriented atomic instruction seeds from
+   RocJITsu and related corpora.
+2. Keep DBI-oriented atomic instruction seeds separate. If a future WMMA
    extraction exposes interesting atomic instructions, record them in the
    corpus notes, but do not mix hardware-level DBI semantics into the
    source-level HIP diagnostic model.
+3. Do not pursue address+value keying unless a later false-negative study
+   makes precision, rather than overhead, the blocking problem.

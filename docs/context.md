@@ -72,8 +72,8 @@ hip_moi::host_context moi(options);
 ```
 
 `storage_bytes` defaults to 16 MiB. The host context partitions that budget into
-diagnostics, subgroup epoch state, counters, atomic-object metadata, and the
-selected shadow backend's metadata.
+diagnostics, subgroup epoch state, counters, atomic-object metadata, the
+internal RMW address cache, and the selected shadow backend's metadata.
 
 This keeps the ordinary API stable as the internal metadata layout changes. A
 user should not normally need to decide how many records of each internal type
@@ -83,8 +83,9 @@ Atomic-object metadata is currently an internal `hip_moi::context` facility.
 The host context derives its capacity from `storage_bytes`: larger global
 storage budgets can track more distinct atomic objects before emitting
 `metadata_full`, while small test contexts naturally get a smaller bounded
-table. There is no separate user-facing atomic-object capacity knob in the
-ordinary API.
+table. The same capacity also sizes the internal direct-mapped RMW address
+cache. There is no separate user-facing atomic-object or RMW-cache capacity
+knob in the ordinary API.
 
 Release/acquire atomics also use an internal acquired-epoch matrix whose size is
 derived from `subgroup_capacity`. This matrix records which producer subgroup
