@@ -3,9 +3,9 @@
 //
 // benchmarks/025_atomic_fence_happens_before_benchmark.hip
 //
-// Stage 8 atomics benchmark. A release fence before a relaxed global atomic
-// publication, paired with an acquire fence after a relaxed observation, orders
-// an instrumented LDS payload handoff.
+// Atomic fence handoff benchmark. A release fence before a relaxed global
+// atomic publication, paired with an acquire fence after a relaxed observation,
+// orders an instrumented LDS payload handoff.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>

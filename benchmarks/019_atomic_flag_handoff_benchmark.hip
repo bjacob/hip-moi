@@ -302,7 +302,7 @@ int main()
 
     if(!moi.check(nullptr))
     {
-        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 2 atomic benchmark\n");
+        std::fprintf(stderr, "unexpected hip-moi diagnostics in atomic flag handoff benchmark\n");
         return EXIT_FAILURE;
     }
 

@@ -7,10 +7,9 @@ SPDX-License-Identifier: MIT
 
 This note records the current fast-path decision point for atomics in
 `hip_moi::context`. It is intentionally separate from
-[`atomics.md`](atomics.md) and [`atomics_plan.md`](atomics_plan.md): the model
-defines current semantics, the plan tracks implementation history and future
-work, and this note explains what the Stream-K-shaped measurements say about
-overhead and specialization.
+[`atomics.md`](atomics.md): that document defines current semantics, while
+this note explains what the Stream-K-shaped measurements say about overhead
+and specialization.
 
 ## Delivery Decision Record
 
@@ -21,7 +20,7 @@ The current atomics fast-path position is:
 | Should atomics use `sampled_watchpoint_context`? | No. | That context is publish-only and cannot report races. Atomics need exhaustive synchronization metadata so the detector does not miss real ordering edges and create false positives. |
 | Should release/acquire metadata stay address-scoped? | Yes, for now. | Address-only metadata avoids keeping scalar atomic values live, keeps the source-level prototype closer to future DBI, and has measured spill-free codegen. Address+value remains a precision experiment, not the default. |
 | Should the generic atomic-object table be removed? | No. | It is the authoritative correctness fallback, carries source-site information, and supports dynamic atomic patterns that do not fit the direct cache. |
-| Should we keep tuning the generic acquire loop? | Not without new evidence. | Stage 17 rejected the two obvious local trims: conditional acquired-token publication and a special two-subgroup direct lookup. |
+| Should we keep tuning the generic acquire loop? | Not without new evidence. | The latest acquire-path audit rejected the two obvious local trims: conditional acquired-token publication and a special two-subgroup direct lookup. |
 | What is the next plausible speedup? | A protocol-aware or DBI-informed path. | Remaining cost is dominated by metadata protocol work and global metadata traffic, not VGPR spills. |
 
 For Loom and RFC discussion, the key message is that source-level atomics
@@ -41,7 +40,7 @@ The generic atomics implementation is semantically useful now:
   payload diagnostics;
 * deliberately relaxed or otherwise broken variants still diagnose.
 
-The most relevant RDNA4 rows after the Stage 17 performance audit are:
+The most relevant RDNA4 rows after the latest performance audit are:
 
 | Benchmark key | Shape | Pass-through | `context` | `context` resources |
 | --- | --- | ---: | ---: | --- |
@@ -56,7 +55,7 @@ enough to dominate the Stream-K-shaped rows. The cost is primarily from the
 generic metadata protocol and from exact-shadow LDS instrumentation in the
 final fold.
 
-Stage 17 also ruled out two narrower local shortcuts. Skipping the
+The latest audit also ruled out two narrower local shortcuts. Skipping the
 acquired-token `atomicMax` after a volatile read found a new-enough token
 looked like an easy way to reduce global atomic traffic, but it produced false
 diagnostics in the four-subgroup `atomicOr` tree. The acquired-token write is a
@@ -129,7 +128,7 @@ The fast path should not silently treat every atomic RMW as a workgroup barrier.
 The current acceptable over-approximation is scoped to the atomic object
 address.
 
-## Implemented Stage 7: Direct-Mapped RMW Address Cache
+## Implemented Direct-Mapped RMW Address Cache
 
 The implemented fast path is an internal cache behind release-capable RMW APIs
 such as `ctx.atomic_fetch_add`, `ctx.atomic_fetch_or`, `ctx.atomic_fetch_and`,
@@ -207,7 +206,7 @@ separate notes, not smuggled into the HIP memory model.
 
 ## Current Recommendation
 
-Treat the Stage 7 cache as the end of the current source-level atomics fast
+Treat the direct RMW cache as the end of the current source-level atomics fast
 path. It is useful enough to keep for multi-subgroup RMW protocols, but it is
 not a general solution to atomics overhead. The next major optimization should
 come from a new corpus-driven protocol shape or from the future DBI track, not

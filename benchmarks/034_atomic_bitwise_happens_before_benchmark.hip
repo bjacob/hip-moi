@@ -3,7 +3,7 @@
 //
 // benchmarks/034_atomic_bitwise_happens_before_benchmark.hip
 //
-// Stage 16 atomics benchmark. Bitwise RMWs beyond atomicOr order an
+// Bitwise atomic RMW handoff benchmark. Bitwise RMWs beyond atomicOr order an
 // instrumented LDS payload handoff through old-value-dependent bitmask control
 // flow.
 #include "hip_moi/hip_moi.hpp"

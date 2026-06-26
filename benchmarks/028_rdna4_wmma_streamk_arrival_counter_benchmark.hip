@@ -3,10 +3,9 @@
 //
 // benchmarks/028_rdna4_wmma_streamk_arrival_counter_benchmark.hip
 //
-// Stage 9 atomics benchmark: a small RDNA4 WMMA Stream-K-shaped arrival
-// counter. Two subgroups compute two K-slice partials for one C tile, publish
-// their LDS partials with a global fetch-add counter, and the last arriving
-// subgroup folds both partials.
+// RDNA4 WMMA Stream-K arrival-counter benchmark. Two subgroups compute two
+// K-slice partials for one C tile, publish their LDS partials with a global
+// fetch-add counter, and the last arriving subgroup folds both partials.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>

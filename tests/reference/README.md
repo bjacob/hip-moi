@@ -52,11 +52,11 @@ The launched no-diagnostic corpus includes:
 * Jakub-derived RDNA4 packed FP16 WMMA matmul schedules: no-pipeline,
   pipelined, and double-buffered;
 * RocJITsu-derived atomics cases that establish the first source shapes for
-  the atomics plan.
+  the source-level atomics model.
 
-The atomics roadmap is tracked in
-[`../../docs/atomics_plan.md`](../../docs/atomics_plan.md), with source-corpus
-details in [`../../docs/atomics_corpus.md`](../../docs/atomics_corpus.md).
+The atomics model is described in [`../../docs/atomics.md`](../../docs/atomics.md),
+with source provenance in
+[`../../docs/atomics_corpus.md`](../../docs/atomics_corpus.md).
 
 ## Compile-Only Diagnostic Shapes
 

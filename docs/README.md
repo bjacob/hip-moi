@@ -14,8 +14,9 @@ interpreted.
 
 For the atomics delivery discussion, read [Atomics Model](atomics.md) first,
 then [Atomics Fast-Path Notes](atomics_fast_paths.md), then the atomics rows in
-the [Benchmark README](../benchmarks/README.md). The staged plan and corpus
-notes are supporting material, not the main delivery narrative.
+the [Benchmark README](../benchmarks/README.md). Source provenance lives in
+[Atomics Corpus](atomics_corpus.md), but it is supporting material rather than
+the main delivery narrative.
 
 For the future rocjitsu DBI direction, read
 [DBI Transition Brief](dbi_transition.md) first, then
@@ -67,33 +68,28 @@ For the future rocjitsu DBI direction, read
    Explains what the benchmark modes and current RDNA4 results imply for Loom,
    the RFC, atomics, ping-pong, and future DBI work.
 
-9. [Atomics Support Plan](atomics_plan.md)
+9. [Atomics Corpus](atomics_corpus.md)
 
-   Gives the staged implementation plan for user-kernel atomics: reference
-   kernels, public API, atomic metadata, release/acquire handoffs, RMW
-   operations, fence-plus-atomic patterns, Stream-K integration, and DBI seeds.
+   Records the source kernels that shaped hip-moi's atomics support and maps
+   them to current tests and benchmarks.
 
-10. [Atomics Corpus](atomics_corpus.md)
-
-   Tracks the seed kernels for the atomics plan.
-
-11. [Atomics Fast-Path Notes](atomics_fast_paths.md)
+10. [Atomics Fast-Path Notes](atomics_fast_paths.md)
 
    Interprets the Stream-K-shaped atomics benchmark rows, the implemented
-   direct RMW cache, and the Stage 17 decision to stop pursuing generic
-   acquire-loop trims without new evidence.
+   direct RMW cache, and the decision to stop pursuing generic acquire-loop
+   trims without new evidence.
 
-12. [DBI Transition Brief](dbi_transition.md)
+11. [DBI Transition Brief](dbi_transition.md)
 
    Translates hip-moi's source-level lessons into DBI requirements, facts to
    preserve, first rocjitsu experiments, and open hardware-model questions.
 
-13. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
+12. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
 
    Records atomic instruction seeds for the future rocjitsu DBI direction and
    keeps them separate from source-level HIP atomics semantics.
 
-14. [Benchmark README](../benchmarks/README.md)
+13. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 

@@ -5,10 +5,9 @@ SPDX-License-Identifier: MIT
 
 # DBI Atomic Instruction Seeds
 
-This document completes Stage 10 of the atomics plan. It records atomic
-instruction seeds for the future rocjitsu dynamic-binary-instrumentation
-direction. It is intentionally separate from the source-level HIP atomics
-model implemented in `hip_moi::context`.
+This document records atomic instruction seeds for the future rocjitsu
+dynamic-binary-instrumentation direction. It is intentionally separate from the
+source-level HIP atomics model implemented in `hip_moi::context`.
 
 At source level, hip-moi reasons in the HIP/LLVM memory model and diagnoses
 LDS payload races. At DBI level, rocjitsu will see AMDGPU instructions,
@@ -57,7 +56,7 @@ Rocjitsu does not automatically see:
   release/acquire pair;
 * source-level object identity beyond the computed address.
 
-That is why Stage 10 keeps two categories separate:
+That is why this document keeps two categories separate:
 
 * source-level atomics tests validate hip-moi's HIP/LLVM memory-model
   approximation;
@@ -79,10 +78,12 @@ already instrumented hip-moi benchmark, it must not mistake hip-moi's metadata
 traffic for the user's synchronization protocol. The clean DBI corpus should
 prefer uninstrumented kernels when the goal is to study workload atomics.
 
-## Current Stage 10 Status
+## Current Status
 
-Stage 10 is complete as an inventory step. The next DBI-oriented step, when the
-project is ready for it, is to pick one seed and produce a minimal standalone
-uninstrumented kernel plus disassembly record. The best first candidate is
+This inventory is complete enough for the first DBI planning discussion. The
+next DBI-oriented step is described in
+[`dbi_transition.md`](dbi_transition.md): start with LDS address reconstruction,
+then pick one atomic seed and produce a minimal standalone uninstrumented
+kernel plus disassembly record. The best first atomic-only candidate remains
 `hipkittens-buffer-pk-add-bf16` because the instruction is explicit inline
 assembly and does not require guessing the compiler lowering.

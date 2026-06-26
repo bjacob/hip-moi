@@ -10,10 +10,8 @@ support. It explains what the source-level API models, what metadata is
 recorded, when that metadata is used, what precision is intentionally lost, and
 what the measured cost currently means.
 
-The staged build history lives in [`atomics_plan.md`](atomics_plan.md). The
-kernel corpus that motivated the stages lives in
-[`atomics_corpus.md`](atomics_corpus.md). Fast-path notes live in
-[`atomics_fast_paths.md`](atomics_fast_paths.md).
+Kernel source provenance lives in [`atomics_corpus.md`](atomics_corpus.md).
+Fast-path decisions live in [`atomics_fast_paths.md`](atomics_fast_paths.md).
 
 ## Delivery Summary
 

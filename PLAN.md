@@ -202,8 +202,8 @@ Current entry points:
   apples-to-apples comparisons, resource metrics, and current evidence;
 * `docs/dbi_transition.md`: transition brief from source-level hip-moi lessons
   to rocjitsu DBI requirements, first experiments, and open model questions;
-* `docs/atomics_plan.md`: staged atomics roadmap and current implementation
-  status;
+* `docs/atomics_corpus.md`: source provenance for current atomics tests and
+  benchmarks;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
@@ -221,15 +221,18 @@ The Markdown sweep is complete as of this session: the old chronological
 `PLAN.md` has been replaced by this delivery plan, stale attention benchmark
 promises have been rewritten as implemented benchmark mappings, and the test
 READMEs now describe the current detector scope. The atomics delivery pass has
-also split the stable atomics model into `docs/atomics.md`, leaving
-`docs/atomics_plan.md` as history and future-work tracking. The Loom/RFC and
+also made `docs/atomics.md` the stable atomics model. The Loom/RFC and
 benchmark interpretation passes are complete in `docs/loom_rfc_comparison.md`
 and `docs/benchmark_interpretation.md`. The atomics delivery polish pass added
 a front-loaded delivery summary, a precise metadata timeline, and a fast-path
 decision table for Jakub-facing discussion. The DBI transition pass added
 `docs/dbi_transition.md`, which states what rocjitsu should preserve, what it
 can change, and why the first DBI experiment should be LDS address
-reconstruction.
+reconstruction. The delivery cleanup pass removed served-purpose checkpoint
+docs: the staged atomics implementation plan and the attention source-mining
+worklog. Durable atomics provenance now lives in `docs/atomics_corpus.md`; the
+attention conclusions live in `benchmarks/README.md` and
+`docs/benchmark_interpretation.md`.
 
 ## Next Work
 
@@ -247,12 +250,12 @@ reconstruction.
 
 2. Use the completed atomics package for delivery discussion.
 
-   The source-level atomics package is complete through Stage 17. The stable
-   description is now `docs/atomics.md`: it defines address-scoped release
-   records, pairwise acquired epoch tokens, supported atomic operations,
-   paired-fence semantics, address-only false-negative risk, sampled-reporting
-   caveats, and current RDNA4 cost. `docs/atomics_plan.md` remains the
-   implementation history and future-work tracker.
+   The source-level atomics package is complete enough for the current delivery
+   phase. The stable description is now `docs/atomics.md`: it defines
+   address-scoped release records, pairwise acquired epoch tokens, supported
+   atomic operations, paired-fence semantics, address-only false-negative risk,
+   sampled-reporting caveats, and current RDNA4 cost. Source provenance is in
+   `docs/atomics_corpus.md`.
 
    The short version for discussion is: `hip_moi::context` supports
    release/acquire load/store, fetch-add/or/and/xor, exchange, successful and

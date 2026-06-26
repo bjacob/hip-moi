@@ -5,8 +5,8 @@ hip-moi's sampled publish-only implementation. The matmul benchmarks are
 focused extractions from Jakub's
 `sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the attention benchmarks are
 hip-moi-native workloads grown from the instrumented test corpus and from the
-llama.cpp/AITER shape signals recorded in
-[`attention_source_mining.md`](attention_source_mining.md).
+llama.cpp/AITER production-shape signals summarized in this README and in
+[`docs/benchmark_interpretation.md`](../docs/benchmark_interpretation.md).
 
 For interpretation of what the benchmark modes and current numbers imply, read
 [`docs/benchmark_interpretation.md`](../docs/benchmark_interpretation.md).
@@ -78,11 +78,11 @@ signature. See [`docs/pingpong.md`](../docs/pingpong.md) for the `setprio`,
 `sched_barrier`, and ATT-trace caveats.
 
 `019_atomic_flag_handoff_benchmark.hip` is the first atomics handoff benchmark:
-global release/acquire atomics order a raw LDS payload. Starting with atomics
-Stage 3, the `context` row records release-side atomic-object metadata, but
-hip-moi does not yet use that metadata to suppress LDS diagnostics.
+global release/acquire atomics order a raw LDS payload. The `context` row
+records release-side atomic-object metadata, but this benchmark intentionally
+uses a raw LDS payload rather than the diagnostic LDS API.
 
-`020_atomic_metadata_benchmark.hip` isolates the Stage 3 metadata cost: each
+`020_atomic_metadata_benchmark.hip` isolates the release-metadata cost: each
 workgroup release-stores one unique global flag, and the `context` row records
 that atomic object in the bounded metadata table.
 
@@ -158,7 +158,7 @@ segment notes are included when that fast row is not spill-free.
 | `pingpong-private-lds` | `016_rdna4_pingpong_att_probe.hip` | `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`, `run_pingpong_att_validation.sh` | hip-moi RDNA4 ping-pong scheduling probe | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B | 44, no spills |
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
 | `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a (`context` only) |
-| `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a (`context` only) |
+| `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi release-metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a (`context` only) |
 | `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a (`context` only) |
 | `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a (`context` only) |
 | `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a (`context` only) |
@@ -234,7 +234,7 @@ table expands those benchmark modes.
 | `exact shadow` | hip-moi exact shadow | Precise shadow-memory checking through explicit LDS-offset APIs. Present only in the tiny matmul wave-scaling benchmark. |
 | `context + sampled_watchpoint` | General hip-moi context with sampled-watchpoint backend | Diagnostic-capable hip-moi API path using sampled watchpoints. This keeps more state live than the publish-only fast path. |
 | `sampled_watchpoint_context` | hip-moi sampled publish-only fast path | Narrow fast-view context optimized for Loom-parity publish-only sampling. This is the main performance target. |
-| `context` | General hip-moi context | Used by atomics benchmarks when the feature is not part of sampled watchpoint instrumentation. Stage 2 atomics use this only as a pass-through wrapper around HIP/Clang atomics. |
+| `context` | General hip-moi context | Used by atomics benchmarks when the feature is not part of sampled watchpoint instrumentation. |
 | `context-sampled-reporting` | General hip-moi context with sampled-watchpoint reporting | Atomics correctness coverage for sampled diagnostics. This is not the publish-only fast path; current rows may scan many watchpoint entries. |
 
 ## Current RDNA4 Results
@@ -395,7 +395,7 @@ publish, but it can be the acquire-side observation consumed by a following
 acquire fence. The `atomic-seq-cst-handoff` row is a sanity check for the
 strongest ordinary load/store spelling, not a new synchronization mechanism.
 
-The Stage 7 atomics fast path is intentionally narrow: release-capable RMWs in
+The atomics fast path is intentionally narrow: release-capable RMWs in
 workgroups with more than two subgroups populate a direct-mapped
 address-scoped producer-mask cache. Acquires use that cache to skip generic
 per-producer probes when the cache slot matches, and fall back to the generic
@@ -419,11 +419,11 @@ latency by making one lane perform every instrumented partial load. The
 committed row uses lane-parallel reduction and is the better signal for the
 next fast-path decision.
 
-The RDNA4 WMMA Stream-K-tree `atomicOr` row is the fourth Stage 9 integration
-row and the first WMMA-shaped bitmask-tree case. Four subgroups compute WMMA
+The RDNA4 WMMA Stream-K-tree `atomicOr` row is the first WMMA-shaped
+bitmask-tree case. Four subgroups compute WMMA
 partials; the first three subgroups publish bits with release `atomicOr`; the
 final subgroup waits for those bits, performs an `acq_rel atomicOr`, and folds
-all four LDS partials. The Stage 7 direct RMW cache lowers this row from the
+all four LDS partials. The direct RMW cache lowers this row from the
 previous 49.2 µs `context` result to 45.2 µs, at the cost of higher SGPR
 pressure and no change in VGPRs or spills.
 

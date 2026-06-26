@@ -3,7 +3,7 @@
 //
 // benchmarks/023_atomic_rmw_happens_before_benchmark.hip
 //
-// Stage 6 atomics benchmark. Global fetch-add arrival counters order an
+// Atomic RMW arrival-counter benchmark. Global fetch-add counters order an
 // instrumented LDS payload handoff: the subgroup that observes itself as the
 // last arrival reads payload written by an earlier subgroup.
 #include "hip_moi/hip_moi.hpp"
@@ -432,7 +432,7 @@ int main()
 
     if(!context_storage.check_all())
     {
-        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 6 atomic benchmark\n");
+        std::fprintf(stderr, "unexpected hip-moi diagnostics in atomic RMW benchmark\n");
         return EXIT_FAILURE;
     }
 

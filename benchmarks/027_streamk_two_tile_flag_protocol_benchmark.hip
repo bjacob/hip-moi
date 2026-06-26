@@ -3,9 +3,8 @@
 //
 // benchmarks/027_streamk_two_tile_flag_protocol_benchmark.hip
 //
-// Stage 9 atomics benchmark: a two-tile Stream-K-style flag protocol. Two
-// owner subgroups each wait on one helper release/acquire flag and fold one
-// helper LDS partial.
+// Two-tile Stream-K flag-protocol benchmark. Two owner subgroups each wait on
+// one helper release/acquire flag and fold one helper LDS partial.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>

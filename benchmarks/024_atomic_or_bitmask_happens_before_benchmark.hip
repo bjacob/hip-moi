@@ -3,7 +3,7 @@
 //
 // benchmarks/024_atomic_or_bitmask_happens_before_benchmark.hip
 //
-// Stage 6 atomics benchmark. A global atomicOr bitmask orders an instrumented
+// AtomicOr bitmask handoff benchmark. A global atomicOr orders an instrumented
 // LDS payload handoff: the second subgroup branches on the returned old mask to
 // read payload written by the first subgroup.
 #include "hip_moi/hip_moi.hpp"

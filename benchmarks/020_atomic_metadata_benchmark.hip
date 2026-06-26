@@ -3,10 +3,10 @@
 //
 // benchmarks/020_atomic_metadata_benchmark.hip
 //
-// Stage 3 atomics benchmark. Each workgroup publishes one unique global flag
-// with release semantics. The context path records the atomic object in the
-// bounded metadata table but does not yet use that metadata for happens-before
-// suppression.
+// Atomic release-metadata benchmark. Each workgroup publishes one unique global
+// flag with release semantics. The context path records the atomic object in
+// the bounded metadata table but does not use that metadata for
+// happens-before suppression.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
@@ -254,7 +254,7 @@ int main()
 
     if(!moi.check(nullptr))
     {
-        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 3 atomic benchmark\n");
+        std::fprintf(stderr, "unexpected hip-moi diagnostics in atomic metadata benchmark\n");
         return EXIT_FAILURE;
     }
 

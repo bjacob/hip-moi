@@ -3,7 +3,7 @@
 //
 // benchmarks/021_atomic_happens_before_benchmark.hip
 //
-// Stage 4 atomics benchmark. A release/acquire global flag orders an
+// Atomic release/acquire handoff benchmark. A global flag orders an
 // instrumented LDS payload handoff, so the context path exercises both
 // atomic-object metadata and the acquired-epoch query in the exact-shadow
 // conflict predicate.
@@ -459,13 +459,13 @@ int main()
 
     if(!context_storage.check_all())
     {
-        std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 4 atomic benchmark\n");
+        std::fprintf(stderr, "unexpected hip-moi diagnostics in atomic handoff benchmark\n");
         return EXIT_FAILURE;
     }
     if(!sampled_reporting_storage.check_all())
     {
         std::fprintf(
-            stderr, "unexpected sampled hip-moi diagnostics in Stage 4 atomic benchmark\n");
+            stderr, "unexpected sampled hip-moi diagnostics in atomic handoff benchmark\n");
         return EXIT_FAILURE;
     }
 

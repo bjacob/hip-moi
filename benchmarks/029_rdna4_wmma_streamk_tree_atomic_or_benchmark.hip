@@ -3,11 +3,10 @@
 //
 // benchmarks/029_rdna4_wmma_streamk_tree_atomic_or_benchmark.hip
 //
-// Stage 9 atomics benchmark: a small RDNA4 WMMA Stream-K-tree-shaped atomicOr
-// bitmask. Four subgroups compute four K-slice partials for one C tile. The
-// first three subgroups publish LDS partials by setting bits in a global
-// bitmask, and the final subgroup observes those bits before folding all
-// partials.
+// RDNA4 WMMA Stream-K tree atomicOr benchmark. Four subgroups compute four
+// K-slice partials for one C tile. The first three subgroups publish LDS
+// partials by setting bits in a global bitmask, and the final subgroup observes
+// those bits before folding all partials.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>

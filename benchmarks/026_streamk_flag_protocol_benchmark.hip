@@ -3,9 +3,9 @@
 //
 // benchmarks/026_streamk_flag_protocol_benchmark.hip
 //
-// Stage 9 atomics benchmark. A RocJITsu hip-stream-k-style owner subgroup
-// waits on two helper release/acquire flags and folds their LDS partial
-// payloads through the same fixup loop shape as the instrumented test.
+// Stream-K flag-protocol benchmark. A RocJITsu hip-stream-k-style owner
+// subgroup waits on two helper release/acquire flags and folds their LDS
+// partial payloads through the same fixup loop shape as the instrumented test.
 #include "hip_moi/hip_moi.hpp"
 
 #include <hip/hip_runtime.h>
