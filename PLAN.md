@@ -277,6 +277,14 @@ READMEs now describe the current detector scope.
    load/store sanity row. Naked fences still do not create ordering in
    hip-moi's source-level model.
 
+   Stage 14 begins atomics optimization in the general `hip_moi::context`
+   rather than by creating a separate atomics fast context. The first cleanup
+   keeps synchronization metadata exhaustive but skips the direct-mapped RMW
+   producer-mask cache probe for one- and two-subgroup acquire imports, because
+   that cache is populated only for workgroups with more than two subgroups.
+   The refreshed RDNA4 rows remain spill-free with unchanged VGPR pressure;
+   SGPR pressure drops in several two-subgroup atomics rows.
+
 ## Non-Goals
 
 These are explicitly out of scope for the current delivery phase:

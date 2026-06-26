@@ -818,12 +818,15 @@ namespace hip_moi
             }
 
             uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
-            bool      cache_hit = false;
-            bool      found
-                = try_record_atomic_acquire_from_cache(address, consumer, capacity, &cache_hit);
-            if(cache_hit)
+            if(detail::configured_subgroup_count(cfg_) > 2u)
             {
-                return found;
+                bool cache_hit = false;
+                bool found
+                    = try_record_atomic_acquire_from_cache(address, consumer, capacity, &cache_hit);
+                if(cache_hit)
+                {
+                    return found;
+                }
             }
 
             return try_record_atomic_acquire_from_table(address, consumer, capacity);

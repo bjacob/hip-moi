@@ -40,6 +40,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 11. Exchange and compare-exchange source shapes | Complete | `030_atomic_exchange_compare_exchange_test.hip` and matching benchmark cover release/acquire exchange, successful acquire compare-exchange lock acquisition, and failed acquire compare-exchange as an acquire load. |
 | 12. Fences paired with relaxed RMWs | Complete | `031_atomic_fence_rmw_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-fetch-add paired with relaxed-fetch-add-before-acquire-fence. Fence-only synchronization remains out of scope. |
 | 13. Fences paired with extended relaxed atomics | Complete | `033_atomic_fence_extended_test.hip` and matching benchmark cover release/acquire fences paired with relaxed exchange, successful relaxed compare-exchange, failed relaxed compare-exchange, and a `seq_cst` load/store sanity row. |
+| 14. General-context atomics optimization | Complete | `hip_moi::context` now skips the address-cache probe for one- and two-subgroup acquire imports, where the RMW producer-mask cache is not populated. Synchronization metadata remains exhaustive; VGPRs and spills are unchanged; several atomics rows reduce SGPR pressure and some improve latency. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -97,6 +98,38 @@ Atomics belong first in `hip_moi::context`. They require a real
 synchronization model and deterministic diagnostics. They do not belong in
 `hip_moi::sampled_watchpoint_context` until the diagnostic model exists and a
 separate publish-only fast path is justified.
+
+## Atomics Optimization Roadmap
+
+The optimization priority is the general `hip_moi::context` class. It is the
+only current class that implements deterministic atomics-aware diagnostics.
+`hip_moi::sampled_watchpoint_context` remains a publish-only sampled LDS
+metadata path; it is not an atomics-aware sanitizer mode.
+
+The staged optimization direction is:
+
+1. Optimize atomics inside the general `context` first. Prefer changes that
+   reduce table probes, global metadata traffic, live state, SGPR/VGPR
+   pressure, or retry work without changing the public API.
+2. Keep synchronization metadata exhaustive. Sampling may thin LDS payload
+   observation, but atomics, fences, and acquire imports should not be sampled
+   by default because missing a synchronization edge can create false
+   positives.
+3. If sampled diagnostics with atomics become important, make sampled conflict
+   reporting consult the same acquired-epoch tokens used by exact-shadow
+   diagnostics. That is separate from the current publish-only sampled fast
+   path.
+4. Consider a separate atomics fast context only if measurements show that the
+   general `context` carries irreducible overhead that cannot be optimized away
+   locally. Do not create a second class merely to mirror
+   `sampled_watchpoint_context`.
+
+Stage 14 starts with a narrow in-place optimization: the RMW producer-mask
+cache is populated only for workgroups with more than two subgroups. For one-
+and two-subgroup workgroups, acquire imports can therefore skip the cache probe
+and go directly to the generic atomic-object table. This preserves the same
+address-scoped release/acquire model and keeps synchronization metadata
+exhaustive.
 
 The first supported memory-ordering rule should be release/acquire
 synchronization through an atomic object:
@@ -739,7 +772,7 @@ row:
 
 | Key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-fence-rmw-handoff` | 3.44 µs | 8.03 µs | 8 B LDS, 63 SGPRs, 23 VGPRs, no spills |
+| `atomic-fence-rmw-handoff` | 3.16 µs | 8.62 µs | 8 B LDS, 57 SGPRs, 23 VGPRs, no spills |
 
 ## Stage 13: Fences Paired With Extended Relaxed Atomics
 
@@ -767,14 +800,48 @@ because it did not modify the atomic object.
 
 | Key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-fence-exchange` | 3.37 µs | 8.66 µs | 4 B LDS, 67 SGPRs, 21 VGPRs, no spills |
-| `atomic-fence-successful-cas` | 3.10 µs | 7.03 µs | 4 B LDS, 68 SGPRs, 21 VGPRs, no spills |
-| `atomic-fence-failed-cas` | 3.11 µs | 7.04 µs | 4 B LDS, 68 SGPRs, 21 VGPRs, no spills |
-| `atomic-seq-cst-handoff` | 3.09 µs | 8.32 µs | 4 B LDS, 64 SGPRs, 21 VGPRs, no spills |
+| `atomic-fence-exchange` | 3.05 µs | 8.60 µs | 4 B LDS, 61 SGPRs, 21 VGPRs, no spills |
+| `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs | 4 B LDS, 62 SGPRs, 21 VGPRs, no spills |
+| `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs | 4 B LDS, 62 SGPRs, 21 VGPRs, no spills |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs | 4 B LDS, 57 SGPRs, 21 VGPRs, no spills |
+
+## Stage 14: General-Context Atomics Optimization
+
+Goal: optimize the diagnostic-capable `hip_moi::context` first, without
+creating a separate atomics fast context and without sampling synchronization
+metadata.
+
+Status: complete for the first in-place cleanup. The acquire path previously
+looked in the direct-mapped RMW producer-mask cache for all workgroup sizes,
+then fell back to the generic atomic-object table. That cache is populated only
+for release-capable RMWs in workgroups with more than two subgroups. Stage 14
+therefore makes one- and two-subgroup acquire imports skip the impossible cache
+hit and go directly to the generic table.
+
+This is a generated-code cleanup more than a dramatic latency change. It keeps
+VGPR pressure unchanged and introduces no spills. SGPR pressure drops in the
+two-subgroup atomics rows, which is useful but less critical than VGPR pressure
+for the production-kernel concern that motivates hip-moi.
+
+Selected local RDNA4 rows after the change:
+
+| Key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-hb-lds-handoff` | 3.32 µs | 8.88 µs | 4 B LDS, 55 SGPRs, 23 VGPRs, no spills |
+| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs | 8 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs | 8 B LDS, 56 SGPRs, 23 VGPRs, no spills |
+| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs | 8 B LDS, unchanged VGPR pressure, no spills |
+| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
+| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
+| `streamk-flag-fixup` | 3.20 µs | 12.5 µs | 12 B LDS, 82 SGPRs, 25 VGPRs, no spills |
+| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | 16 B LDS, 93 SGPRs, 60 VGPRs, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | 4096 B LDS, 73 SGPRs, 51 VGPRs, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | 8192 B LDS, 82 SGPRs, 52 VGPRs, no spills |
 
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 13.
+1. The current atomics plan is complete through Stage 14.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
 3. Additional source-level atomics should be corpus-driven. Likely candidates

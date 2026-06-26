@@ -254,23 +254,23 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | --- | ---: | ---: |
 | `atomic-flag-handoff` | 7.26 µs | 45.5 µs |
 | `atomic-metadata-release-store` | 3.44 µs | 21.1 µs |
-| `atomic-hb-lds-handoff` | 3.33 µs | 8.93 µs |
-| `atomic-rmw-arrival-counter` | 3.45 µs | 8.23 µs |
-| `atomic-rmw-acq-rel-chain` | 3.25 µs | 8.93 µs |
-| `atomic-or-bitmask-handoff` | 3.21 µs | 8.75 µs |
-| `atomic-fence-handoff` | 3.12 µs | 6.82 µs |
-| `atomic-exchange-handoff` | 3.37 µs | 8.56 µs |
-| `atomic-cas-lock-handoff` | 3.06 µs | 7.47 µs |
-| `atomic-failed-cas-acquire` | 3.11 µs | 7.10 µs |
-| `atomic-fence-rmw-handoff` | 3.44 µs | 8.03 µs |
-| `atomic-fence-exchange` | 3.37 µs | 8.66 µs |
-| `atomic-fence-successful-cas` | 3.10 µs | 7.03 µs |
-| `atomic-fence-failed-cas` | 3.11 µs | 7.04 µs |
-| `atomic-seq-cst-handoff` | 3.09 µs | 8.32 µs |
-| `streamk-flag-fixup` | 3.37 µs | 13.0 µs |
-| `streamk-two-tile-flag-fixup` | 3.18 µs | 13.2 µs |
-| `rdna4-wmma-streamk-arrival-counter` | 3.48 µs | 26.6 µs |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.77 µs | 43.6 µs |
+| `atomic-hb-lds-handoff` | 3.32 µs | 8.88 µs |
+| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs |
+| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs |
+| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs |
+| `atomic-fence-handoff` | 3.10 µs | 6.83 µs |
+| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs |
+| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs |
+| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs |
+| `atomic-fence-rmw-handoff` | 3.16 µs | 8.62 µs |
+| `atomic-fence-exchange` | 3.05 µs | 8.60 µs |
+| `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs |
+| `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs |
+| `streamk-flag-fixup` | 3.20 µs | 12.5 µs |
+| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs |
+| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs |
 
 ## Reading The Suite
 
@@ -306,6 +306,14 @@ An acquire imports producer records for that address; the scalar value stored,
 loaded, or returned by a RMW is not part of the current metadata key.
 Address+value remains a possible future precision refinement, but it is not the
 default implementation.
+
+The first general-context atomics optimization is intentionally small: one- and
+two-subgroup acquire imports skip the direct-mapped RMW producer-mask cache
+probe, because that cache is populated only for workgroups with more than two
+subgroups. This keeps synchronization metadata exhaustive. The main benefit is
+cleaner generated code and lower SGPR pressure in the two-subgroup atomics
+rows; VGPR pressure stays unchanged and all refreshed atomics rows remain
+spill-free.
 
 The atomic flag handoff row records release-side atomic-object metadata for a
 raw LDS payload. The metadata release-store row isolates the release-side
@@ -391,13 +399,17 @@ The current Stage 9 `context` resource refresh found no spills:
 | --- | ---: | ---: | ---: | --- |
 | `streamk-flag-fixup` | 12 B | 82 | 25 | none, 0 B |
 | `streamk-two-tile-flag-fixup` | 16 B | 93 | 60 | none, 0 B |
-| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 79 | 51 | none, 0 B |
+| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 73 | 51 | none, 0 B |
 | `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 82 | 52 | none, 0 B |
-| `atomic-exchange-handoff` | 4 B | 62 | 23 | none, 0 B |
-| `atomic-cas-lock-handoff` | 4 B | 63 | 23 | none, 0 B |
-| `atomic-failed-cas-acquire` | 4 B | 62 | 23 | none, 0 B |
-| `atomic-fence-rmw-handoff` | 8 B | 63 | 23 | none, 0 B |
-| `atomic-fence-exchange` | 4 B | 67 | 21 | none, 0 B |
-| `atomic-fence-successful-cas` | 4 B | 68 | 21 | none, 0 B |
-| `atomic-fence-failed-cas` | 4 B | 68 | 21 | none, 0 B |
-| `atomic-seq-cst-handoff` | 4 B | 64 | 21 | none, 0 B |
+| `atomic-hb-lds-handoff` | 4 B | 55 | 23 | none, 0 B |
+| `atomic-rmw-arrival-counter` | 8 B | 57 | 23 | none, 0 B |
+| `atomic-rmw-acq-rel-chain` | 8 B | 56 | 23 | none, 0 B |
+| `atomic-exchange-handoff` | 4 B | 56 | 23 | none, 0 B |
+| `atomic-cas-lock-handoff` | 4 B | 57 | 23 | none, 0 B |
+| `atomic-failed-cas-acquire` | 4 B | 56 | 23 | none, 0 B |
+| `atomic-fence-handoff` | 4 B | 57 | 23 | none, 0 B |
+| `atomic-fence-rmw-handoff` | 8 B | 57 | 23 | none, 0 B |
+| `atomic-fence-exchange` | 4 B | 61 | 21 | none, 0 B |
+| `atomic-fence-successful-cas` | 4 B | 62 | 21 | none, 0 B |
+| `atomic-fence-failed-cas` | 4 B | 62 | 21 | none, 0 B |
+| `atomic-seq-cst-handoff` | 4 B | 57 | 21 | none, 0 B |
