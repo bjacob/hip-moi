@@ -38,6 +38,15 @@ benchmarks, documentation, and diligence notes have landed.
 | 9. Stream-K integration tests | In progress | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, and `028_rdna4_wmma_streamk_arrival_counter_test.hip` add Stream-K-shaped flag, ownership, and RDNA4 WMMA arrival-counter rows. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
 
+Known semantic gap: the current atomic-object table is keyed by
+`(atomic address, released value, generation)`. That is sufficient only for
+protocols where the observed value identifies the release event, or where
+same-address same-value releases carry equivalent ordering for the LDS payload.
+Repeated release stores of the same value to the same atomic object can
+over-match an acquire to the wrong release metadata and incorrectly suppress a
+diagnostic. Supporting that shape requires additional release identity or a
+conservative ambiguity path.
+
 ## Stage Completion Checklist
 
 For each implementation stage, complete the following before moving on:
@@ -318,10 +327,12 @@ Exit criteria:
 Status: complete for the first minimal release/acquire handoff. The
 implementation adds a per-context matrix of acquired epoch tokens indexed by
 consumer subgroup and producer subgroup. A release-style atomic records the
-producing subgroup and epoch in the atomic-object table. An acquire load that
-observes the released value updates the consumer's token for that producer. The
-exact-shadow conflict predicate suppresses a conflict only when the current
-subgroup has acquired a token covering the prior subgroup's recorded epoch.
+producing subgroup and epoch in the atomic-object table. An acquire load whose
+observed value identifies a release record updates the consumer's token for
+that producer. The exact-shadow conflict predicate suppresses a conflict only
+when the current subgroup has acquired a token covering the prior subgroup's
+recorded epoch. This status does not claim support for ambiguous same-value
+release stores.
 
 `021_atomic_happens_before_test.hip` covers the key semantic cases: a
 release/acquire global flag orders an instrumented LDS payload and reports no
@@ -432,7 +443,9 @@ reading the payload. The same test and benchmark also cover a two-RMW
 Supporting the `acq_rel` chain required changing atomic metadata from an
 address-only key to an `(address, released value)` key. This lets records for
 consecutive counter values coexist long enough for the later RMW to acquire the
-earlier RMW's release metadata. Current local RDNA4 rows are 7.16 µs for
+earlier RMW's release metadata. This is sufficient for monotonic counter values;
+it is not a general reads-from identity for repeated same-value release stores.
+Current local RDNA4 rows are 7.16 µs for
 `atomic-rmw-arrival-counter_context` with 8 B LDS, 23 VGPRs, 54 SGPRs, no
 private segment, and no spills, and 8.59 µs for
 `atomic-rmw-acq-rel-chain_context` with 8 B LDS, 25 VGPRs, 54 SGPRs, no private

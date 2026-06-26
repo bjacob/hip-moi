@@ -41,7 +41,7 @@ For a releasing RMW such as `ctx.atomic_fetch_add`, the current path:
 
 1. executes the user atomic operation;
 2. computes the released value;
-3. finds or claims a value-keyed atomic-object metadata slot keyed by
+3. finds or claims an address/value-keyed atomic-object metadata slot keyed by
    `(atomic address, released value)`;
 4. publishes the releasing subgroup and epoch into that slot;
 5. uses a thread fence before making the slot visible for the current launch
@@ -62,6 +62,13 @@ For each instrumented LDS access, the exact-shadow path:
 2. atomically exchanges each shadow cell with the current access metadata;
 3. checks whether the prior entry conflicts;
 4. queries the acquired-epoch matrix before deciding whether to diagnose.
+
+The address/value key is a performance-conscious approximation of the
+memory-model reads-from relation. It is suitable for the Stream-K-like counter
+and bitmask protocols currently tested, where observed values distinguish the
+release state being acquired. It is not sufficient for protocols with repeated
+release stores of the same value to the same atomic object unless those
+same-value releases carry equivalent LDS ordering.
 
 That is the right conservative structure for a general source-level prototype.
 It is also more general than the common Stream-K patterns in the current
@@ -110,8 +117,9 @@ and falls back to the generic lookup on miss.
 
 This preserves the public API and can improve the common case where a benchmark
 uses one or a few counters with predictable values. It does not require users
-to annotate Stream-K protocols. It also preserves correctness because the
-generic path remains the fallback.
+to annotate Stream-K protocols. It preserves the current address/value-keyed
+semantics because the generic path remains the fallback; it does not solve
+ambiguous same-value release stores.
 
 The risk is live state and code size: checking both the fast slot and the
 generic fallback can increase register pressure unless the fast path is

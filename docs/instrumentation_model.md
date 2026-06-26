@@ -232,7 +232,8 @@ synchronization through an atomic object:
 2. The release record is keyed by the atomic object's address, the value that
    the release makes observable, and the launch generation.
 3. An acquire operation performs the user atomic operation first.
-4. If the acquire observes a value with a matching release record, hip-moi
+4. If the acquire observes a value with a matching release record, and the
+   protocol makes that observed value identify the release event, hip-moi
    updates the pairwise acquired-epoch token for
    `(consumer subgroup, producer subgroup)`.
 5. Later exact-shadow LDS conflict checks consult that token table before
@@ -280,6 +281,24 @@ read-modify-write operations, the observed value is the old value returned by
 the hardware atomic. RMW acquire paths retry briefly because one RMW can
 observe the value produced by another RMW before the producing subgroup has
 finished publishing hip-moi's release metadata.
+
+The current address-and-value-keyed representation is sufficient only when the
+synchronization protocol makes the observed atomic value identify the release
+that should be acquired, or when all same-address same-value releases carry
+equivalent ordering for the LDS payload being checked. Monotonic counters,
+unique flag values, and bitmasks whose observed values distinguish the relevant
+state are the intended shape.
+
+Repeated release stores of the same value to the same atomic object are not
+enough information for hip-moi to identify which store an acquire load read
+from. In the HIP/LLVM memory model, the acquire synchronizes with the specific
+release operation, or release sequence, that it observes; the returned scalar
+value alone does not encode that reads-from identity. If hip-moi matched only
+on `(address, value, generation)` in such a protocol, it could over-match the
+acquire to the wrong release record and incorrectly suppress an LDS diagnostic.
+Supporting that shape requires additional identity, such as a release-sequence
+identifier, a monotonic protocol value, or a conservative mode that refuses to
+use ambiguous same-value release records for suppression.
 
 Fence-only synchronization is not modeled. The implemented fence support is
 the standard paired-atomic shape:

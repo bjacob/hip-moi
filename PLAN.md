@@ -285,7 +285,7 @@ READMEs now describe the current detector scope.
    `context` kernel. `docs/atomics_fast_paths.md` now records the fast-path
    decision point; its current recommendation is a small direct-mapped RMW
    metadata cache behind the existing API, with fallback to the generic
-   value-keyed table. The
+   address/value-keyed table. The
    diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the
@@ -296,7 +296,12 @@ READMEs now describe the current detector scope.
    `docs/instrumentation_model.md` now documents the implemented atomics model:
    atomic synchronization preserves the ordinary per-subgroup barrier epochs
    and adds pairwise ordering evidence for release/acquire edges. It does not
-   add nested epochs inside the barrier epoch model.
+   add nested epochs inside the barrier epoch model. The current
+   address/value-keyed atomic-object table supports protocols where the
+   observed atomic value identifies the release event being acquired. Repeated
+   same-address same-value release stores need additional release identity or
+   conservative ambiguity handling before hip-moi can claim sound suppression
+   for them.
 
 ## Non-Goals
 
