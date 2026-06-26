@@ -93,6 +93,9 @@ Current files:
 * `032_workgroup_barrier_fence_test.hip`: lower-level
   release-fence/barrier/acquire-fence spelling for full-workgroup epoch
   boundaries.
+* `033_atomic_fence_extended_test.hip`: release/acquire fences paired with
+  relaxed exchange and compare-exchange, plus a `seq_cst` load/store sanity
+  case.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

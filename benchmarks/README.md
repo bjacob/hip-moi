@@ -108,6 +108,11 @@ CAS after a release unlock, and failed acquire CAS as an acquire load.
 to relaxed RMWs: release fence before relaxed `fetch_add`, and relaxed
 `fetch_add` before acquire fence.
 
+`033_atomic_fence_extended_benchmark.hip` closes the main paired-fence gap for
+the currently supported source-level atomics: relaxed exchange, successful
+relaxed compare-exchange, failed relaxed compare-exchange, and `seq_cst`
+load/store.
+
 `026_streamk_flag_protocol_benchmark.hip` is the first Stream-K-shaped
 integration benchmark. It keeps the RocJITsu hip-stream-k owner/helper flag
 protocol but distills the payload to LDS partials so hip-moi can diagnose the
@@ -153,6 +158,10 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-cas-lock-handoff` | `030_atomic_exchange_compare_exchange_benchmark.hip` | `tests/instrumented/030_atomic_exchange_compare_exchange_test.hip` | Lock-like compare-exchange handoff | 256 workgroups, 2 subgroups/workgroup, release unlock store followed by successful acquire CAS lock acquisition | 4 B | n/a (`context` only) |
 | `atomic-failed-cas-acquire` | `030_atomic_exchange_compare_exchange_benchmark.hip` | `tests/instrumented/030_atomic_exchange_compare_exchange_test.hip` | Failed compare-exchange acquire-load shape | 256 workgroups, 2 subgroups/workgroup, release flag store followed by failed acquire CAS that observes the published value | 4 B | n/a (`context` only) |
 | `atomic-fence-rmw-handoff` | `031_atomic_fence_rmw_happens_before_benchmark.hip` | `tests/instrumented/031_atomic_fence_rmw_happens_before_test.hip` | Raw-fence-plus-RMW handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed `fetch_add` and relaxed `fetch_add` before acquire fence | 8 B | n/a (`context` only) |
+| `atomic-fence-exchange` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Raw-fence-plus-exchange handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed exchange and relaxed exchange before acquire fence | 4 B | n/a (`context` only) |
+| `atomic-fence-successful-cas` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Raw-fence-plus-successful-CAS handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed unlock store and successful relaxed CAS before acquire fence | 4 B | n/a (`context` only) |
+| `atomic-fence-failed-cas` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Raw-fence-plus-failed-CAS handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and failed relaxed CAS before acquire fence | 4 B | n/a (`context` only) |
+| `atomic-seq-cst-handoff` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Strong load/store sanity row | 256 workgroups, 2 subgroups/workgroup, `seq_cst` store/load orders an instrumented LDS payload | 4 B | n/a (`context` only) |
 | `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a (`context` only) |
 | `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a (`context` only) |
@@ -190,6 +199,10 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-cas-lock-handoff` | 256 workgroups, 2 subgroups/workgroup, release unlock store and successful acquire CAS lock acquisition order instrumented LDS payload | 4 B, <0.1% | 3 |
 | `atomic-failed-cas-acquire` | 256 workgroups, 2 subgroups/workgroup, release store and failed acquire CAS order instrumented LDS payload | 4 B, <0.1% | 4 |
 | `atomic-fence-rmw-handoff` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed RMW operations around instrumented LDS payload | 8 B, <0.1% | 4 |
+| `atomic-fence-exchange` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair relaxed exchange operations around instrumented LDS payload | 4 B, <0.1% | 3 |
+| `atomic-fence-successful-cas` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair a relaxed unlock store with successful relaxed CAS around instrumented LDS payload | 4 B, <0.1% | 3 |
+| `atomic-fence-failed-cas` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair a relaxed flag store with failed relaxed CAS around instrumented LDS payload | 4 B, <0.1% | 3 |
+| `atomic-seq-cst-handoff` | 256 workgroups, 2 subgroups/workgroup, `seq_cst` store/load orders instrumented LDS payload | 4 B, <0.1% | 3 |
 | `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
 | `streamk-two-tile-flag-fixup` | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B, <0.1% | 3 |
 | `rdna4-wmma-streamk-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, arrival counter, final subgroup folds LDS partials | 4096 B, 6.3% | 21 |
@@ -213,11 +226,11 @@ table expands those benchmark modes.
 
 Matmul and attention rows were measured on 2026-06-24 on device 0, AMD Radeon
 RX 9070, `gfx1201`, 28 CUs. The ping-pong rows were measured on the same machine
-on 2026-06-25. Latencies below 1 ms are printed in microseconds (`µs`); larger
-latencies are printed in milliseconds. Most rows use `MIN_MS=100` and
-`WARMUP_MS=100`. `attention-d16-dense` uses `MIN_MS=500` and `WARMUP_MS=500`
-because full dense score/weight instrumentation makes it much slower than the
-matmul rows.
+on 2026-06-25. Atomics rows were last refreshed on 2026-06-26. Latencies below
+1 ms are printed in microseconds (`µs`); larger latencies are printed in
+milliseconds. Most rows use `MIN_MS=100` and `WARMUP_MS=100`.
+`attention-d16-dense` uses `MIN_MS=500` and `WARMUP_MS=500` because full dense
+score/weight instrumentation makes it much slower than the matmul rows.
 
 | Key | pass-through | Jakub-Sampled-Loom | exact shadow | `context + sampled_watchpoint` | `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -250,6 +263,10 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 | `atomic-cas-lock-handoff` | 3.06 µs | 7.47 µs |
 | `atomic-failed-cas-acquire` | 3.11 µs | 7.10 µs |
 | `atomic-fence-rmw-handoff` | 3.44 µs | 8.03 µs |
+| `atomic-fence-exchange` | 3.37 µs | 8.66 µs |
+| `atomic-fence-successful-cas` | 3.10 µs | 7.03 µs |
+| `atomic-fence-failed-cas` | 3.11 µs | 7.04 µs |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.32 µs |
 | `streamk-flag-fixup` | 3.37 µs | 13.0 µs |
 | `streamk-two-tile-flag-fixup` | 3.18 µs | 13.2 µs |
 | `rdna4-wmma-streamk-arrival-counter` | 3.48 µs | 26.6 µs |
@@ -328,6 +345,14 @@ relaxed RMW counters. A release fence arms the next relaxed RMW publication,
 and an acquire fence consumes the most recent relaxed RMW observation. Naked
 fences are still not modeled as inter-subgroup synchronization.
 
+The extended fence rows apply that same paired-fence rule to the remaining
+source-level RMW forms currently implemented by hip-moi. Relaxed exchange and
+successful relaxed compare-exchange can both publish a pending release fence
+because they modify the atomic object. Failed relaxed compare-exchange cannot
+publish, but it can be the acquire-side observation consumed by a following
+acquire fence. The `atomic-seq-cst-handoff` row is a sanity check for the
+strongest ordinary load/store spelling, not a new synchronization mechanism.
+
 The Stage 7 atomics fast path is intentionally narrow: release-capable RMWs in
 workgroups with more than two subgroups populate a direct-mapped
 address-scoped producer-mask cache. Acquires use that cache to skip generic
@@ -372,3 +397,7 @@ The current Stage 9 `context` resource refresh found no spills:
 | `atomic-cas-lock-handoff` | 4 B | 63 | 23 | none, 0 B |
 | `atomic-failed-cas-acquire` | 4 B | 62 | 23 | none, 0 B |
 | `atomic-fence-rmw-handoff` | 8 B | 63 | 23 | none, 0 B |
+| `atomic-fence-exchange` | 4 B | 67 | 21 | none, 0 B |
+| `atomic-fence-successful-cas` | 4 B | 68 | 21 | none, 0 B |
+| `atomic-fence-failed-cas` | 4 B | 68 | 21 | none, 0 B |
+| `atomic-seq-cst-handoff` | 4 B | 64 | 21 | none, 0 B |

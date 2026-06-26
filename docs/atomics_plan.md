@@ -39,6 +39,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 10. DBI-oriented atomic instruction seeds | Complete | `dbi_atomic_seeds.md` records HipKittens buffer atomics, Stream-K `atomicAdd`/`atomicOr`, hip-stream-k locks, llama count-equal, hip-fpsan atomics, and a Tensile buffer-cmpswap audit signal as DBI seeds separate from source-level HIP diagnostics. |
 | 11. Exchange and compare-exchange source shapes | Complete | `030_atomic_exchange_compare_exchange_test.hip` and matching benchmark cover release/acquire exchange, successful acquire compare-exchange lock acquisition, and failed acquire compare-exchange as an acquire load. |
 | 12. Fences paired with relaxed RMWs | Complete | `031_atomic_fence_rmw_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-fetch-add paired with relaxed-fetch-add-before-acquire-fence. Fence-only synchronization remains out of scope. |
+| 13. Fences paired with extended relaxed atomics | Complete | `033_atomic_fence_extended_test.hip` and matching benchmark cover release/acquire fences paired with relaxed exchange, successful relaxed compare-exchange, failed relaxed compare-exchange, and a `seq_cst` load/store sanity row. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -740,9 +741,40 @@ row:
 | --- | ---: | ---: | --- |
 | `atomic-fence-rmw-handoff` | 3.44 µs | 8.03 µs | 8 B LDS, 63 SGPRs, 23 VGPRs, no spills |
 
+## Stage 13: Fences Paired With Extended Relaxed Atomics
+
+Goal: close the main fence-plus-relaxed-atomic coverage gap for the atomics
+that already have release/acquire support: exchange and compare-exchange.
+
+Status: complete for the source-level forms covered by
+`030_atomic_exchange_compare_exchange_test.hip`. The new
+`033_atomic_fence_extended_test.hip` covers:
+
+* release fence before relaxed exchange paired with relaxed exchange before
+  acquire fence;
+* release fence before relaxed store paired with successful relaxed
+  compare-exchange before acquire fence;
+* release fence before relaxed store paired with failed relaxed
+  compare-exchange before acquire fence;
+* `seq_cst` store/load as the strongest ordinary load/store spelling.
+
+The paired-fence cases suppress the ordered LDS handoff diagnostic. The same
+relaxed operations without fences still diagnose. A failed compare-exchange is
+only an acquire-side observation; it does not publish a pending release fence
+because it did not modify the atomic object.
+
+`033_atomic_fence_extended_benchmark.hip` records the local RDNA4 rows:
+
+| Key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-fence-exchange` | 3.37 µs | 8.66 µs | 4 B LDS, 67 SGPRs, 21 VGPRs, no spills |
+| `atomic-fence-successful-cas` | 3.10 µs | 7.03 µs | 4 B LDS, 68 SGPRs, 21 VGPRs, no spills |
+| `atomic-fence-failed-cas` | 3.11 µs | 7.04 µs | 4 B LDS, 68 SGPRs, 21 VGPRs, no spills |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.32 µs | 4 B LDS, 64 SGPRs, 21 VGPRs, no spills |
+
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 12.
+1. The current atomics plan is complete through Stage 13.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
 3. Additional source-level atomics should be corpus-driven. Likely candidates

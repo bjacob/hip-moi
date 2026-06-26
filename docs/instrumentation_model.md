@@ -335,8 +335,9 @@ Fence-only synchronization is not modeled. The implemented fence support is
 the standard paired-atomic shape:
 
 * a release fence records the current subgroup epoch as a pending release;
-* the next relaxed atomic store or successful RMW consumes that pending release
-  and publishes the atomic address with the fence's epoch;
+* the next relaxed atomic store, exchange, or successful read-modify-write
+  operation consumes that pending release and publishes the atomic address with
+  the fence's epoch;
 * a relaxed atomic load or RMW remembers the address it observed;
 * a later acquire fence consumes that remembered address and imports release
   records for that address.
@@ -344,6 +345,20 @@ the standard paired-atomic shape:
 A failed compare-exchange is not a release-side publication point for a pending
 release fence because it does not modify the atomic object. It can still be the
 observation consumed by a later acquire fence.
+
+The support matrix for source-level synchronization operations is:
+
+| Source-level spelling through `hip_moi::context` | Diagnostic model |
+| --- | --- |
+| `ctx.syncthreads()` | Full-workgroup barrier and epoch boundary. |
+| `ctx.release_fence(workgroup); ctx.barrier(); ctx.acquire_fence(workgroup);` | Lower-level full-workgroup barrier spelling; equivalent to `ctx.syncthreads()` for diagnostics. |
+| `ctx.release_fence()` or `ctx.acquire_fence()` without `ctx.barrier()` | Emits the native workgroup fence but does not order LDS diagnostics by itself. |
+| Release store plus acquire load on one atomic address | Imports producer epochs for that address. |
+| Release/acquire `fetch_add`, `fetch_or`, or `exchange` | RMW-style publication and observation on one atomic address. |
+| Successful compare-exchange with release/acquire success order | Modeled as an RMW on the success path. |
+| Failed compare-exchange with acquire-capable failure order | Modeled as an acquire load, not as a release. |
+| Release atomic fence before relaxed store/exchange/successful RMW, paired with relaxed load/RMW before acquire atomic fence | Imports producer epochs for the observed atomic address. |
+| Relaxed atomics without release/acquire orders or paired fences | Execute the user atomic operation but do not order LDS diagnostics. |
 
 The diagnostic payload remains LDS access. Global atomics are supported as
 synchronization operations because real kernels often use global flags,

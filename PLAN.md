@@ -271,8 +271,11 @@ READMEs now describe the current detector scope.
    Stage 11 added source-level `atomic_exchange` and
    `atomic_compare_exchange_strong` wrappers with tests and benchmarks for
    exchange handoff, successful lock-like CAS, and failed acquire CAS. Stage 12
-   added release/acquire fences paired with relaxed RMW atomics. Naked fences
-   still do not create ordering in hip-moi's source-level model.
+   added release/acquire fences paired with relaxed RMW atomics. Stage 13
+   expands paired-fence coverage to relaxed exchange, successful relaxed CAS,
+   failed relaxed CAS as an acquire-side observation, and a `seq_cst`
+   load/store sanity row. Naked fences still do not create ordering in
+   hip-moi's source-level model.
 
 ## Non-Goals
 

@@ -105,3 +105,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_exchange_compare_exchange
                             030_atomic_exchange_compare_exchange_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_fence_rmw_happens_before
                             031_atomic_fence_rmw_happens_before_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_fence_extended
+                            033_atomic_fence_extended_benchmark.hip)
