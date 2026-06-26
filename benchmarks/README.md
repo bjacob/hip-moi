@@ -115,6 +115,11 @@ the currently supported source-level atomics: relaxed exchange, successful
 relaxed compare-exchange, failed relaxed compare-exchange, and `seq_cst`
 load/store.
 
+`034_atomic_bitwise_happens_before_benchmark.hip` extends source-level bitwise
+RMW coverage beyond `atomicOr`. It covers `atomic_fetch_and` bit clearing and
+`atomic_fetch_xor` bit toggling, with old-value-dependent control flow deciding
+when to read an instrumented LDS payload.
+
 `026_streamk_flag_protocol_benchmark.hip` is the first Stream-K-shaped
 integration benchmark. It keeps the RocJITsu hip-stream-k owner/helper flag
 protocol but distills the payload to LDS partials so hip-moi can diagnose the
@@ -164,6 +169,8 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-fence-successful-cas` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Raw-fence-plus-successful-CAS handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed unlock store and successful relaxed CAS before acquire fence | 4 B | n/a (`context` only) |
 | `atomic-fence-failed-cas` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Raw-fence-plus-failed-CAS handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and failed relaxed CAS before acquire fence | 4 B | n/a (`context` only) |
 | `atomic-seq-cst-handoff` | `033_atomic_fence_extended_benchmark.hip` | `tests/instrumented/033_atomic_fence_extended_test.hip` | Strong load/store sanity row | 256 workgroups, 2 subgroups/workgroup, `seq_cst` store/load orders an instrumented LDS payload | 4 B | n/a (`context` only) |
+| `atomic-and-bitmask-handoff` | `034_atomic_bitwise_happens_before_benchmark.hip` | `tests/instrumented/034_atomic_bitwise_happens_before_test.hip` | Bitmask RMW clearing shape, modeled after Stream-K-tree-style old-value protocols | 256 workgroups, 2 subgroups/workgroup, release `fetch_and` clears a producer bit and acquire `fetch_and` observes the old mask before reading payload | 4 B | n/a (`context` only) |
+| `atomic-xor-bitmask-handoff` | `034_atomic_bitwise_happens_before_benchmark.hip` | `tests/instrumented/034_atomic_bitwise_happens_before_test.hip` | Bitmask RMW toggling shape, modeled after Stream-K-tree-style old-value protocols | 256 workgroups, 2 subgroups/workgroup, release `fetch_xor` toggles a producer bit and acquire `fetch_xor` observes the old mask before reading payload | 4 B | n/a (`context` only) |
 | `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a (`context` only) |
 | `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a (`context` only) |
@@ -205,6 +212,8 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-fence-successful-cas` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair a relaxed unlock store with successful relaxed CAS around instrumented LDS payload | 4 B, <0.1% | 3 |
 | `atomic-fence-failed-cas` | 256 workgroups, 2 subgroups/workgroup, release/acquire fences pair a relaxed flag store with failed relaxed CAS around instrumented LDS payload | 4 B, <0.1% | 3 |
 | `atomic-seq-cst-handoff` | 256 workgroups, 2 subgroups/workgroup, `seq_cst` store/load orders instrumented LDS payload | 4 B, <0.1% | 3 |
+| `atomic-and-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `fetch_and` bit clearing orders instrumented LDS payload | 4 B, <0.1% | 4 |
+| `atomic-xor-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `fetch_xor` bit toggling orders instrumented LDS payload | 4 B, <0.1% | 4 |
 | `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
 | `streamk-two-tile-flag-fixup` | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B, <0.1% | 3 |
 | `rdna4-wmma-streamk-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, arrival counter, final subgroup folds LDS partials | 4096 B, 6.3% | 21 |
@@ -272,6 +281,8 @@ are intentionally part of the semantic coverage.
 | `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs | n/a |
 | `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs | n/a |
 | `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs | n/a |
+| `atomic-and-bitmask-handoff` | 2.93 µs | 8.99 µs | n/a |
+| `atomic-xor-bitmask-handoff` | 3.08 µs | 8.85 µs | n/a |
 | `streamk-flag-fixup` | 3.20 µs | 12.5 µs | n/a |
 | `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | n/a |
 | `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | n/a |
@@ -336,10 +347,11 @@ diagnostics consult the same acquired-epoch tokens as exact shadow. It uses
 is semantic coverage rather than a candidate fast path.
 
 The atomic RMW rows cover `fetch_add` arrival counters, a two-RMW `acq_rel`
-chain, and old-value-dependent `atomicOr` bitmask control flow. The old value
-returned by the RMW still drives user control flow, but hip-moi no longer uses
-that value as synchronization metadata. The current RMW latencies remain in the
-8 to 9 µs range through `context`.
+chain, and old-value-dependent bitmask control flow through `atomicOr`,
+`fetch_and`, and `fetch_xor`. The old value returned by the RMW still drives
+user control flow, but hip-moi no longer uses that value as synchronization
+metadata. The current two-subgroup RMW latencies remain in the 8 to 9 µs range
+through `context`.
 
 The atomic fence handoff row supports the standard shape where a release fence
 is sequenced before a relaxed atomic store, and an acquire fence is sequenced
@@ -403,7 +415,7 @@ all four LDS partials. The Stage 7 direct RMW cache lowers this row from the
 previous 49.2 µs `context` result to 43.6 µs, at the cost of higher SGPR
 pressure and no change in VGPRs or spills.
 
-The current Stage 9 `context` resource refresh found no spills:
+The current atomics `context` resource refresh found no spills:
 
 | Key | Context LDS | Context SGPRs | Context VGPRs | Spills/private |
 | --- | ---: | ---: | ---: | --- |
@@ -423,3 +435,5 @@ The current Stage 9 `context` resource refresh found no spills:
 | `atomic-fence-successful-cas` | 4 B | 62 | 21 | none, 0 B |
 | `atomic-fence-failed-cas` | 4 B | 62 | 21 | none, 0 B |
 | `atomic-seq-cst-handoff` | 4 B | 57 | 21 | none, 0 B |
+| `atomic-and-bitmask-handoff` | 4 B | 59 | 23 | none, 0 B |
+| `atomic-xor-bitmask-handoff` | 4 B | 59 | 23 | none, 0 B |

@@ -359,6 +359,44 @@ namespace hip_moi
         }
 
         template <int Scope, typename T>
+        __device__ inline T atomic_fetch_and_with_scope(T* ptr, T value, atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return __hip_atomic_fetch_and(ptr, value, __ATOMIC_RELAXED, Scope);
+            case atomic_memory_order::acquire:
+                return __hip_atomic_fetch_and(ptr, value, __ATOMIC_ACQUIRE, Scope);
+            case atomic_memory_order::release:
+                return __hip_atomic_fetch_and(ptr, value, __ATOMIC_RELEASE, Scope);
+            case atomic_memory_order::acq_rel:
+                return __hip_atomic_fetch_and(ptr, value, __ATOMIC_ACQ_REL, Scope);
+            case atomic_memory_order::seq_cst:
+                return __hip_atomic_fetch_and(ptr, value, __ATOMIC_SEQ_CST, Scope);
+            }
+            return __hip_atomic_fetch_and(ptr, value, __ATOMIC_SEQ_CST, Scope);
+        }
+
+        template <int Scope, typename T>
+        __device__ inline T atomic_fetch_xor_with_scope(T* ptr, T value, atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_RELAXED, Scope);
+            case atomic_memory_order::acquire:
+                return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_ACQUIRE, Scope);
+            case atomic_memory_order::release:
+                return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_RELEASE, Scope);
+            case atomic_memory_order::acq_rel:
+                return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_ACQ_REL, Scope);
+            case atomic_memory_order::seq_cst:
+                return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_SEQ_CST, Scope);
+            }
+            return __hip_atomic_fetch_xor(ptr, value, __ATOMIC_SEQ_CST, Scope);
+        }
+
+        template <int Scope, typename T>
         __device__ inline T atomic_exchange_with_scope(T* ptr, T value, atomic_memory_order order)
         {
             return __hip_atomic_exchange(ptr, value, atomic_order_value(order), Scope);
@@ -518,6 +556,42 @@ namespace hip_moi
                 return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
             }
             return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+        }
+
+        template <typename T>
+        __device__ inline T atomic_fetch_and_dispatch(T*                  ptr,
+                                                      T                   value,
+                                                      atomic_memory_order order,
+                                                      atomic_memory_scope scope)
+        {
+            switch(scope)
+            {
+            case atomic_memory_scope::workgroup:
+                return atomic_fetch_and_with_scope<__HIP_MEMORY_SCOPE_WORKGROUP>(ptr, value, order);
+            case atomic_memory_scope::agent:
+                return atomic_fetch_and_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+            case atomic_memory_scope::system:
+                return atomic_fetch_and_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
+            }
+            return atomic_fetch_and_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+        }
+
+        template <typename T>
+        __device__ inline T atomic_fetch_xor_dispatch(T*                  ptr,
+                                                      T                   value,
+                                                      atomic_memory_order order,
+                                                      atomic_memory_scope scope)
+        {
+            switch(scope)
+            {
+            case atomic_memory_scope::workgroup:
+                return atomic_fetch_xor_with_scope<__HIP_MEMORY_SCOPE_WORKGROUP>(ptr, value, order);
+            case atomic_memory_scope::agent:
+                return atomic_fetch_xor_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+            case atomic_memory_scope::system:
+                return atomic_fetch_xor_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
+            }
+            return atomic_fetch_xor_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
         }
 
         template <typename T>

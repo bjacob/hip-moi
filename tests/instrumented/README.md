@@ -96,6 +96,9 @@ Current files:
 * `033_atomic_fence_extended_test.hip`: release/acquire fences paired with
   relaxed exchange and compare-exchange, plus a `seq_cst` load/store sanity
   case.
+* `034_atomic_bitwise_happens_before_test.hip`: release/acquire `fetch_and`
+  bit clearing and `fetch_xor` bit toggling as old-value-dependent bitmask
+  synchronization shapes.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

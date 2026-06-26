@@ -102,10 +102,11 @@ address.
 
 ## Implemented Stage 7: Direct-Mapped RMW Address Cache
 
-The implemented fast path is an internal cache behind the existing
-`ctx.atomic_fetch_add` and `ctx.atomic_fetch_or` APIs. It is deliberately
-narrower than the first sketch: only release-capable RMWs in workgroups with
-more than two subgroups populate the cache.
+The implemented fast path is an internal cache behind release-capable RMW APIs
+such as `ctx.atomic_fetch_add`, `ctx.atomic_fetch_or`, `ctx.atomic_fetch_and`,
+and `ctx.atomic_fetch_xor`. It is deliberately narrower than the first sketch:
+only release-capable RMWs in workgroups with more than two subgroups populate
+the cache.
 
 The cache is keyed by a compact hash of:
 

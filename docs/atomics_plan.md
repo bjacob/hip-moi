@@ -42,6 +42,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 13. Fences paired with extended relaxed atomics | Complete | `033_atomic_fence_extended_test.hip` and matching benchmark cover release/acquire fences paired with relaxed exchange, successful relaxed compare-exchange, failed relaxed compare-exchange, and a `seq_cst` load/store sanity row. |
 | 14. General-context atomics optimization | Complete | `hip_moi::context` now skips the address-cache probe for one- and two-subgroup acquire imports, where the RMW producer-mask cache is not populated. Synchronization metadata remains exhaustive; VGPRs and spills are unchanged; several atomics rows reduce SGPR pressure and some improve latency. |
 | 15. Sampled-reporting atomics correctness | Complete | The sampled-watchpoint reporting backend in the general `context` now consults acquired-epoch tokens before emitting conflicts. `008_sampled_watchpoint_backend_test.hip` covers release/acquire suppression and relaxed diagnostics; `021_atomic_happens_before_benchmark.hip` adds a sampled-reporting row. |
+| 16. Bitwise RMW source coverage | Complete | `hip_moi::context` now supports `atomic_fetch_and` and `atomic_fetch_xor`. `034_atomic_bitwise_happens_before_test.hip` covers release/acquire suppression and relaxed diagnostics for old-value-dependent bitmask handoffs; the matching benchmark records latency and resource pressure. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -880,17 +881,49 @@ watchpoint table and is intentionally much more expensive than exact shadow for
 this tiny handoff. Treat it as semantic coverage and as a reminder that
 diagnostic sampled reporting is not the Loom-parity publish-only fast path.
 
+## Stage 16: Bitwise RMW Source Coverage
+
+Goal: broaden source-level RMW coverage to bitmask operations that are natural
+neighbors of the existing Stream-K-tree `atomicOr` protocol.
+
+Status: complete. The local corpus pass found strong source-level semantic
+seeds for add, or, exchange, compare-exchange, load, and store. It did not find
+equally strong source-level LDS-synchronization seeds for min/max; those remain
+better treated as DBI or instruction-coverage material for now. Stage 16
+therefore adds only `atomic_fetch_and` and `atomic_fetch_xor` to the
+source-level `context` API.
+
+The tests use old-value-dependent control flow:
+
+* `fetch_and` clears a producer bit; the consumer observes that the bit is
+  cleared before reading the producer's LDS payload.
+* `fetch_xor` toggles a producer bit; the consumer observes that the bit is set
+  before reading the producer's LDS payload.
+
+Release/acquire orders suppress the LDS diagnostic. Relaxed producer RMWs still
+let the diagnostic fire.
+
+Local RDNA4 rows:
+
+| Key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-and-bitmask-handoff` | 2.93 µs | 8.99 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
+| `atomic-xor-bitmask-handoff` | 3.08 µs | 8.85 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
+
+These rows are in the same latency and VGPR band as the existing two-subgroup
+RMW coverage. They do not motivate a new fast path on their own.
+
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 15.
+1. The current atomics plan is complete through Stage 16.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
 3. If sampled-reporting atomics become performance-relevant, add a low-probe
    benchmark row before optimizing; the current `probe_count=0` row is
    correctness coverage, not a performance target.
-4. Additional source-level atomics should be corpus-driven. Likely candidates
-   are `fetch_and`, `fetch_xor`, min/max, 64-bit production variants,
-   memory-scope-specific tests, and Clang builtin forms that appear in a real
-   workload.
+4. Additional source-level atomics should remain corpus-driven. Likely
+   candidates are 64-bit production variants, memory-scope-specific tests,
+   Clang builtin forms that appear in a real workload, and min/max only if a
+   source-level synchronization payload needs them.
 5. Any future atomics work should start by deciding whether it belongs to the
    HIP/LLVM source-level detector or to the hardware-level DBI track.

@@ -294,6 +294,17 @@ READMEs now describe the current detector scope.
    whole-table sampled probe configuration, so it is correctness coverage, not
    a performance target.
 
+   Stage 16 broadens source-level bitwise RMW coverage with
+   `atomic_fetch_and` and `atomic_fetch_xor`. The motivating shape is still
+   old-value-dependent bitmask control flow, like the existing Stream-K-tree
+   `atomicOr` case. Release/acquire bit clearing and bit toggling suppress LDS
+   diagnostics; relaxed producers still diagnose. The new local rows,
+   `atomic-and-bitmask-handoff` and `atomic-xor-bitmask-handoff`, are both
+   about 9 µs through `context` with 59 SGPRs, 23 VGPRs, and no spills. The
+   same corpus pass did not justify source-level min/max support yet; keep
+   min/max on the DBI or instruction-coverage side until a real source
+   synchronization protocol needs it.
+
 ## Non-Goals
 
 These are explicitly out of scope for the current delivery phase:

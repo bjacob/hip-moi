@@ -249,6 +249,8 @@ value = ctx.atomic_load(ptr, order, scope, HIP_MOI_SITE_ID());
 ctx.atomic_store(ptr, value, order, scope, HIP_MOI_SITE_ID());
 old = ctx.atomic_fetch_add(ptr, delta, order, scope, HIP_MOI_SITE_ID());
 old = ctx.atomic_fetch_or(ptr, bits, order, scope, HIP_MOI_SITE_ID());
+old = ctx.atomic_fetch_and(ptr, bits, order, scope, HIP_MOI_SITE_ID());
+old = ctx.atomic_fetch_xor(ptr, bits, order, scope, HIP_MOI_SITE_ID());
 old = ctx.atomic_exchange(ptr, value, order, scope, HIP_MOI_SITE_ID());
 exchanged = ctx.atomic_compare_exchange_strong(
     ptr, &expected, desired, success_order, failure_order, scope, HIP_MOI_SITE_ID());
@@ -356,7 +358,7 @@ The support matrix for source-level synchronization operations is:
 | `ctx.release_fence(workgroup); ctx.barrier(); ctx.acquire_fence(workgroup);` | Lower-level full-workgroup barrier spelling; equivalent to `ctx.syncthreads()` for diagnostics. |
 | `ctx.release_fence()` or `ctx.acquire_fence()` without `ctx.barrier()` | Emits the native workgroup fence but does not order LDS diagnostics by itself. |
 | Release store plus acquire load on one atomic address | Imports producer epochs for that address. |
-| Release/acquire `fetch_add`, `fetch_or`, or `exchange` | RMW-style publication and observation on one atomic address. |
+| Release/acquire `fetch_add`, `fetch_or`, `fetch_and`, `fetch_xor`, or `exchange` | RMW-style publication and observation on one atomic address. |
 | Successful compare-exchange with release/acquire success order | Modeled as an RMW on the success path. |
 | Failed compare-exchange with acquire-capable failure order | Modeled as an acquire load, not as a release. |
 | Release atomic fence before relaxed store/exchange/successful RMW, paired with relaxed load/RMW before acquire atomic fence | Imports producer epochs for the observed atomic address. |

@@ -190,6 +190,14 @@ signals.
 listed above: `atomicAdd` for a counter handoff and `atomicOr` for tree-style
 bit publication.
 
+Stage 16 adds source-level `atomic_fetch_and` and `atomic_fetch_xor` coverage as
+bitmask protocol siblings of `atomicOr`, not because the current corpus has a
+stronger AND/XOR signal than OR. The goal is to exercise the same old-value
+dependent RMW synchronization shape with bit clearing and bit toggling. The
+same search did not find a strong source-level LDS handoff requiring min/max;
+min/max remains better classified as instruction-level or DBI coverage until a
+real source synchronization protocol needs it.
+
 `third_party/llama.cpp/ggml/src/ggml-cuda/count-equal.cu` contains a simple
 device-side `atomicAdd` from one thread per block into an integer output
 counter. This is a useful tiny global-atomic reduction seed, but it is not a

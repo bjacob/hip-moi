@@ -155,3 +155,5 @@ hip_moi_add_gtest(hip_moi_instrumented_workgroup_barrier_fence_test
                   instrumented/032_workgroup_barrier_fence_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_atomic_fence_extended_test
                   instrumented/033_atomic_fence_extended_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_atomic_bitwise_happens_before_test
+                  instrumented/034_atomic_bitwise_happens_before_test.hip)

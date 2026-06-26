@@ -328,6 +328,64 @@ namespace hip_moi
         }
 
         template <typename T>
+        __device__ T atomic_fetch_and(T*                  ptr,
+                                      T                   value,
+                                      atomic_memory_order order,
+                                      atomic_memory_scope scope,
+                                      site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_fetch_and currently supports "
+                          "4-byte and 8-byte integral values");
+            T old_value = detail::atomic_fetch_and_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                record_atomic_rmw_release(ptr, sizeof(T), site);
+            }
+            else
+            {
+                consume_pending_release_fence(ptr, static_cast<uint32_t>(sizeof(T)), site);
+            }
+            if(detail::atomic_order_has_acquire(order))
+            {
+                // See atomic_fetch_add: acquiring RMWs may need to wait for
+                // release metadata from the immediately preceding RMW.
+                record_atomic_acquire(ptr, kAtomicRmwAcquireRetryCount);
+            }
+            remember_observed_atomic(ptr);
+            return old_value;
+        }
+
+        template <typename T>
+        __device__ T atomic_fetch_xor(T*                  ptr,
+                                      T                   value,
+                                      atomic_memory_order order,
+                                      atomic_memory_scope scope,
+                                      site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_fetch_xor currently supports "
+                          "4-byte and 8-byte integral values");
+            T old_value = detail::atomic_fetch_xor_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                record_atomic_rmw_release(ptr, sizeof(T), site);
+            }
+            else
+            {
+                consume_pending_release_fence(ptr, static_cast<uint32_t>(sizeof(T)), site);
+            }
+            if(detail::atomic_order_has_acquire(order))
+            {
+                // See atomic_fetch_add: acquiring RMWs may need to wait for
+                // release metadata from the immediately preceding RMW.
+                record_atomic_acquire(ptr, kAtomicRmwAcquireRetryCount);
+            }
+            remember_observed_atomic(ptr);
+            return old_value;
+        }
+
+        template <typename T>
         __device__ T atomic_exchange(T*                  ptr,
                                      T                   value,
                                      atomic_memory_order order,
@@ -703,7 +761,7 @@ namespace hip_moi
                                                             uint32_t    releasing_epoch,
                                                             site_id     site) const
         {
-            uintptr_t             address = reinterpret_cast<uintptr_t>(ptr);
+            uintptr_t             address  = reinterpret_cast<uintptr_t>(ptr);
             uint32_t              producer = subgroup_id();
             atomic_object_record* record
                 = find_or_claim_atomic_object_record(address, byte_count, producer, site);
@@ -862,7 +920,7 @@ namespace hip_moi
             *cache_hit = true;
             uint64_t producer_mask
                 = *reinterpret_cast<volatile uint64_t*>(&cache_record->producer_mask);
-            bool      found   = false;
+            bool found = false;
             for(uint32_t producer = 0; producer < capacity; ++producer)
             {
                 if(producer == consumer)
