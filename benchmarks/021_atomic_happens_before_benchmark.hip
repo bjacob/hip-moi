@@ -27,6 +27,12 @@ namespace
     constexpr int kFlagReady          = 0;
     constexpr int kFlagWaiting        = 1;
 
+    using SampledReportingPolicy = hip_moi::sampled_watchpoint_policy<
+        /*SampleSkip=*/1,
+        /*ProbeCount=*/0,
+        /*DelayIters=*/0,
+        /*ReportConflicts=*/true>;
+
     struct DisplayLatency
     {
         double      value;
@@ -154,6 +160,66 @@ namespace
         }
     }
 
+    __global__ void
+        atomic_hb_lds_handoff_sampled_reporting(hip_moi::context::storage_ref* storage_refs,
+                                                uint64_t                       generation,
+                                                int*                           flags,
+                                                int*                           out)
+    {
+        __shared__ int payload;
+
+        int                           block   = static_cast<int>(blockIdx.x);
+        hip_moi::context::storage_ref storage = storage_refs[block];
+        storage.generation                    = generation;
+        hip_moi::context::config cfg{
+            /*thread_count=*/kThreadCount,
+            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*subgroup_count=*/kSubgroupCount,
+        };
+        hip_moi::context ctx(storage, cfg);
+        ctx.init_workgroup();
+
+        if(ctx.thread_id() == 0)
+        {
+            ctx.atomic_store(&flags[block],
+                             kFlagWaiting,
+                             hip_moi::atomic_memory_order::relaxed,
+                             hip_moi::atomic_memory_scope::agent,
+                             HIP_MOI_SITE_ID());
+        }
+        __syncthreads();
+
+        if(ctx.subgroup_id() == 0)
+        {
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, SampledReportingPolicy>(
+                &payload, payload_value(block), /*lds_byte_offset=*/0, HIP_MOI_SITE_ID());
+            ctx.atomic_store(&flags[block],
+                             kFlagReady,
+                             hip_moi::atomic_memory_order::release,
+                             hip_moi::atomic_memory_scope::agent,
+                             HIP_MOI_SITE_ID());
+        }
+
+        if(ctx.subgroup_id() == 1)
+        {
+            while(ctx.atomic_load(&flags[block],
+                                  hip_moi::atomic_memory_order::acquire,
+                                  hip_moi::atomic_memory_scope::agent,
+                                  HIP_MOI_SITE_ID())
+                  != kFlagReady)
+            {
+            }
+            int loaded
+                = ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint,
+                                  SampledReportingPolicy>(
+                    &payload, /*lds_byte_offset=*/0, HIP_MOI_SITE_ID());
+            if(ctx.thread_id() == kThreadsPerSubgroup)
+            {
+                out[block] = loaded;
+            }
+        }
+    }
+
     struct DeviceBuffers
     {
         int* flags = nullptr;
@@ -180,14 +246,21 @@ namespace
         std::vector<std::unique_ptr<hip_moi::host_context>> contexts;
         hip_moi::context::storage_ref*                      device_refs = nullptr;
 
-        explicit ContextStorageSet(int blocks)
+        explicit ContextStorageSet(int blocks,
+                                   hip_moi::backend_kind backend,
+                                   int exact_shadow_entry_capacity,
+                                   int sampled_watchpoint_capacity)
         {
             hip_moi::host_context_options options;
-            options.storage_bytes               = 64 * 1024;
-            options.exact_shadow_entry_capacity = 16;
-            options.sampled_watchpoint_capacity = 0;
-            options.diagnostic_capacity         = 8;
-            options.subgroup_capacity           = kSubgroupCount;
+            options.storage_bytes                  = 64 * 1024;
+            options.backend                        = backend;
+            options.exact_shadow_entry_capacity    = exact_shadow_entry_capacity;
+            options.sampled_watchpoint_capacity    = sampled_watchpoint_capacity;
+            options.sampled_watchpoint_sample_skip = 1;
+            options.sampled_watchpoint_probe_count = 0;
+            options.sampled_watchpoint_reports     = true;
+            options.diagnostic_capacity            = 8;
+            options.subgroup_capacity              = kSubgroupCount;
 
             contexts.reserve(static_cast<std::size_t>(blocks));
             std::vector<hip_moi::context::storage_ref> host_refs;
@@ -313,7 +386,14 @@ int main()
     int measure_ms = get_int_env("MIN_MS", kDefaultMeasureMs);
 
     DeviceBuffers     buffers(blocks);
-    ContextStorageSet context_storage(blocks);
+    ContextStorageSet context_storage(blocks,
+                                      hip_moi::backend_kind::exact_shadow,
+                                      /*exact_shadow_entry_capacity=*/16,
+                                      /*sampled_watchpoint_capacity=*/0);
+    ContextStorageSet sampled_reporting_storage(blocks,
+                                                hip_moi::backend_kind::sampled_watchpoint,
+                                                /*exact_shadow_entry_capacity=*/0,
+                                                /*sampled_watchpoint_capacity=*/64);
     uint64_t          generation = 1;
 
     auto pass_through_launch = [&]() {
@@ -337,6 +417,18 @@ int main()
                            buffers.flags,
                            buffers.out);
     };
+    auto sampled_reporting_launch = [&]() {
+        ++generation;
+        hipLaunchKernelGGL(atomic_hb_lds_handoff_sampled_reporting,
+                           dim3(blocks),
+                           dim3(kThreadCount),
+                           0,
+                           0,
+                           sampled_reporting_storage.device_refs,
+                           generation,
+                           buffers.flags,
+                           buffers.out);
+    };
 
     pass_through_launch();
     HIP_MOI_ATOMIC_HB_BENCH_HIP_CHECK(hipGetLastError());
@@ -348,6 +440,11 @@ int main()
     HIP_MOI_ATOMIC_HB_BENCH_HIP_CHECK(hipDeviceSynchronize());
     verify_outputs(buffers.out, blocks);
 
+    sampled_reporting_launch();
+    HIP_MOI_ATOMIC_HB_BENCH_HIP_CHECK(hipGetLastError());
+    HIP_MOI_ATOMIC_HB_BENCH_HIP_CHECK(hipDeviceSynchronize());
+    verify_outputs(buffers.out, blocks);
+
     std::printf("hip-moi atomic happens-before benchmark: blocks=%d warmup_ms=%d min_ms=%d\n",
                 blocks,
                 warmup_ms,
@@ -355,10 +452,20 @@ int main()
     benchmark_mode(
         "atomic-hb-lds-handoff_pass-through", pass_through_launch, warmup_ms, measure_ms);
     benchmark_mode("atomic-hb-lds-handoff_context", context_launch, warmup_ms, measure_ms);
+    benchmark_mode("atomic-hb-lds-handoff_context-sampled-reporting",
+                   sampled_reporting_launch,
+                   warmup_ms,
+                   measure_ms);
 
     if(!context_storage.check_all())
     {
         std::fprintf(stderr, "unexpected hip-moi diagnostics in Stage 4 atomic benchmark\n");
+        return EXIT_FAILURE;
+    }
+    if(!sampled_reporting_storage.check_all())
+    {
+        std::fprintf(
+            stderr, "unexpected sampled hip-moi diagnostics in Stage 4 atomic benchmark\n");
         return EXIT_FAILURE;
     }
 

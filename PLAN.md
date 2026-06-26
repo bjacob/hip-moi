@@ -285,6 +285,15 @@ READMEs now describe the current detector scope.
    The refreshed RDNA4 rows remain spill-free with unchanged VGPR pressure;
    SGPR pressure drops in several two-subgroup atomics rows.
 
+   Stage 15 extends the same atomics synchronization semantics to sampled
+   diagnostics in the general `context`: sampled-watchpoint reporting now
+   checks acquired-epoch tokens before emitting a conflict. The new coverage is
+   deliberately separate from `sampled_watchpoint_context`, which remains a
+   publish-only fast path. The first local benchmark row,
+   `atomic-hb-lds-handoff_context-sampled-reporting`, runs at 76.3 µs with a
+   whole-table sampled probe configuration, so it is correctness coverage, not
+   a performance target.
+
 ## Non-Goals
 
 These are explicitly out of scope for the current delivery phase:

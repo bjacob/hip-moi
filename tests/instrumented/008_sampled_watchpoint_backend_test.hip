@@ -19,6 +19,10 @@ namespace
     constexpr int              kSubgroupCount      = 2;
     constexpr int              kDiagnosticCapacity = 8;
     constexpr int              kWatchpointCapacity = 64;
+    constexpr int              kPayloadValue       = 117;
+    constexpr int              kInitialOutput      = -1;
+    constexpr int              kFlagReady          = 0;
+    constexpr int              kFlagWaiting        = 1;
     constexpr hip_moi::site_id kProducerSite(0x401);
     constexpr hip_moi::site_id kConsumerSite(0x502);
 
@@ -124,6 +128,44 @@ namespace
         }
     }
 
+    template <hip_moi::atomic_memory_order StoreOrder>
+    __global__ void sampled_atomic_flag_orders_lds_payload_kernel(
+        hip_moi::context::storage_ref storage, int* flag, int* out)
+    {
+        __shared__ int payload;
+
+        hip_moi::context ctx = make_context(storage);
+        ctx.init_workgroup();
+
+        if(ctx.subgroup_id() == 0)
+        {
+            ctx.lds_store_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
+                &payload, kPayloadValue, /*lds_byte_offset=*/0, kProducerSite);
+            ctx.atomic_store(flag,
+                             kFlagReady,
+                             StoreOrder,
+                             hip_moi::atomic_memory_scope::agent,
+                             HIP_MOI_SITE_ID());
+        }
+        if(ctx.subgroup_id() == 1)
+        {
+            while(ctx.atomic_load(flag,
+                                  hip_moi::atomic_memory_order::acquire,
+                                  hip_moi::atomic_memory_scope::agent,
+                                  HIP_MOI_SITE_ID())
+                  != kFlagReady)
+            {
+            }
+            int loaded
+                = ctx.lds_load_at<hip_moi::backend_kind::sampled_watchpoint, TestSampledPolicy>(
+                    &payload, /*lds_byte_offset=*/0, kConsumerSite);
+            if(ctx.thread_id() == kThreadsPerSubgroup)
+            {
+                out[0] = loaded;
+            }
+        }
+    }
+
     template <typename Storage>
     void copy_observed_metadata(const Storage& storage, observed_metadata* observed)
     {
@@ -145,6 +187,30 @@ namespace
         ref.sampled_watchpoint_probe_count      = 0;
         ref.sampled_watchpoint_report_conflicts = 1;
         return ref;
+    }
+
+    hip_moi::host_context_options sampled_reporting_options()
+    {
+        hip_moi::host_context_options options;
+        options.storage_bytes                  = 64 * 1024;
+        options.backend                        = hip_moi::backend_kind::sampled_watchpoint;
+        options.exact_shadow_entry_capacity    = 0;
+        options.sampled_watchpoint_capacity    = kWatchpointCapacity;
+        options.sampled_watchpoint_sample_skip = 1;
+        options.sampled_watchpoint_probe_count = 0;
+        options.sampled_watchpoint_reports     = true;
+        options.diagnostic_capacity            = kDiagnosticCapacity;
+        options.subgroup_capacity              = kSubgroupCount;
+        return options;
+    }
+
+    void reset_flag_and_output(int* device_flag, int* device_output)
+    {
+        int flag   = kFlagWaiting;
+        int output = kInitialOutput;
+        HIP_MOI_TEST_HIP_ASSERT(hipMemcpy(device_flag, &flag, sizeof(flag), hipMemcpyHostToDevice));
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(device_output, &output, sizeof(output), hipMemcpyHostToDevice));
     }
 
     TEST(HipMoiSampledWatchpointBackend, SynchronizedSelectedAccessesDoNotReport)
@@ -215,5 +281,68 @@ namespace
         EXPECT_EQ(output, kThreadCount - 1);
 
         HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+    }
+
+    TEST(HipMoiSampledWatchpointBackend, AtomicReleaseAcquireOrdersSampledDiagnostics)
+    {
+        hip_moi::host_context moi(sampled_reporting_options());
+        int*                  device_flag   = nullptr;
+        int*                  device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_flag, sizeof(int)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+        reset_flag_and_output(device_flag, device_output);
+
+        hipLaunchKernelGGL(
+            (sampled_atomic_flag_orders_lds_payload_kernel<hip_moi::atomic_memory_order::release>),
+            dim3(1),
+            dim3(kThreadCount),
+            0,
+            0,
+            moi.launch_ref(),
+            device_flag,
+            device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        int output = 0;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+        EXPECT_EQ(output, kPayloadValue);
+        EXPECT_TRUE(moi.check(nullptr));
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_flag));
+    }
+
+    TEST(HipMoiSampledWatchpointBackend, RelaxedAtomicDoesNotOrderSampledDiagnostics)
+    {
+        hip_moi::host_context moi(sampled_reporting_options());
+        int*                  device_flag   = nullptr;
+        int*                  device_output = nullptr;
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_flag, sizeof(int)));
+        HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_output, sizeof(int)));
+        reset_flag_and_output(device_flag, device_output);
+
+        hipLaunchKernelGGL(
+            (sampled_atomic_flag_orders_lds_payload_kernel<hip_moi::atomic_memory_order::relaxed>),
+            dim3(1),
+            dim3(kThreadCount),
+            0,
+            0,
+            moi.launch_ref(),
+            device_flag,
+            device_output);
+        HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+        HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
+
+        int output = 0;
+        HIP_MOI_TEST_HIP_ASSERT(
+            hipMemcpy(&output, device_output, sizeof(output), hipMemcpyDeviceToHost));
+        EXPECT_EQ(output, kPayloadValue);
+        EXPECT_FALSE(moi.check(nullptr));
+        EXPECT_GT(moi.last_diagnostic_count(), 0);
+
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_output));
+        HIP_MOI_TEST_HIP_ASSERT(hipFree(device_flag));
     }
 } // namespace

@@ -954,21 +954,37 @@ namespace hip_moi
             current_access_acquired_prior_epoch(const detail::exact_shadow_entry& prior,
                                                 const detail::exact_shadow_entry& current) const
         {
+            return current_access_acquired_prior_epoch(
+                prior.owner_id, prior.epoch, current.owner_id);
+        }
+
+        __device__ bool current_access_acquired_prior_epoch(
+            const detail::sampled_watchpoint_entry& prior,
+            const detail::sampled_watchpoint_entry& current) const
+        {
+            return current_access_acquired_prior_epoch(
+                prior.owner_id, prior.epoch, current.owner_id);
+        }
+
+        __device__ bool current_access_acquired_prior_epoch(uint32_t prior_owner_id,
+                                                            uint32_t prior_epoch,
+                                                            uint32_t current_owner_id) const
+        {
             if(!storage_.acquired_subgroup_epoch_tokens || storage_.subgroup_capacity <= 0)
             {
                 return false;
             }
 
             uint32_t capacity = static_cast<uint32_t>(storage_.subgroup_capacity);
-            if(current.owner_id >= capacity || prior.owner_id >= capacity)
+            if(current_owner_id >= capacity || prior_owner_id >= capacity)
             {
                 return false;
             }
 
-            uint32_t index = current.owner_id * capacity + prior.owner_id;
+            uint32_t index = current_owner_id * capacity + prior_owner_id;
             uint32_t token = *reinterpret_cast<volatile uint32_t*>(
                 &storage_.acquired_subgroup_epoch_tokens[index]);
-            return token >= prior.epoch + 1u;
+            return token >= prior_epoch + 1u;
         }
 
         __device__ void record_access_at(const void* ptr,
@@ -1261,7 +1277,8 @@ namespace hip_moi
             {
                 detail::sampled_watchpoint_entry prior
                     = detail::decode_sampled_watchpoint_entry(prior_value);
-                if(detail::sampled_watchpoints_conflict(current, prior))
+                if(detail::sampled_watchpoints_conflict(current, prior)
+                   && !current_access_acquired_prior_epoch(prior, current))
                 {
                     emit_sampled_watchpoint_conflict(
                         prior, current, lds_byte_offset, byte_count, site);
@@ -1299,7 +1316,8 @@ namespace hip_moi
                     = atomic_exchange_shadow_entry(&storage_.sampled_watchpoints[slot], packed);
                 detail::sampled_watchpoint_entry prior
                     = detail::decode_sampled_watchpoint_entry(prior_value);
-                if(detail::sampled_watchpoints_conflict(current, prior))
+                if(detail::sampled_watchpoints_conflict(current, prior)
+                   && !current_access_acquired_prior_epoch(prior, current))
                 {
                     emit_sampled_watchpoint_conflict(
                         prior, current, lds_byte_offset, byte_count, site);
@@ -1370,7 +1388,8 @@ namespace hip_moi
                     = *reinterpret_cast<volatile uint64_t*>(&storage_.sampled_watchpoints[index]);
                 detail::sampled_watchpoint_entry prior
                     = detail::decode_sampled_watchpoint_entry(prior_value);
-                if(detail::sampled_watchpoints_conflict(current, prior))
+                if(detail::sampled_watchpoints_conflict(current, prior)
+                   && !current_access_acquired_prior_epoch(prior, current))
                 {
                     emit_sampled_watchpoint_conflict(
                         prior, current, lds_byte_offset, byte_count, site);
@@ -1403,7 +1422,8 @@ namespace hip_moi
                     = *reinterpret_cast<volatile uint64_t*>(&storage_.sampled_watchpoints[index]);
                 detail::sampled_watchpoint_entry prior
                     = detail::decode_sampled_watchpoint_entry(prior_value);
-                if(detail::sampled_watchpoints_conflict(current, prior))
+                if(detail::sampled_watchpoints_conflict(current, prior)
+                   && !current_access_acquired_prior_epoch(prior, current))
                 {
                     emit_sampled_watchpoint_conflict(
                         prior, current, lds_byte_offset, byte_count, site);

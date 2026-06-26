@@ -41,6 +41,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 12. Fences paired with relaxed RMWs | Complete | `031_atomic_fence_rmw_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-fetch-add paired with relaxed-fetch-add-before-acquire-fence. Fence-only synchronization remains out of scope. |
 | 13. Fences paired with extended relaxed atomics | Complete | `033_atomic_fence_extended_test.hip` and matching benchmark cover release/acquire fences paired with relaxed exchange, successful relaxed compare-exchange, failed relaxed compare-exchange, and a `seq_cst` load/store sanity row. |
 | 14. General-context atomics optimization | Complete | `hip_moi::context` now skips the address-cache probe for one- and two-subgroup acquire imports, where the RMW producer-mask cache is not populated. Synchronization metadata remains exhaustive; VGPRs and spills are unchanged; several atomics rows reduce SGPR pressure and some improve latency. |
+| 15. Sampled-reporting atomics correctness | Complete | The sampled-watchpoint reporting backend in the general `context` now consults acquired-epoch tokens before emitting conflicts. `008_sampled_watchpoint_backend_test.hip` covers release/acquire suppression and relaxed diagnostics; `021_atomic_happens_before_benchmark.hip` adds a sampled-reporting row. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -115,10 +116,11 @@ The staged optimization direction is:
    observation, but atomics, fences, and acquire imports should not be sampled
    by default because missing a synchronization edge can create false
    positives.
-3. If sampled diagnostics with atomics become important, make sampled conflict
-   reporting consult the same acquired-epoch tokens used by exact-shadow
-   diagnostics. That is separate from the current publish-only sampled fast
-   path.
+3. Sampled diagnostics with atomics now have a first correctness path: sampled
+   conflict reporting in the general `context` consults the same
+   acquired-epoch tokens used by exact-shadow diagnostics. This is separate
+   from the publish-only `sampled_watchpoint_context`, which still does not
+   diagnose races.
 4. Consider a separate atomics fast context only if measurements show that the
    general `context` carries irreducible overhead that cannot be optimized away
    locally. Do not create a second class merely to mirror
@@ -839,14 +841,56 @@ Selected local RDNA4 rows after the change:
 | `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | 4096 B LDS, 73 SGPRs, 51 VGPRs, no spills |
 | `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | 8192 B LDS, 82 SGPRs, 52 VGPRs, no spills |
 
+## Stage 15: Sampled-Reporting Atomics Correctness
+
+Goal: make the diagnostic-capable sampled-watchpoint backend respect the same
+atomic synchronization model as exact shadow.
+
+Status: complete for the first semantic slice. Sampled watchpoint entries
+already record subgroup owner and epoch. Stage 15 reuses those fields and asks
+the same acquired-token question as exact shadow before emitting a sampled
+watchpoint conflict:
+
+```text
+acquired_epoch_token[current_owner][prior_owner] >= prior_epoch + 1
+```
+
+If the token exists, the sampled conflict candidate is considered ordered by a
+supported release/acquire atomic edge and no diagnostic is emitted. If the
+release is missing, relaxed, or on a different atomic address, the sampled
+reporting path still diagnoses the conflict.
+
+This is not a new publish-only fast path. It applies to
+`hip_moi::context` with `backend_kind::sampled_watchpoint` and reports enabled.
+`hip_moi::sampled_watchpoint_context` remains publish-only by construction and
+does not report races.
+
+Local RDNA4 check:
+
+| Row | Result |
+| --- | ---: |
+| `HipMoiSampledWatchpointBackend.AtomicReleaseAcquireOrdersSampledDiagnostics` | passed |
+| `HipMoiSampledWatchpointBackend.RelaxedAtomicDoesNotOrderSampledDiagnostics` | passed |
+| `atomic-hb-lds-handoff_pass-through` | 3.11 µs |
+| `atomic-hb-lds-handoff_context` | 8.99 µs |
+| `atomic-hb-lds-handoff_context-sampled-reporting` | 76.3 µs |
+
+The sampled-reporting benchmark uses `probe_count=0`, so it scans the entire
+watchpoint table and is intentionally much more expensive than exact shadow for
+this tiny handoff. Treat it as semantic coverage and as a reminder that
+diagnostic sampled reporting is not the Loom-parity publish-only fast path.
+
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 14.
+1. The current atomics plan is complete through Stage 15.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
-3. Additional source-level atomics should be corpus-driven. Likely candidates
+3. If sampled-reporting atomics become performance-relevant, add a low-probe
+   benchmark row before optimizing; the current `probe_count=0` row is
+   correctness coverage, not a performance target.
+4. Additional source-level atomics should be corpus-driven. Likely candidates
    are `fetch_and`, `fetch_xor`, min/max, 64-bit production variants,
    memory-scope-specific tests, and Clang builtin forms that appear in a real
    workload.
-4. Any future atomics work should start by deciding whether it belongs to the
+5. Any future atomics work should start by deciding whether it belongs to the
    HIP/LLVM source-level detector or to the hardware-level DBI track.

@@ -237,8 +237,10 @@ release/acquire synchronization object:
    records produced by the acquiring subgroup itself.
 5. For each imported producer record, hip-moi updates the pairwise
    acquired-epoch token for `(consumer subgroup, producer subgroup)`.
-6. Later exact-shadow LDS conflict checks consult that token table before
-   reporting a same-epoch cross-subgroup conflict.
+6. Later LDS conflict checks consult that token table before reporting a
+   same-epoch cross-subgroup conflict. This applies to exact-shadow diagnostics
+   and to sampled-watchpoint diagnostics when reporting is enabled in the
+   general `hip_moi::context`.
 
 The current public atomic operations are:
 
@@ -404,7 +406,11 @@ conflicts:
 
 1. Decode the overwritten prior entry and compare it with the current entry.
 2. Probe additional watchpoint slots according to `probe_count`.
-3. Emit an `access_conflict` diagnostic for each conflicting prior entry.
+3. For each conflicting prior entry, ask whether the current subgroup has
+   acquired the prior subgroup's recorded epoch through supported atomic
+   synchronization.
+4. Emit an `access_conflict` diagnostic only when no such acquired-epoch token
+   exists.
 
 The sampled watchpoint conflict predicate is:
 
@@ -415,6 +421,12 @@ The sampled watchpoint conflict predicate is:
 * current and prior entries have different subgroup owners;
 * at least one of the two entries is a write;
 * the recorded dword-cell ranges overlap.
+
+That predicate describes a potential conflict. Reporting then applies the same
+atomic-synchronization suppression as exact shadow: if
+`acquired_epoch_token[current.owner][prior.owner]` is at least
+`prior.epoch + 1`, the current access is considered ordered after the prior
+entry and no diagnostic is emitted for that pair.
 
 If reporting is disabled, the sampled backend publishes metadata but does not
 consume it to diagnose races.

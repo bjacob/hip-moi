@@ -86,7 +86,9 @@ that atomic object in the bounded metadata table.
 `021_atomic_happens_before_benchmark.hip` is the first diagnostic-semantics
 atomics benchmark. A global release/acquire flag orders an instrumented LDS
 payload handoff, and the `context` row uses the acquired-epoch matrix to avoid
-reporting the ordered LDS access pair.
+reporting the ordered LDS access pair. It also has a
+`context-sampled-reporting` row that checks the same synchronization rule
+through the sampled-watchpoint reporting backend.
 
 `023_atomic_rmw_happens_before_benchmark.hip` is the first RMW atomics
 benchmark. It covers both a release/acquire `fetch_add` arrival counter and a
@@ -221,6 +223,7 @@ table expands those benchmark modes.
 | `context + sampled_watchpoint` | General hip-moi context with sampled-watchpoint backend | Diagnostic-capable hip-moi API path using sampled watchpoints. This keeps more state live than the publish-only fast path. |
 | `sampled_watchpoint_context` | hip-moi sampled publish-only fast path | Narrow fast-view context optimized for Loom-parity publish-only sampling. This is the main performance target. |
 | `context` | General hip-moi context | Used by atomics benchmarks when the feature is not part of sampled watchpoint instrumentation. Stage 2 atomics use this only as a pass-through wrapper around HIP/Clang atomics. |
+| `context-sampled-reporting` | General hip-moi context with sampled-watchpoint reporting | Atomics correctness coverage for sampled diagnostics. This is not the publish-only fast path; current rows may scan many watchpoint entries. |
 
 ## Current RDNA4 Results
 
@@ -247,30 +250,32 @@ score/weight instrumentation makes it much slower than the matmul rows.
 | `pingpong-private-lds` | 3.94 µs | n/a | n/a | 9.10 µs | 6.64 µs |
 | `pingpong-wide-cooperative-lds` | 5.41 µs | n/a | n/a | 18.9 µs | 9.67 µs |
 
-The atomics rows use a separate result table because the first atomics API is
-implemented only for `hip_moi::context`, not for sampled watchpoint modes.
+The atomics rows use a separate result table because most atomics coverage is
+implemented only for `hip_moi::context`. The
+`context-sampled-reporting` column is present only where sampled diagnostics
+are intentionally part of the semantic coverage.
 
-| Key | pass-through | `context` |
-| --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.26 µs | 45.5 µs |
-| `atomic-metadata-release-store` | 3.44 µs | 21.1 µs |
-| `atomic-hb-lds-handoff` | 3.32 µs | 8.88 µs |
-| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs |
-| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs |
-| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs |
-| `atomic-fence-handoff` | 3.10 µs | 6.83 µs |
-| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs |
-| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs |
-| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs |
-| `atomic-fence-rmw-handoff` | 3.16 µs | 8.62 µs |
-| `atomic-fence-exchange` | 3.05 µs | 8.60 µs |
-| `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs |
-| `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs |
-| `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs |
-| `streamk-flag-fixup` | 3.20 µs | 12.5 µs |
-| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs |
-| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs |
+| Key | pass-through | `context` | `context-sampled-reporting` |
+| --- | ---: | ---: | ---: |
+| `atomic-flag-handoff` | 7.26 µs | 45.5 µs | n/a |
+| `atomic-metadata-release-store` | 3.44 µs | 21.1 µs | n/a |
+| `atomic-hb-lds-handoff` | 3.11 µs | 8.99 µs | 76.3 µs |
+| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs | n/a |
+| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs | n/a |
+| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs | n/a |
+| `atomic-fence-handoff` | 3.10 µs | 6.83 µs | n/a |
+| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs | n/a |
+| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs | n/a |
+| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs | n/a |
+| `atomic-fence-rmw-handoff` | 3.16 µs | 8.62 µs | n/a |
+| `atomic-fence-exchange` | 3.05 µs | 8.60 µs | n/a |
+| `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs | n/a |
+| `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs | n/a |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs | n/a |
+| `streamk-flag-fixup` | 3.20 µs | 12.5 µs | n/a |
+| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | n/a |
+| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | n/a |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | n/a |
 
 ## Reading The Suite
 
@@ -324,6 +329,11 @@ still diagnoses. These rows show that the current address-scoped publication
 and acquire paths are correct enough for the staged model, but not yet cheap;
 `atomic-flag-handoff_context` rose to 45.5 µs after address-scoped acquire
 imports.
+
+The `atomic-hb-lds-handoff_context-sampled-reporting` row checks that sampled
+diagnostics consult the same acquired-epoch tokens as exact shadow. It uses
+`probe_count=0`, which scans the whole watchpoint table, so the 76.3 µs result
+is semantic coverage rather than a candidate fast path.
 
 The atomic RMW rows cover `fetch_add` arrival counters, a two-RMW `acq_rel`
 chain, and old-value-dependent `atomicOr` bitmask control flow. The old value
