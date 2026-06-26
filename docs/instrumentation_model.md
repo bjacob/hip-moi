@@ -291,6 +291,16 @@ state, such as monotonic counters or bitmasks. It is not the current default.
 Even address+value keying is not a true memory-model reads-from identity for
 repeated same-address same-value release stores.
 
+A compact address+value mode could hash `(atomic address, scalar value)` into a
+single metadata word instead of storing both fields as full tags. That can be a
+reasonable precision/performance trade-off for value-distinguishing protocols:
+it may reduce false negatives compared with address-only while keeping the
+metadata row small. It is not a strict improvement. Hash collisions can create
+extra synchronization imports and therefore false negatives, and the
+instrumentation still has to keep or recompute the scalar atomic value,
+normalize 32-bit and 64-bit cases, and hash the pair on the hot path. The
+current address-only model avoids that value-liveness and codegen cost.
+
 Fence-only synchronization is not modeled. The implemented fence support is
 the standard paired-atomic shape:
 

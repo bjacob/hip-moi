@@ -47,6 +47,16 @@ precision: releases through the same address that the acquire did not actually
 read from can still be imported, causing false negatives. Address+value keying
 is kept as a possible future precision refinement, not the current default.
 
+That future refinement does not have to mean storing a full address tag and a
+full value tag. A compact variant could hash `(atomic address, scalar value)`
+into a word-sized key and may be better than address-only for protocols where
+values distinguish synchronization states. It is still a trade-off, not a free
+strict improvement: hash collisions can add unwanted synchronization imports,
+and the instrumentation must keep or recompute the atomic scalar value,
+normalize its width, and hash it on the hot path. Any address+value experiment
+should therefore measure VGPR pressure and generated code before being treated
+as a win.
+
 ## Stage Completion Checklist
 
 For each implementation stage, complete the following before moving on:

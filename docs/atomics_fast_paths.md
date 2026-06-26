@@ -73,7 +73,12 @@ joined rather than overwritten.
 
 That is the right conservative structure for the current DBI-oriented
 prototype. Address+value keying remains a possible future precision refinement
-when realistic protocols justify keeping observed or released values live.
+when realistic protocols justify keeping observed or released values live. A
+compact version could hash `(atomic address, scalar value)` into a word-sized
+key, which may reduce address-only false negatives for monotonic counters or
+bitmasks. It would still introduce a probabilistic collision source and value
+liveness/codegen cost, so it must be measured rather than assumed to be a free
+upgrade.
 
 ## What A Safe Fast Path Must Preserve
 

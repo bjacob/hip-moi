@@ -305,7 +305,9 @@ READMEs now describe the current detector scope.
    atomic synchronization preserves the ordinary per-subgroup barrier epochs
    and adds pairwise ordering evidence for release/acquire edges. It does not
    add nested epochs inside the barrier epoch model. Address+value keying is
-   now a possible future precision refinement, not the current implementation.
+   now a possible future precision refinement, not the current implementation;
+   compact hashing of `(address, value)` may help value-distinguishing
+   protocols, but it brings collision risk and value-liveness/codegen cost.
 
 ## Non-Goals
 
