@@ -133,6 +133,11 @@ integration row. It keeps the flag protocol distilled to LDS partials, but
 splits the work into two independent tile fixups, each with its own owner
 subgroup and helper subgroup.
 
+`037_streamk_two_level_reduction_benchmark.hip` adds a chained Stream-K-style
+flag reduction. Four producer subgroups publish LDS partials to two pair
+reducers, then one final reducer consumes the pair partials after a second
+flag handoff.
+
 `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` is the first
 WMMA-flavored Stream-K integration row. It keeps the diagnostic payload in LDS,
 but adds RDNA4 WMMA arithmetic and an arrival-counter-style `fetch_add` before
@@ -184,6 +189,7 @@ segment notes are included when that fast row is not spill-free.
 | `atomic-xor-bitmask-handoff` | `034_atomic_bitwise_happens_before_benchmark.hip` | `tests/instrumented/034_atomic_bitwise_happens_before_test.hip` | Bitmask RMW toggling shape, modeled after Stream-K-tree-style old-value protocols | 256 workgroups, 2 subgroups/workgroup, release `fetch_xor` toggles a producer bit and acquire `fetch_xor` observes the old mask before reading payload | 4 B | n/a (`context` only) |
 | `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a (`context` only) |
 | `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a (`context` only) |
+| `streamk-two-level-reduction` | `037_streamk_two_level_reduction_benchmark.hip` | `tests/instrumented/037_streamk_two_level_reduction_test.hip` | Sanitized split-K/PostGSU-style two-level flag reduction, localized to LDS payload diagnostics | 256 workgroups, 6 subgroups/workgroup, four producer subgroups feed two pair reducers, then one final reducer folds pair partials | 768 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-tree-atomic-or` | `029_rdna4_wmma_streamk_tree_atomic_or_benchmark.hip` | `tests/instrumented/029_rdna4_wmma_streamk_tree_atomic_or_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K-tree `atomicOr` idea, localized to LDS payload diagnostics | 256 workgroups, 4 subgroups/workgroup, four K-slice RDNA4 WMMA partials, first three subgroups publish bits with release `atomicOr`, final subgroup folds LDS partials after `acq_rel atomicOr` | 8192 B | n/a (`context` only) |
 
@@ -228,6 +234,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `atomic-xor-bitmask-handoff` | 256 workgroups, 2 subgroups/workgroup, old-value-dependent `fetch_xor` bit toggling orders instrumented LDS payload | 4 B, <0.1% | 4 |
 | `streamk-flag-fixup` | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper flags and folds two LDS helper partials | 12 B, <0.1% | 4 |
 | `streamk-two-tile-flag-fixup` | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B, <0.1% | 3 |
+| `streamk-two-level-reduction` | 256 workgroups, 6 subgroups/workgroup, four producer subgroups feed two pair reducers, then one final reducer folds pair partials | 768 B, 1.2% | 7 |
 | `rdna4-wmma-streamk-arrival-counter` | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, arrival counter, final subgroup folds LDS partials | 4096 B, 6.3% | 21 |
 | `rdna4-wmma-streamk-tree-atomic-or` | 256 workgroups, 4 subgroups/workgroup, four K-slice RDNA4 WMMA partials, `atomicOr` bitmask tree, final subgroup folds LDS partials | 8192 B, 12.5% | 36 |
 
@@ -256,6 +263,9 @@ refreshed on 2026-06-26. Latencies below 1 ms are printed in microseconds
 `MIN_MS=100` and `WARMUP_MS=100`.
 `attention-d16-dense` uses `MIN_MS=500` and `WARMUP_MS=500` because full dense
 score/weight instrumentation makes it much slower than the matmul rows.
+`streamk-two-level-reduction` also uses `MIN_MS=500` and `WARMUP_MS=500`
+because its short-window `context` row showed more run-to-run variation than
+the smaller atomics rows.
 
 | Key | pass-through | Jakub-Sampled-Loom | exact shadow | `context + sampled_watchpoint` | `sampled_watchpoint_context` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -299,6 +309,7 @@ are intentionally part of the semantic coverage.
 | `atomic-xor-bitmask-handoff` | 3.02 µs | 8.91 µs | n/a |
 | `streamk-flag-fixup` | 3.22 µs | 12.8 µs | n/a |
 | `streamk-two-tile-flag-fixup` | 3.07 µs | 12.4 µs | n/a |
+| `streamk-two-level-reduction` | 3.71 µs | 27.9 µs | n/a |
 | `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | n/a |
 | `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | n/a |
 
@@ -424,7 +435,10 @@ The Stream-K flag fixup rows are integration rows rather than one-edge
 microbenchmarks. They preserve RocJITsu hip-stream-k owner/helper flag
 protocols but distill the payload to LDS partials so hip-moi can diagnose the
 handoff. The one-owner/two-helper row is now 12.8 µs through `context`; the
-two-tile ownership row is now 12.4 µs through `context`.
+two-tile ownership row is now 12.4 µs through `context`. The two-level
+reduction row is a larger six-subgroup flag protocol: it adds an intermediate
+pair-reduction level before the final fold and is now 27.9 µs through
+`context`.
 
 The RDNA4 WMMA Stream-K arrival-counter row is the first atomics integration
 row with WMMA arithmetic. It is not a direct global-partial Stream-K GEMM: the
@@ -450,6 +464,7 @@ The current atomics `context` resource refresh found no spills:
 | --- | ---: | ---: | ---: | --- |
 | `streamk-flag-fixup` | 12 B | 84 | 26 | none, 0 B |
 | `streamk-two-tile-flag-fixup` | 16 B | 94 | 61 | none, 0 B |
+| `streamk-two-level-reduction` | 768 B | 69 | 44 | none, 0 B |
 | `rdna4-wmma-streamk-arrival-counter` | 4096 B | 75 | 51 | none, 0 B |
 | `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 84 | 52 | none, 0 B |
 | `atomic-hb-lds-handoff` | 4 B | 56 | 23 | none, 0 B |

@@ -161,3 +161,5 @@ hip_moi_add_gtest(hip_moi_instrumented_atomic_bitwise_happens_before_test
                   instrumented/034_atomic_bitwise_happens_before_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_attention_lds_alias_handoff_test
                   instrumented/035_attention_lds_alias_handoff_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_streamk_two_level_reduction_test
+                  instrumented/037_streamk_two_level_reduction_test.hip)

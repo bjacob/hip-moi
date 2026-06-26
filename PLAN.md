@@ -243,8 +243,8 @@ attention conclusions live in `benchmarks/README.md` and
    or verbatim external reports in OSS files. Only generalized kernel
    mechanisms, shapes, tests, and benchmark rows should land here.
 
-   The first import target is done. The production attention-forward LDS alias
-   handoff is now represented by:
+   Two source-level import targets are done. The production attention-forward
+   LDS alias handoff is now represented by:
 
    * `tests/instrumented/035_attention_lds_alias_handoff_test.hip`;
    * `tests/instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip`;
@@ -256,6 +256,18 @@ attention conclusions live in `benchmarks/README.md` and
    with pass-through, `context + sampled_watchpoint`, and
    `sampled_watchpoint_context` rows, and `benchmarks/README.md` records the
    current latency/resource data.
+
+   A sanitized split-K/PostGSU-style two-level flag reduction is now
+   represented by:
+
+   * `tests/instrumented/037_streamk_two_level_reduction_test.hip`;
+   * `benchmarks/037_streamk_two_level_reduction_benchmark.hip`.
+
+   This row has four producer subgroups, two pair-reducer subgroups, and one
+   final reducer subgroup. It exercises chained release/acquire flag handoffs
+   with LDS payload diagnostics. Current RDNA4 timing is 3.71 µs
+   pass-through and 27.9 µs through `context`, with 768 B LDS, 69 SGPRs, 44
+   VGPRs, and no spills in the `context` row.
 
    The second target is an assembly-level wait-count/pack-ordering family. It
    is not a HIP source-level race test because the relevant failure is a
@@ -299,14 +311,15 @@ attention conclusions live in `benchmarks/README.md` and
    failed compare-exchange, `seq_cst` sanity coverage, and atomic fences paired
    with relaxed atomics. All refreshed atomics `context` rows are spill-free.
    Small two-subgroup rows are roughly 7 to 9 µs through `context`, while
-   Stream-K-shaped integration rows range from 12.4 µs to 45.2 µs. VGPR
-   pressure is controlled; remaining cost is mostly metadata protocol work and
-   global metadata traffic. A deep acquire-path audit rejected two tempting
-   local shortcuts: conditional acquired-token publication broke the
-   four-subgroup `atomicOr` tree, and a special two-subgroup direct lookup
-   regressed the shared-context flag microbenchmark. The next meaningful
-   atomics speedup should be protocol-aware or DBI-informed, not another small
-   generic table-loop trim.
+   Stream-K-shaped integration rows range from 12.4 µs to 45.2 µs, with the
+   six-subgroup two-level flag reduction at 27.9 µs. VGPR pressure is
+   controlled; remaining cost is mostly metadata protocol work and global
+   metadata traffic. A deep acquire-path audit rejected two tempting local
+   shortcuts: conditional acquired-token publication broke the four-subgroup
+   `atomicOr` tree, and a special two-subgroup direct lookup regressed the
+   shared-context flag microbenchmark. The next meaningful atomics speedup
+   should be protocol-aware or DBI-informed, not another small generic
+   table-loop trim.
 
 4. Use `docs/dbi_transition.md` as the bridge to rocjitsu work.
 

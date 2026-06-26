@@ -104,6 +104,9 @@ Current files:
   barrier is clean, and non-aliased LDS slots do not need the handoff barrier.
 * `036_rdna4_wmma_attention_lds_alias_handoff_test.hip`: RDNA4-only WMMA-shaped
   version of the LDS alias handoff, paired with the matching benchmark.
+* `037_streamk_two_level_reduction_test.hip`: Stream-K-style two-level flag
+  reduction where four producer subgroups feed two pair reducers, then one
+  final reducer consumes the pair partials.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

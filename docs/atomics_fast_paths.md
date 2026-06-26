@@ -46,6 +46,7 @@ The most relevant RDNA4 rows after the latest performance audit are:
 | --- | --- | ---: | ---: | --- |
 | `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.22 µs | 12.8 µs | 12 B LDS, 84 SGPR, 26 VGPR, no spills |
 | `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.07 µs | 12.4 µs | 16 B LDS, 94 SGPR, 61 VGPR, no spills |
+| `streamk-two-level-reduction` | four producer subgroups, two pair reducers, one final reducer | 3.71 µs | 27.9 µs | 768 B LDS, 69 SGPR, 44 VGPR, no spills |
 | `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPR, 51 VGPR, no spills |
 | `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPR, 52 VGPR, no spills |
 

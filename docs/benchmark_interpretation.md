@@ -111,7 +111,9 @@ diagnostics.
 
 The small atomics microbenchmarks mostly run around 7 to 9 microseconds
 through `context` versus about 3 microseconds pass-through. The Stream-K-shaped
-integration rows range from about 12.4 to 45.2 microseconds through `context`.
+integration rows range from about 12.4 to 45.2 microseconds through `context`;
+the chained six-subgroup flag reduction sits in the middle at 27.9
+microseconds.
 The current atomics resource refresh found no spills. That is a good sign:
 atomics overhead is currently metadata-protocol cost, not VGPR-spill collapse.
 
@@ -158,7 +160,8 @@ For Loom-parity performance discussion, use:
 For synchronization semantics discussion, use:
 
 * atomics microbenchmarks for individual release/acquire and fence patterns;
-* Stream-K flag, arrival-counter, and bitmask rows for integration cases;
+* Stream-K flag, two-level reduction, arrival-counter, and bitmask rows for
+  integration cases;
 * the paired instrumented tests under `tests/instrumented/`.
 
 For DBI planning, use:

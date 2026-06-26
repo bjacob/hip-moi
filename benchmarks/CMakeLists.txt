@@ -111,3 +111,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_bitwise_happens_before
                             034_atomic_bitwise_happens_before_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_rdna4_wmma_attention_lds_alias_handoff
                             036_rdna4_wmma_attention_lds_alias_handoff_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_streamk_two_level_reduction
+                            037_streamk_two_level_reduction_benchmark.hip)

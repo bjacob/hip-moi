@@ -22,6 +22,7 @@ not make hip-moi a general global-memory race detector.
 | --- | --- | --- |
 | Release/acquire flag handoff | RocJITsu `hip-stream-k` device locks | Reference kernels, `021_atomic_happens_before_test.hip`, `026_streamk_flag_protocol_test.hip`, and matching benchmarks. |
 | Two-tile owner/helper flag protocol | RocJITsu `hip-stream-k` two-tile case | `027_streamk_two_tile_flag_protocol_test.hip` and matching benchmark. |
+| Two-level split-K/PostGSU-style flag reduction | Sanitized production reduction-shape review | `037_streamk_two_level_reduction_test.hip` and matching benchmark. |
 | Arrival counter RMW | `hip-matmul/matmul_rdna4.hip` Split-K and Stream-K kernels | `023_atomic_rmw_happens_before_test.hip`, `028_rdna4_wmma_streamk_arrival_counter_test.hip`, and matching benchmarks. |
 | Stream-K-tree bitmask RMW | `hip-matmul/matmul_rdna4.hip` Stream-K-tree kernel | `024_atomic_or_bitmask_happens_before_test.hip`, `029_rdna4_wmma_streamk_tree_atomic_or_test.hip`, and matching benchmarks. |
 | Exchange and compare-exchange | Lock-like source patterns and HIP atomics API coverage | `030_atomic_exchange_compare_exchange_test.hip` and matching benchmark. |
@@ -66,6 +67,15 @@ The Stream-K-shaped integration rows are:
 * `benchmarks/026_streamk_flag_protocol_benchmark.hip`;
 * `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`;
 * `benchmarks/027_streamk_two_tile_flag_protocol_benchmark.hip`.
+
+The chained flag-reduction row is:
+
+* `tests/instrumented/037_streamk_two_level_reduction_test.hip`;
+* `benchmarks/037_streamk_two_level_reduction_benchmark.hip`.
+
+It keeps the payload in LDS but adds an intermediate reduction level: four
+producer subgroups feed two pair reducers, then one final reducer consumes the
+pair partials after a second flag handoff.
 
 ## RDNA4 Stream-K Counters And Bitmasks
 

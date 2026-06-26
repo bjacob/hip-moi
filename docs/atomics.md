@@ -328,7 +328,8 @@ Current source-level coverage includes:
 * `seq_cst` sanity coverage;
 * release/acquire fences paired with relaxed store, load, exchange, successful
   compare-exchange, failed compare-exchange, and RMW operations;
-* Stream-K-shaped flag, arrival-counter, and bitmask-tree integration rows.
+* Stream-K-shaped flag, two-level reduction, arrival-counter, and bitmask-tree
+  integration rows.
 
 Current intentional gaps:
 
@@ -357,6 +358,7 @@ expensive:
 | `atomic-xor-bitmask-handoff` | 3.02 µs | 8.91 µs | 4 B LDS, 59 SGPR, 23 VGPR, no spills |
 | `streamk-flag-fixup` | 3.22 µs | 12.8 µs | 12 B LDS, 84 SGPR, 26 VGPR, no spills |
 | `streamk-two-tile-flag-fixup` | 3.07 µs | 12.4 µs | 16 B LDS, 94 SGPR, 61 VGPR, no spills |
+| `streamk-two-level-reduction` | 3.71 µs | 27.9 µs | 768 B LDS, 69 SGPR, 44 VGPR, no spills |
 | `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPR, 51 VGPR, no spills |
 | `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPR, 52 VGPR, no spills |
 
