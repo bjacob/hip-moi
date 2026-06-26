@@ -236,7 +236,47 @@ attention conclusions live in `benchmarks/README.md` and
 
 ## Next Work
 
-1. Keep ping-pong ATT validation as the guardrail for ping-pong benchmark work.
+1. Import newly mined production hazard patterns into the corpus.
+
+   The newest corpus review found three useful pattern families. The import must
+   be sanitized: do not name source repositories, incident ids, bundle paths,
+   or verbatim external reports in OSS files. Only generalized kernel
+   mechanisms, shapes, tests, and benchmark rows should land here.
+
+   The first import target is a production attention-forward LDS alias handoff:
+   a pipeline reuses one LDS backing slot for the tail of one logical tile and
+   the prefetch/write of the next logical tile. Without a full-workgroup
+   barrier, a fast subgroup can overwrite the shared slot while a slower
+   subgroup is still reading it. Add this in three rungs:
+
+   * a scalar, architecture-independent instrumented test with a bad
+     missing-barrier variant that reports and a good conditional-barrier variant
+     that is clean;
+   * an RDNA4 WMMA-shaped test that keeps the same aliasing mechanism while
+     using the same all-LDS-accesses-instrumented discipline as the current
+     attention and ping-pong tests;
+   * a matching benchmark row for the synchronized variant, with pass-through,
+     `context + sampled_watchpoint`, and `sampled_watchpoint_context` modes
+     where applicable, plus LDS/VGPR/spill resource reporting in
+     `benchmarks/README.md`.
+
+   The second target is an assembly-level wait-count/pack-ordering family. It
+   is not a HIP source-level race test because the relevant failure is a
+   hardware instruction-scheduling/data-dependency hazard, not a HIP/LLVM
+   memory-model violation. Keep it on the DBI track: add a future rocjitsu seed
+   that decodes LDS reads, nearby `s_waitcnt lgkmcnt(...)`, and pack
+   instructions, then checks whether the wait-count is strong enough for the
+   consumed VGPR data.
+
+   The third target is a global fp32 atomic accumulator family. It is important
+   for atomics, but it is not a current hip-moi source-level LDS payload
+   testcase: the payload is a global accumulator and the suspected issue is at
+   the hardware atomic/L2 level. Keep the source-level detector focused on
+   global atomics as synchronization for LDS accesses. Record this family as a
+   DBI atomic instruction seed and revisit only if hip-moi's scope expands to
+   global-memory diagnostics.
+
+2. Keep ping-pong ATT validation as the guardrail for ping-pong benchmark work.
 
    The optimized probe now validates pass-through and sampled hip-moi dynamic
    instruction streams through ROCprof UI JSON. SIMD 0/1 traces validate the
@@ -248,7 +288,7 @@ attention conclusions live in `benchmarks/README.md` and
    generated-code and ATT checks before latency numbers are treated as
    meaningful.
 
-2. Use the completed atomics package for delivery discussion.
+3. Use the completed atomics package for delivery discussion.
 
    The source-level atomics package is complete enough for the current delivery
    phase. The stable description is now `docs/atomics.md`: it defines
@@ -271,7 +311,7 @@ attention conclusions live in `benchmarks/README.md` and
    atomics speedup should be protocol-aware or DBI-informed, not another small
    generic table-loop trim.
 
-3. Use `docs/dbi_transition.md` as the bridge to rocjitsu work.
+4. Use `docs/dbi_transition.md` as the bridge to rocjitsu work.
 
    The next concrete DBI step is an LDS address reconstruction experiment:
    decode LDS load/store instructions in a minimal uninstrumented kernel,
