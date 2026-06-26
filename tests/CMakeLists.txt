@@ -128,6 +128,8 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_streamk_tree_atomic_or_test
                     instrumented/029_rdna4_wmma_streamk_tree_atomic_or_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_attention_lds_alias_handoff_test
+                    instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_atomic_api_test
                   instrumented/019_atomic_api_test.hip)
@@ -157,3 +159,5 @@ hip_moi_add_gtest(hip_moi_instrumented_atomic_fence_extended_test
                   instrumented/033_atomic_fence_extended_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_atomic_bitwise_happens_before_test
                   instrumented/034_atomic_bitwise_happens_before_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_attention_lds_alias_handoff_test
+                  instrumented/035_attention_lds_alias_handoff_test.hip)

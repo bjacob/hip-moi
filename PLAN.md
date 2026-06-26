@@ -243,22 +243,19 @@ attention conclusions live in `benchmarks/README.md` and
    or verbatim external reports in OSS files. Only generalized kernel
    mechanisms, shapes, tests, and benchmark rows should land here.
 
-   The first import target is a production attention-forward LDS alias handoff:
-   a pipeline reuses one LDS backing slot for the tail of one logical tile and
-   the prefetch/write of the next logical tile. Without a full-workgroup
-   barrier, a fast subgroup can overwrite the shared slot while a slower
-   subgroup is still reading it. Add this in three rungs:
+   The first import target is done. The production attention-forward LDS alias
+   handoff is now represented by:
 
-   * a scalar, architecture-independent instrumented test with a bad
-     missing-barrier variant that reports and a good conditional-barrier variant
-     that is clean;
-   * an RDNA4 WMMA-shaped test that keeps the same aliasing mechanism while
-     using the same all-LDS-accesses-instrumented discipline as the current
-     attention and ping-pong tests;
-   * a matching benchmark row for the synchronized variant, with pass-through,
-     `context + sampled_watchpoint`, and `sampled_watchpoint_context` modes
-     where applicable, plus LDS/VGPR/spill resource reporting in
-     `benchmarks/README.md`.
+   * `tests/instrumented/035_attention_lds_alias_handoff_test.hip`;
+   * `tests/instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip`;
+   * `benchmarks/036_rdna4_wmma_attention_lds_alias_handoff_benchmark.hip`.
+
+   The scalar test covers the missing-barrier diagnostic, the clean conditional
+   barrier, and a non-aliased no-barrier case. The RDNA4 test keeps the same
+   mechanism around a WMMA tile. The benchmark times the synchronized variant
+   with pass-through, `context + sampled_watchpoint`, and
+   `sampled_watchpoint_context` rows, and `benchmarks/README.md` records the
+   current latency/resource data.
 
    The second target is an assembly-level wait-count/pack-ordering family. It
    is not a HIP source-level race test because the relevant failure is a

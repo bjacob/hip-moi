@@ -99,6 +99,11 @@ Current files:
 * `034_atomic_bitwise_happens_before_test.hip`: release/acquire `fetch_and`
   bit clearing and `fetch_xor` bit toggling as old-value-dependent bitmask
   synchronization shapes.
+* `035_attention_lds_alias_handoff_test.hip`: scalar attention-pipeline LDS
+  alias handoff where a missing full-workgroup barrier reports, a conditional
+  barrier is clean, and non-aliased LDS slots do not need the handoff barrier.
+* `036_rdna4_wmma_attention_lds_alias_handoff_test.hip`: RDNA4-only WMMA-shaped
+  version of the LDS alias handoff, paired with the matching benchmark.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

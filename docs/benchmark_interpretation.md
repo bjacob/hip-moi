@@ -84,6 +84,12 @@ regime Jakub expects to matter. They should be used to catch spill regressions.
 They are not evidence that every production attention kernel uses that exact
 LDS layout.
 
+The attention LDS-alias handoff row is a different kind of attention benchmark:
+it is a production-hazard extraction. It measures the synchronized case where a
+reusable LDS slot is read as one logical tile and then written as the next
+logical tile. The paired tests, not the benchmark row, cover the missing-barrier
+diagnostic.
+
 ## Ping-Pong Rows
 
 The ping-pong rows are scheduling guardrails, not headline sanitizer results.

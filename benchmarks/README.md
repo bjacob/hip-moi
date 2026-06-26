@@ -138,6 +138,13 @@ WMMA-flavored Stream-K integration row. It keeps the diagnostic payload in LDS,
 but adds RDNA4 WMMA arithmetic and an arrival-counter-style `fetch_add` before
 the final subgroup folds LDS partials.
 
+`036_rdna4_wmma_attention_lds_alias_handoff_benchmark.hip` is the synchronized
+benchmark partner for the attention LDS-alias handoff tests. It models the
+case where one logical attention tile is consumed from a reusable LDS slot
+before the next logical tile is written into the same slot. The benchmark times
+the correct barrier-protected variant; the paired tests cover the missing
+barrier diagnostic.
+
 ## Benchmark Catalog
 
 `Fast VGPRs` refers to the `sampled_watchpoint_context` row. Spill and private
@@ -155,6 +162,7 @@ segment notes are included when that fast row is not spill-free.
 | `attention-d128-pressure-full-kv16` | `012_rdna4_d128_attention_pressure_benchmark.hip` | `tests/instrumented/012_rdna4_d128_attention_pressure_test.hip` | llama.cpp-scale LDS pressure candidate | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B | 256, 22 spills, 92 B private |
 | `attention-d128-pressure-wide-k32` | `012_rdna4_d128_attention_pressure_benchmark.hip` | `tests/instrumented/012_rdna4_d128_attention_pressure_test.hip` | explicit high-LDS pressure variant | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B | 256, 120 spills, 352 B private |
 | `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 shape | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
+| `attention-lds-alias-handoff` | `036_rdna4_wmma_attention_lds_alias_handoff_benchmark.hip` | `tests/instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip` | sanitized production-hazard pattern: reusable attention LDS slot needs a handoff barrier | 256 workgroups, 2 subgroups/workgroup, one 16x16x16 WMMA tile consumes a tail-K fragment before the next logical tile reuses the same LDS slot | 512 B | 27, no spills |
 | `pingpong-private-lds` | `016_rdna4_pingpong_att_probe.hip` | `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`, `run_pingpong_att_validation.sh` | hip-moi RDNA4 ping-pong scheduling probe | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B | 44, no spills |
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
 | `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a (`context` only) |
@@ -198,6 +206,7 @@ VGPR counts come from the bundled RDNA4 code-object metadata for the
 | `attention-d128-pressure-full-kv16` | seq=8192, D128/V128, 16-key tile, full K/V double-buffering | 19712 B, 30.1% | 232 |
 | `attention-d128-pressure-wide-k32` | seq=8192, D128/V128, 32-key tile, wider double-buffering | 39168 B, 59.8% | 227 |
 | `attention-d128-no-score` | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B, 1.6% | 178 |
+| `attention-lds-alias-handoff` | 256 workgroups, 2 subgroups/workgroup, one 16x16x16 WMMA tile consumes a tail-K fragment before the next logical tile reuses the same LDS slot | 512 B, 0.8% | 19 |
 | `pingpong-private-lds` | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B, 6.3% | 23 |
 | `pingpong-wide-cooperative-lds` | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B, 9.4% | 24 |
 | `atomic-flag-handoff` | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B, <0.1% | 3 |
@@ -241,9 +250,10 @@ table expands those benchmark modes.
 
 Matmul and attention rows were measured on 2026-06-24 on device 0, AMD Radeon
 RX 9070, `gfx1201`, 28 CUs. The ping-pong rows were measured on the same machine
-on 2026-06-25. Atomics rows were last refreshed on 2026-06-26. Latencies below
-1 ms are printed in microseconds (`µs`); larger latencies are printed in
-milliseconds. Most rows use `MIN_MS=100` and `WARMUP_MS=100`.
+on 2026-06-25. Atomics and the attention LDS-alias handoff row were last
+refreshed on 2026-06-26. Latencies below 1 ms are printed in microseconds
+(`µs`); larger latencies are printed in milliseconds. Most rows use
+`MIN_MS=100` and `WARMUP_MS=100`.
 `attention-d16-dense` uses `MIN_MS=500` and `WARMUP_MS=500` because full dense
 score/weight instrumentation makes it much slower than the matmul rows.
 
@@ -259,6 +269,7 @@ score/weight instrumentation makes it much slower than the matmul rows.
 | `attention-d128-pressure-full-kv16` | 5.87 ms | 156 ms | n/a | 132 ms | 48.4 ms |
 | `attention-d128-pressure-wide-k32` | 8.87 ms | 183 ms | n/a | 162 ms | 75.5 ms |
 | `attention-d128-no-score` | 3.44 ms | 10.9 ms | n/a | 22.0 ms | 7.29 ms |
+| `attention-lds-alias-handoff` | 3.16 µs | n/a | n/a | 6.74 µs | 4.64 µs |
 | `pingpong-private-lds` | 3.94 µs | n/a | n/a | 9.10 µs | 6.64 µs |
 | `pingpong-wide-cooperative-lds` | 5.41 µs | n/a | n/a | 18.9 µs | 9.67 µs |
 
@@ -306,6 +317,12 @@ attention direction: K/V fragments are staged through LDS, while the QK-to-PV
 handoff stays in registers. The pressure rows remain useful because they push
 LDS and VGPR usage into the regime Jakub expects to be interesting for
 instrumentation overhead.
+
+The attention LDS-alias handoff row is a correctness-driven production-hazard
+extraction rather than a high-pressure throughput row. Its paired tests include
+the missing-barrier diagnostic; the benchmark times only the synchronized
+variant because that is the meaningful performance shape. The current fast row
+uses 27 VGPRs, no spills, and 512 B LDS.
 
 The general `context + sampled_watchpoint` row tracks the diagnostic-capable API
 path. The publish-only performance comparison row is
