@@ -64,6 +64,9 @@ spill, and code-size overhead. It is not a replacement for the diagnostic API.
   hip-moi, the compiler-rt RFC, real Loom, and Jakub-Sampled-Loom.
 * [docs/benchmark_interpretation.md](docs/benchmark_interpretation.md): how to
   read the benchmark modes, results, and resource-pressure signals.
+* [docs/dbi_transition.md](docs/dbi_transition.md): transition brief from
+  source-level hip-moi lessons to future rocjitsu DBI requirements and first
+  experiments.
 * [docs/context.md](docs/context.md): host/device context allocation and usage.
 * [benchmarks/README.md](benchmarks/README.md): current RDNA4 benchmark suite,
   resource pressure, and latency results.

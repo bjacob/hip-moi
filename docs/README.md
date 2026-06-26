@@ -17,6 +17,10 @@ then [Atomics Fast-Path Notes](atomics_fast_paths.md), then the atomics rows in
 the [Benchmark README](../benchmarks/README.md). The staged plan and corpus
 notes are supporting material, not the main delivery narrative.
 
+For the future rocjitsu DBI direction, read
+[DBI Transition Brief](dbi_transition.md) first, then
+[DBI Atomic Instruction Seeds](dbi_atomic_seeds.md).
+
 1. [Instrumentation Model](instrumentation_model.md)
 
    Defines the terminology, metadata records, access-time algorithms,
@@ -79,12 +83,17 @@ notes are supporting material, not the main delivery narrative.
    direct RMW cache, and the Stage 17 decision to stop pursuing generic
    acquire-loop trims without new evidence.
 
-12. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
+12. [DBI Transition Brief](dbi_transition.md)
+
+   Translates hip-moi's source-level lessons into DBI requirements, facts to
+   preserve, first rocjitsu experiments, and open hardware-model questions.
+
+13. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
 
    Records atomic instruction seeds for the future rocjitsu DBI direction and
    keeps them separate from source-level HIP atomics semantics.
 
-13. [Benchmark README](../benchmarks/README.md)
+14. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 

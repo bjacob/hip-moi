@@ -200,6 +200,8 @@ Current entry points:
   Jakub-Sampled-Loom path;
 * `docs/benchmark_interpretation.md`: interpretation of benchmark modes,
   apples-to-apples comparisons, resource metrics, and current evidence;
+* `docs/dbi_transition.md`: transition brief from source-level hip-moi lessons
+  to rocjitsu DBI requirements, first experiments, and open model questions;
 * `docs/atomics_plan.md`: staged atomics roadmap and current implementation
   status;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
@@ -224,7 +226,10 @@ also split the stable atomics model into `docs/atomics.md`, leaving
 benchmark interpretation passes are complete in `docs/loom_rfc_comparison.md`
 and `docs/benchmark_interpretation.md`. The atomics delivery polish pass added
 a front-loaded delivery summary, a precise metadata timeline, and a fast-path
-decision table for Jakub-facing discussion.
+decision table for Jakub-facing discussion. The DBI transition pass added
+`docs/dbi_transition.md`, which states what rocjitsu should preserve, what it
+can change, and why the first DBI experiment should be LDS address
+reconstruction.
 
 ## Next Work
 
@@ -262,6 +267,15 @@ decision table for Jakub-facing discussion.
    regressed the shared-context flag microbenchmark. The next meaningful
    atomics speedup should be protocol-aware or DBI-informed, not another small
    generic table-loop trim.
+
+3. Use `docs/dbi_transition.md` as the bridge to rocjitsu work.
+
+   The next concrete DBI step is an LDS address reconstruction experiment:
+   decode LDS load/store instructions in a minimal uninstrumented kernel,
+   compute active-lane LDS byte ranges, and compare those ranges against the
+   explicit offsets used by the matching hip-moi source-level test. This proves
+   that DBI can remove the `lds_byte_offset` API compromise while preserving
+   the diagnostic payload.
 
 ## Non-Goals
 
