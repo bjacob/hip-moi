@@ -7,9 +7,10 @@ SPDX-License-Identifier: MIT
 
 This note records the current fast-path decision point for atomics in
 `hip_moi::context`. It is intentionally separate from
-[`atomics_plan.md`](atomics_plan.md): the plan says which semantic stages to
-build, while this note explains what the first Stream-K-shaped measurements say
-about overhead and specialization.
+[`atomics.md`](atomics.md) and [`atomics_plan.md`](atomics_plan.md): the model
+defines current semantics, the plan tracks implementation history and future
+work, and this note explains what the Stream-K-shaped measurements say about
+overhead and specialization.
 
 ## Current Evidence
 

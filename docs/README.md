@@ -41,27 +41,33 @@ interpreted.
    detector. Also records the current RDNA4 ping-pong test shapes,
    generated-code inspection workflow, and ATT trace smoke test.
 
-6. [Atomics Support Plan](atomics_plan.md)
+6. [Atomics Model](atomics.md)
+
+   Defines the current source-level atomics support: public API, release
+   records, acquired epoch tokens, paired fences, address-only precision,
+   fast-path limits, and current performance/resource interpretation.
+
+7. [Atomics Support Plan](atomics_plan.md)
 
    Gives the staged implementation plan for user-kernel atomics: reference
    kernels, public API, atomic metadata, release/acquire handoffs, RMW
    operations, fence-plus-atomic patterns, Stream-K integration, and DBI seeds.
 
-7. [Atomics Corpus](atomics_corpus.md)
+8. [Atomics Corpus](atomics_corpus.md)
 
    Tracks the seed kernels for the atomics plan.
 
-8. [Atomics Fast-Path Notes](atomics_fast_paths.md)
+9. [Atomics Fast-Path Notes](atomics_fast_paths.md)
 
    Interprets the Stream-K-shaped atomics benchmark rows and the implemented
    Stage 7 direct RMW cache.
 
-9. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
+10. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
 
    Records atomic instruction seeds for the future rocjitsu DBI direction and
    keeps them separate from source-level HIP atomics semantics.
 
-10. [Benchmark README](../benchmarks/README.md)
+11. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 

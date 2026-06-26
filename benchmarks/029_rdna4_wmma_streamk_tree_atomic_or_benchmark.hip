@@ -462,12 +462,12 @@ namespace
             (void)hipFree(device_refs);
         }
 
-        bool check_all()
+        bool check_all(std::FILE* stream)
         {
             bool ok = true;
             for(auto& context : contexts)
             {
-                ok = context->check(nullptr) && ok;
+                ok = context->check(stream) && ok;
             }
             return ok;
         }
@@ -620,7 +620,7 @@ int main()
     benchmark_mode(
         "rdna4-wmma-streamk-tree-atomic-or_context", context_launch, warmup_ms, measure_ms);
 
-    if(!context_storage.check_all())
+    if(!context_storage.check_all(stderr))
     {
         std::fprintf(stderr, "unexpected hip-moi diagnostic\n");
         return EXIT_FAILURE;

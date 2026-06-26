@@ -12,6 +12,10 @@ to hip-moi. The corpus inventory lives in
 build, in which order, and what each stage must prove before the next one
 starts.
 
+For the current stable atomics model, read [`atomics.md`](atomics.md) first.
+This plan is the implementation history and future work tracker, not the best
+entry point for delivery discussions.
+
 The plan is RocJITsu-first. Use
 `/home/benoit/workspace/rocjitsu-test-corpus` as the default source for
 examples. Use `/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` only for

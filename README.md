@@ -58,6 +58,8 @@ spill, and code-size overhead. It is not a replacement for the diagnostic API.
 * [docs/instrumentation_model.md](docs/instrumentation_model.md): precise
   description of recorded metadata, access-time algorithms, diagnostics, and
   sampling.
+* [docs/atomics.md](docs/atomics.md): source-level atomics model, precision
+  trade-offs, paired fences, and current atomics performance interpretation.
 * [docs/context.md](docs/context.md): host/device context allocation and usage.
 * [benchmarks/README.md](benchmarks/README.md): current RDNA4 benchmark suite,
   resource pressure, and latency results.
@@ -92,4 +94,3 @@ ctest --test-dir /home/benoit/workspace/hip-moi-build --output-on-failure
 Benchmarks are not enabled in the default build. See
 [benchmarks/README.md](benchmarks/README.md) for the benchmark targets and
 standalone scripts.
-

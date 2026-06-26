@@ -191,6 +191,9 @@ Current entry points:
 * `docs/pingpong.md`: source survey and scope decision for ping-pong
   scheduling, `setprio`, `sched_barrier`, RDNA4 suitability, generated-code
   inspection, and optimized ATT validation;
+* `docs/atomics.md`: stable delivery-facing atomics model, including supported
+  API, address-scoped release metadata, acquired epoch tokens, paired fences,
+  precision trade-offs, and current RDNA4 performance interpretation;
 * `docs/atomics_plan.md`: staged atomics roadmap and current implementation
   status;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
@@ -209,7 +212,9 @@ Documentation should keep using the same terms:
 The Markdown sweep is complete as of this session: the old chronological
 `PLAN.md` has been replaced by this delivery plan, stale attention benchmark
 promises have been rewritten as implemented benchmark mappings, and the test
-READMEs now describe the current detector scope.
+READMEs now describe the current detector scope. The atomics delivery pass has
+also split the stable atomics model into `docs/atomics.md`, leaving
+`docs/atomics_plan.md` as history and future-work tracking.
 
 ## Next Work
 
@@ -244,66 +249,23 @@ READMEs now describe the current detector scope.
    generated-code and ATT checks before latency numbers are treated as
    meaningful.
 
-5. Use the completed atomics package for the next delivery discussion.
+5. Use the completed atomics package for delivery discussion.
 
-   The source-level atomics plan is complete through Stage 12 and Stage 7's
-   first fast path. `hip_moi::context` models address-scoped release/acquire
-   synchronization for LDS diagnostics; release records are keyed by atomic
-   address and producer subgroup, and acquires import producer epochs for that
-   address. Address+value keying remains a future precision experiment, not the
-   current path.
+   The source-level atomics package is complete through Stage 16. The stable
+   description is now `docs/atomics.md`: it defines address-scoped release
+   records, pairwise acquired epoch tokens, supported atomic operations,
+   paired-fence semantics, address-only false-negative risk, sampled-reporting
+   caveats, and current RDNA4 cost. `docs/atomics_plan.md` remains the
+   implementation history and future-work tracker.
 
-   Stage 7 added a narrow internal fast path for release-capable RMWs in
-   workgroups with more than two subgroups. Those RMWs populate a
-   direct-mapped address-scoped producer-mask cache, while release stores,
-   fence-published relaxed stores, and two-subgroup RMWs stay on the generic
-   atomic-object table. The main measured win is
-   `rdna4-wmma-streamk-tree-atomic-or_context`, which moved from 49.2 µs to
-   43.6 µs on the local RDNA4 machine. The trade-off is visible in resource
-   pressure: the tree row is still spill-free, but SGPR pressure rises from 78
-   to 82; VGPRs stay at 52.
-
-   Stage 10 is now complete as an inventory step:
-   `docs/dbi_atomic_seeds.md` records DBI-oriented atomic instruction seeds
-   from RocJITsu and related corpora, while keeping hardware-level DBI
-   semantics separate from the HIP/LLVM source-level diagnostic model.
-
-   Stage 11 added source-level `atomic_exchange` and
-   `atomic_compare_exchange_strong` wrappers with tests and benchmarks for
-   exchange handoff, successful lock-like CAS, and failed acquire CAS. Stage 12
-   added release/acquire fences paired with relaxed RMW atomics. Stage 13
-   expands paired-fence coverage to relaxed exchange, successful relaxed CAS,
-   failed relaxed CAS as an acquire-side observation, and a `seq_cst`
-   load/store sanity row. Naked fences still do not create ordering in
-   hip-moi's source-level model.
-
-   Stage 14 begins atomics optimization in the general `hip_moi::context`
-   rather than by creating a separate atomics fast context. The first cleanup
-   keeps synchronization metadata exhaustive but skips the direct-mapped RMW
-   producer-mask cache probe for one- and two-subgroup acquire imports, because
-   that cache is populated only for workgroups with more than two subgroups.
-   The refreshed RDNA4 rows remain spill-free with unchanged VGPR pressure;
-   SGPR pressure drops in several two-subgroup atomics rows.
-
-   Stage 15 extends the same atomics synchronization semantics to sampled
-   diagnostics in the general `context`: sampled-watchpoint reporting now
-   checks acquired-epoch tokens before emitting a conflict. The new coverage is
-   deliberately separate from `sampled_watchpoint_context`, which remains a
-   publish-only fast path. The first local benchmark row,
-   `atomic-hb-lds-handoff_context-sampled-reporting`, runs at 76.3 µs with a
-   whole-table sampled probe configuration, so it is correctness coverage, not
-   a performance target.
-
-   Stage 16 broadens source-level bitwise RMW coverage with
-   `atomic_fetch_and` and `atomic_fetch_xor`. The motivating shape is still
-   old-value-dependent bitmask control flow, like the existing Stream-K-tree
-   `atomicOr` case. Release/acquire bit clearing and bit toggling suppress LDS
-   diagnostics; relaxed producers still diagnose. The new local rows,
-   `atomic-and-bitmask-handoff` and `atomic-xor-bitmask-handoff`, are both
-   about 9 µs through `context` with 59 SGPRs, 23 VGPRs, and no spills. The
-   same corpus pass did not justify source-level min/max support yet; keep
-   min/max on the DBI or instruction-coverage side until a real source
-   synchronization protocol needs it.
+   The short version for discussion is: `hip_moi::context` supports
+   release/acquire load/store, fetch-add/or/and/xor, exchange, successful and
+   failed compare-exchange, `seq_cst` sanity coverage, and atomic fences paired
+   with relaxed atomics. All refreshed atomics `context` rows are spill-free.
+   Small two-subgroup rows are roughly 6.7 to 9.0 µs through `context`, while
+   Stream-K-shaped integration rows range from 12.5 µs to 42.7 µs. VGPR
+   pressure is controlled; remaining cost is mostly metadata protocol work and
+   global metadata traffic.
 
 ## Non-Goals
 

@@ -212,6 +212,9 @@ instrumented access that publishes the new metadata.
 
 ## Atomic Synchronization Model
 
+This section gives the algorithmic model used by the access-time checks. The
+delivery-facing atomics overview is [`atomics.md`](atomics.md).
+
 Each subgroup has one epoch counter for LDS access records. Instrumented
 full-workgroup barriers advance those counters. Atomic operations do not
 introduce another epoch hierarchy; they add pairwise ordering evidence:
