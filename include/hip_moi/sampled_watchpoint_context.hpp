@@ -45,6 +45,24 @@ namespace hip_moi
 
         __device__ void syncthreads()
         {
+            barrier();
+        }
+
+        __device__ void release_fence(atomic_memory_scope scope, site_id site = no_site_id) const
+        {
+            (void)site;
+            detail::atomic_fence_dispatch(atomic_memory_order::release, scope);
+        }
+
+        __device__ void acquire_fence(atomic_memory_scope scope, site_id site = no_site_id) const
+        {
+            (void)site;
+            detail::atomic_fence_dispatch(atomic_memory_order::acquire, scope);
+        }
+
+        __device__ void barrier(site_id site = no_site_id)
+        {
+            (void)site;
             __syncthreads();
             ++epoch_;
             __syncthreads();

@@ -432,6 +432,20 @@ epoch, and performs another `__syncthreads()`. For the general context, thread
 0 advances stored subgroup epochs. For `sampled_watchpoint_context`, each
 thread increments its local epoch.
 
+The lower-level workgroup-barrier spelling is also supported:
+
+```c++
+ctx.release_fence(hip_moi::atomic_memory_scope::workgroup, HIP_MOI_SITE_ID());
+ctx.barrier(HIP_MOI_SITE_ID());
+ctx.acquire_fence(hip_moi::atomic_memory_scope::workgroup, HIP_MOI_SITE_ID());
+```
+
+`ctx.release_fence()` and `ctx.acquire_fence()` emit native fences but do not
+interact with the address-scoped atomic-fence state. `ctx.barrier()` performs
+the full-workgroup barrier and advances the epoch, so the sequence above is
+equivalent to `ctx.syncthreads()` for hip-moi diagnostics. Fences without
+`ctx.barrier()` do not advance the epoch and do not order LDS diagnostics.
+
 `hip_moi::context` also models release/acquire synchronization through
 instrumented atomic operations, as described in
 [Atomic Synchronization Model](#atomic-synchronization-model). Atomic ordering
@@ -439,10 +453,10 @@ does not advance the barrier epoch. It records producer epochs observed by
 consumer subgroups and lets the LDS conflict predicate suppress conflicts that
 are ordered by those acquire observations.
 
-Fence-only modeling is intentionally out of scope. Fences contribute to
-inter-thread synchronization when paired with operations, typically atomics,
-that can create synchronizes-with edges. The implemented fence support is
-therefore limited to release/acquire fences paired with relaxed atomics.
+Fence-only modeling is intentionally out of scope. Workgroup fences need
+`ctx.barrier()` to form a full-workgroup epoch boundary. Atomic fences need a
+paired atomic operation, as described above, to create address-scoped ordering
+tokens.
 
 Subgroup-local barriers are not modeled as synchronization operations.
 

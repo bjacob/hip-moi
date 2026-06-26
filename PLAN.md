@@ -73,13 +73,18 @@ The current diagnostic condition is:
   synchronization orders the two accesses.
 
 `ctx.syncthreads()` performs a real full-workgroup barrier and advances the
-epoch. `hip_moi::context` also models release/acquire ordering through
-instrumented atomic operations by recording address-scoped release metadata
-and pairwise acquired-epoch tokens between producer and consumer subgroups.
+epoch. The lower-level workgroup spelling
+`ctx.release_fence(hip_moi::atomic_memory_scope::workgroup); ctx.barrier();
+ctx.acquire_fence(hip_moi::atomic_memory_scope::workgroup);` is also supported;
+`ctx.barrier()` is the epoch boundary, and the fence wrappers emit native
+fences so source instrumentation can mirror HIP or Clang builtin spellings.
+`hip_moi::context` also models release/acquire ordering through instrumented
+atomic operations by recording address-scoped release metadata and pairwise
+acquired-epoch tokens between producer and consumer subgroups.
 
-Fence-only modeling is intentionally out of scope. Fence semantics become
-useful for inter-thread synchronization when paired with operations, typically
-atomics, that can create synchronizes-with edges.
+Fence-only modeling is intentionally out of scope. Workgroup fences need
+`ctx.barrier()` to order LDS diagnostics; atomic fences need a paired atomic
+operation that can create synchronizes-with edges.
 
 ## Implementation Status
 

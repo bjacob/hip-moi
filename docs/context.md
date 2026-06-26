@@ -45,13 +45,13 @@ Use the general `hip_moi::context` when you want diagnostics:
 * sampled watchpoint diagnostics in reporting mode,
 * metadata saturation diagnostics,
 * destructor or `HIP_MOI_CHECK` host reporting,
-* future synchronization models beyond full-workgroup barriers.
+* source-level release/acquire atomics and full-workgroup barriers.
 
 Use `hip_moi::sampled_watchpoint_context` only for the current narrow fast path:
 
 * sampled watchpoint publication only,
 * fixed compile-time sampled policy,
-* full-workgroup barriers through `ctx.syncthreads()`,
+* full-workgroup barriers through `ctx.syncthreads()` or `ctx.barrier()`,
 * source-instrumented kernels where the LDS byte offset is already known,
 * benchmark rows that should resemble the Jakub-Sampled-Loom publish-only path.
 
@@ -218,6 +218,20 @@ __global__ void diagnostic_kernel(hip_moi::context::storage_ref storage,
     }
 }
 ```
+
+Code that mirrors lower-level native workgroup synchronization can spell the
+same epoch boundary as:
+
+```c++
+ctx.release_fence(hip_moi::atomic_memory_scope::workgroup, HIP_MOI_SITE_ID());
+ctx.barrier(HIP_MOI_SITE_ID());
+ctx.acquire_fence(hip_moi::atomic_memory_scope::workgroup, HIP_MOI_SITE_ID());
+```
+
+`ctx.barrier()` is the full-workgroup epoch boundary. The release/acquire fence
+wrappers emit native fences and keep this spelling close to the underlying HIP
+or Clang builtins. Fences without `ctx.barrier()` do not advance hip-moi's
+epoch.
 
 Host setup:
 

@@ -24,10 +24,16 @@ The implemented synchronization model is full-workgroup barriers:
 
 ```c++
 ctx.syncthreads();
+ctx.release_fence(hip_moi::atomic_memory_scope::workgroup);
+ctx.barrier();
+ctx.acquire_fence(hip_moi::atomic_memory_scope::workgroup);
 ```
 
-Atomics, release/acquire ordering, fences paired with atomics, and
-subgroup-local synchronization are future semantic work.
+The lower-level release-fence/barrier/acquire-fence sequence mirrors native
+barrier spellings and is equivalent to `ctx.syncthreads()` for hip-moi
+diagnostics. The current implementation also supports source-level
+release/acquire atomic ordering, including fences paired with atomics. Subgroup
+local synchronization remains out of scope.
 
 ## Context Split
 
@@ -38,7 +44,7 @@ surface for:
 * sampled-watchpoint reporting mode;
 * `metadata_full` diagnostics;
 * host reporting through `HIP_MOI_CHECK` and `host_context` destructors;
-* future synchronization models beyond full-workgroup barriers.
+* source-level release/acquire atomics and full-workgroup barriers.
 
 `hip_moi::sampled_watchpoint_context` is a narrow publish-only fast view. It is
 for benchmark-sensitive kernels that want to measure low-overhead sampled
@@ -82,9 +88,9 @@ lesson is narrower:
 * attention-like workloads expose different bottlenecks than isolated matmul,
   especially when scalar score/weight LDS scratch is instrumented.
 
-## Next Scope Increase
+## Recent Scope Increase
 
-The next semantic expansion is atomics. It belongs first in
+The most recent semantic expansion was atomics. It belongs in
 `hip_moi::context`, because atomics require a real synchronization model beyond
 the local epoch used by `sampled_watchpoint_context`. The concrete staged plan
 is [`atomics_plan.md`](atomics_plan.md), and the source corpus inventory is
@@ -102,6 +108,6 @@ The atomics design should specify:
 * how conflicts are diagnosed;
 * which shortcuts, if any, are allowed in publish-only benchmark paths.
 
-Fence-only modeling remains out of scope. A fence becomes useful for
-inter-thread synchronization only together with an operation, typically an
-atomic, that can create a synchronizes-with edge.
+Fence-only modeling remains out of scope. Workgroup fences become useful when
+paired with `ctx.barrier()`; atomic fences become useful when paired with an
+atomic operation that can create a synchronizes-with edge.
