@@ -211,10 +211,9 @@ instrumented access that publishes the new metadata.
 
 ## Atomic Synchronization Model
 
-Atomics do not replace barrier epochs with one global epoch, and they do not
-add a nested layer of per-subgroup epochs inside each barrier epoch. There is
-still only one epoch counter per subgroup for LDS access records. Atomic
-synchronization adds pairwise ordering evidence:
+Each subgroup has one epoch counter for LDS access records. Instrumented
+full-workgroup barriers advance those counters. Atomic operations do not
+introduce another epoch hierarchy; they add pairwise ordering evidence:
 
 ```text
 acquired_epoch_token[consumer_subgroup][producer_subgroup]
