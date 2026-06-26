@@ -75,7 +75,7 @@ The current diagnostic condition is:
 `ctx.syncthreads()` performs a real full-workgroup barrier and advances the
 epoch. `hip_moi::context` also models release/acquire ordering through
 instrumented atomic operations by recording value-sensitive release metadata
-and acquired epoch tokens between subgroups.
+and pairwise acquired-epoch tokens between producer and consumer subgroups.
 
 Fence-only modeling is intentionally out of scope. Fence semantics become
 useful for inter-thread synchronization when paired with operations, typically
@@ -294,8 +294,9 @@ READMEs now describe the current detector scope.
    `benchmarks/README.md` update, and generated-code/performance diligence
    before the next stage starts.
    `docs/instrumentation_model.md` now documents the implemented atomics model:
-   atomic synchronization preserves per-subgroup barrier epochs and adds
-   value-sensitive acquired epoch tokens for release/acquire ordering.
+   atomic synchronization preserves the ordinary per-subgroup barrier epochs
+   and adds pairwise ordering evidence for release/acquire edges. It does not
+   add nested epochs inside the barrier epoch model.
 
 ## Non-Goals
 

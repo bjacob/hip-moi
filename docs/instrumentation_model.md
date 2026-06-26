@@ -99,7 +99,7 @@ The host context lays out one device allocation into slices:
 | exact shadow | `uint64_t[]` | One exact-shadow entry per 4-byte LDS cell. |
 | sampled watchpoints | `uint64_t[]` | Software watchpoint records. |
 | atomic objects | `context::atomic_object_record[]` | Value-sensitive release metadata keyed by atomic address and released value. |
-| acquired epoch tokens | `uint32_t[]` | Per-consumer/per-producer ordering tokens created by atomic acquire operations. |
+| acquired epoch tokens | `uint32_t[]` | Pairwise ordering evidence created by atomic acquire operations. These are not additional epoch counters. |
 
 The default host storage budget is 16 MiB. `host_context_options` can either set
 explicit capacities or let the implementation derive capacities from that byte
@@ -191,20 +191,39 @@ The raw exact shadow conflict predicate is:
 * current and prior entries have different subgroup owners;
 * at least one of the two entries is a write.
 
-A raw conflict is suppressed when the current subgroup has acquired an epoch
-token covering the prior subgroup's recorded epoch. A token value of `N + 1`
-means that the consumer subgroup has acquired producer epoch `N`. Zero means
-"no acquired epoch", so representing the acquired value as `epoch + 1` lets
-epoch zero participate in atomic ordering.
+A raw conflict is suppressed when the current subgroup has acquired ordering
+evidence covering the prior subgroup's recorded epoch. The table entry is
+indexed as:
+
+```text
+acquired_epoch_token[consumer_subgroup][producer_subgroup]
+```
+
+A token value of `N + 1` means that the consumer subgroup has acquired
+producer epoch `N`. Zero means "no acquired epoch", so representing the
+acquired value as `epoch + 1` lets epoch zero participate in atomic ordering.
+This table does not create nested epochs. It is only a pairwise fact used to
+answer this question during conflict checking: "has the current subgroup
+acquired the prior subgroup's recorded epoch?"
 
 This is an immediate-checking algorithm: the check happens at the same
 instrumented access that publishes the new metadata.
 
 ## Atomic Synchronization Model
 
-Atomics do not replace barrier epochs with one global epoch. Each subgroup
-still records LDS accesses with its own current epoch. Atomic synchronization
-adds a second data structure: acquired epoch tokens between subgroups.
+Atomics do not replace barrier epochs with one global epoch, and they do not
+add a nested layer of per-subgroup epochs inside each barrier epoch. There is
+still only one epoch counter per subgroup for LDS access records. Atomic
+synchronization adds pairwise ordering evidence:
+
+```text
+acquired_epoch_token[consumer_subgroup][producer_subgroup]
+```
+
+The table answers whether a consumer subgroup has acquired a producer
+subgroup's epoch through a supported release/acquire atomic edge. It is not a
+clock that advances on every atomic operation, and it does not change either
+subgroup's current epoch.
 
 The represented synchronizes-with shape is value-sensitive release/acquire
 synchronization through an atomic object:
@@ -215,7 +234,7 @@ synchronization through an atomic object:
    the release makes observable, and the launch generation.
 3. An acquire operation performs the user atomic operation first.
 4. If the acquire observes a value with a matching release record, hip-moi
-   updates the acquired epoch token for
+   updates the pairwise acquired-epoch token for
    `(consumer subgroup, producer subgroup)`.
 5. Later exact-shadow LDS conflict checks consult that token table before
    reporting a same-epoch cross-subgroup conflict.
@@ -234,11 +253,11 @@ The API uses hip-moi memory-order and memory-scope enums. The implementation
 lowers those operations to HIP/Clang atomic builtins and separately records the
 ordering metadata described here.
 
-This adapts the epoch idea without collapsing all participants into one clock.
-A subgroup can be in epoch zero and still have acquired another subgroup's
-epoch zero through an atomic flag. Conversely, two subgroups can both be in
-the same barrier epoch and still race if no acquire operation has observed the
-release that would order the payload accesses.
+This adapts the epoch idea by adding an ordering predicate, not by adding more
+epochs. A subgroup can be in epoch zero and still have acquired another
+subgroup's epoch zero through an atomic flag. Conversely, two subgroups can
+both be in the same barrier epoch and still race if no acquire operation has
+observed the release that would order the payload accesses.
 
 `context::atomic_object_record` stores:
 
