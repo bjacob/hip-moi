@@ -24,17 +24,18 @@ The generic atomics implementation is semantically useful now:
 
 The most relevant RDNA4 rows are:
 
-| Benchmark key | Shape | Pass-through | `context` |
-| --- | --- | ---: | ---: |
-| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.35 µs | 13.3 µs |
-| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.19 µs | 12.7 µs |
-| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.49 µs | 27.6 µs |
+| Benchmark key | Shape | Pass-through | `context` | `context` resources |
+| --- | --- | ---: | ---: | --- |
+| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.38 µs | 13.4 µs | 12 B LDS, 82 SGPR, 25 VGPR, no spills |
+| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.20 µs | 12.6 µs | 16 B LDS, 84 SGPR, 60 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.47 µs | 27.5 µs | 4096 B LDS, 73 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.75 µs | 49.2 µs | 8192 B LDS, 78 SGPR, 52 VGPR, no spills |
 
-The resource counts for these rows should be refreshed after the
-address-scoped metadata change before making VGPR or SGPR claims. The latency
-signal is already clear enough to motivate the next fast-path question: the
-cost is primarily from the generic metadata protocol and from exact-shadow LDS
-instrumentation in the final fold.
+The latency and resource signals now point in the same direction: the current
+rows are spill-free, but the generic address-scoped metadata path is expensive
+enough to dominate the Stream-K-shaped rows. The cost is primarily from the
+generic metadata protocol and from exact-shadow LDS instrumentation in the
+final fold.
 
 ## Why The Generic Path Costs More
 
@@ -173,7 +174,8 @@ Measure it first on:
 * `atomic-or-bitmask-handoff`;
 * `streamk-flag-fixup`;
 * `streamk-two-tile-flag-fixup`;
-* `rdna4-wmma-streamk-arrival-counter`.
+* `rdna4-wmma-streamk-arrival-counter`;
+* `rdna4-wmma-streamk-tree-atomic-or`.
 
 Do not remove the generic table. It remains the correctness fallback and the
 right representation for dynamic atomic patterns that do not fit the cache.

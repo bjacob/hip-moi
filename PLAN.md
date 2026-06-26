@@ -280,8 +280,13 @@ READMEs now describe the current detector scope.
    `028_rdna4_wmma_streamk_arrival_counter_test.hip` and its matching
    benchmark: it keeps the diagnostic payload in LDS, uses two subgroup-local
    WMMA K-slice partials, and uses an `acq_rel fetch_add` arrival counter to
-   order the final fold. The current atomics implementation now uses an
-   address-scoped, TSan-like join model: releases record
+   order the final fold. The fourth Stage 9 row has landed as
+   `029_rdna4_wmma_streamk_tree_atomic_or_test.hip` and its matching
+   benchmark: four subgroups compute RDNA4 WMMA K-slice partials, the first
+   three publish bits with release `atomicOr`, and the final subgroup folds
+   all LDS partials after an `acq_rel atomicOr` old-mask observation. The
+   current atomics implementation now uses an address-scoped, TSan-like join
+   model: releases record
    `(atomic address, producer subgroup, generation)`, and acquires import
    producer records for the atomic address. This intentionally drops
    address+value keying from the default path to reduce VGPR pressure and to
@@ -292,9 +297,12 @@ READMEs now describe the current detector scope.
    refreshed local latency rows are 45.5 µs for
    `atomic-flag-handoff_context`, 21.1 µs for
    `atomic-metadata-release-store_context`, 8.57 to 8.97 µs for the current
-   `fetch_add` RMW rows, and 27.6 µs for
-   `rdna4-wmma-streamk-arrival-counter_context`. The diagnostic payload remains
-   LDS access; global atomics are synchronization
+   `fetch_add` RMW rows, 27.5 µs for
+   `rdna4-wmma-streamk-arrival-counter_context`, and 49.2 µs for
+   `rdna4-wmma-streamk-tree-atomic-or_context`. The refreshed Stage 9 resource
+   rows are spill-free; the highest-pressure current row is
+   `streamk-two-tile-flag-fixup_context` at 60 VGPRs and 84 SGPRs. The
+   diagnostic payload remains LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the
    completion checklist in `docs/atomics_plan.md`:

@@ -99,3 +99,5 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_streamk_two_tile_flag_protocol
                             027_streamk_two_tile_flag_protocol_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_rdna4_wmma_streamk_arrival_counter
                             028_rdna4_wmma_streamk_arrival_counter_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_rdna4_wmma_streamk_tree_atomic_or
+                            029_rdna4_wmma_streamk_tree_atomic_or_benchmark.hip)
