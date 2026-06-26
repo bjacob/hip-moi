@@ -68,11 +68,14 @@ The current diagnostic condition is:
 * two instrumented LDS accesses overlap in represented LDS byte range;
 * the accesses come from different subgroups in the same workgroup;
 * the accesses are in the same epoch;
-* at least one access is a write.
+* at least one access is a write;
+* `hip_moi::context` cannot prove that supported atomic release/acquire
+  synchronization orders the two accesses.
 
 `ctx.syncthreads()` performs a real full-workgroup barrier and advances the
-epoch. The current implemented synchronization model is not a model for
-atomics, fences, release/acquire ordering, or subgroup-local barriers.
+epoch. `hip_moi::context` also models release/acquire ordering through
+instrumented atomic operations by recording value-sensitive release metadata
+and acquired epoch tokens between subgroups.
 
 Fence-only modeling is intentionally out of scope. Fence semantics become
 useful for inter-thread synchronization when paired with operations, typically
@@ -183,6 +186,8 @@ Current entry points:
 * `docs/pingpong.md`: source survey and scope decision for ping-pong
   scheduling, `setprio`, `sched_barrier`, RDNA4 suitability, generated-code
   inspection, and optimized ATT validation;
+* `docs/atomics_plan.md`: staged atomics roadmap and current implementation
+  status;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
   current RDNA4 results.
 
@@ -288,6 +293,9 @@ READMEs now describe the current detector scope.
    instrumented test, matching benchmark,
    `benchmarks/README.md` update, and generated-code/performance diligence
    before the next stage starts.
+   `docs/instrumentation_model.md` now documents the implemented atomics model:
+   atomic synchronization preserves per-subgroup barrier epochs and adds
+   value-sensitive acquired epoch tokens for release/acquire ordering.
 
 ## Non-Goals
 

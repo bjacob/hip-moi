@@ -27,8 +27,9 @@ The active detector is subgroup-scoped:
   barriers.
 
 The current diagnostic condition is a same-epoch LDS conflict between different
-subgroups in the same workgroup. hip-moi intentionally does not diagnose
-conflicts wholly inside one subgroup.
+subgroups in the same workgroup, unless `hip_moi::context` can prove that the
+accesses are ordered by the supported atomic release/acquire model. hip-moi
+intentionally does not diagnose conflicts wholly inside one subgroup.
 
 The current access API requires the caller to supply the LDS byte offset:
 
@@ -97,6 +98,8 @@ The host context lays out one device allocation into slices:
 | counters | two `int` values | Diagnostic count and simulated-barrier arrivals. |
 | exact shadow | `uint64_t[]` | One exact-shadow entry per 4-byte LDS cell. |
 | sampled watchpoints | `uint64_t[]` | Software watchpoint records. |
+| atomic objects | `context::atomic_object_record[]` | Value-sensitive release metadata keyed by atomic address and released value. |
+| acquired epoch tokens | `uint32_t[]` | Per-consumer/per-producer ordering tokens created by atomic acquire operations. |
 
 The default host storage budget is 16 MiB. `host_context_options` can either set
 explicit capacities or let the implementation derive capacities from that byte
@@ -174,10 +177,13 @@ access does the following:
    into a 64-bit shadow entry.
 6. For each covered shadow cell, atomically exchange the cell with the current
    entry.
-7. Decode the previous entry and check the conflict predicate.
-8. Emit an `access_conflict` diagnostic if the predicate is true.
+7. Decode the previous entry and check the raw conflict predicate.
+8. If the raw predicate is true, check whether an atomic acquire has ordered
+   the current subgroup after the prior subgroup's recorded epoch.
+9. Emit an `access_conflict` diagnostic if the raw predicate is true and no
+   acquired epoch token suppresses it.
 
-The exact shadow conflict predicate is:
+The raw exact shadow conflict predicate is:
 
 * the prior entry is not empty;
 * current and prior entries have the same epoch;
@@ -185,8 +191,100 @@ The exact shadow conflict predicate is:
 * current and prior entries have different subgroup owners;
 * at least one of the two entries is a write.
 
+A raw conflict is suppressed when the current subgroup has acquired an epoch
+token covering the prior subgroup's recorded epoch. A token value of `N + 1`
+means that the consumer subgroup has acquired producer epoch `N`. Zero means
+"no acquired epoch", so representing the acquired value as `epoch + 1` lets
+epoch zero participate in atomic ordering.
+
 This is an immediate-checking algorithm: the check happens at the same
 instrumented access that publishes the new metadata.
+
+## Atomic Synchronization Model
+
+Atomics do not replace barrier epochs with one global epoch. Each subgroup
+still records LDS accesses with its own current epoch. Atomic synchronization
+adds a second data structure: acquired epoch tokens between subgroups.
+
+The represented synchronizes-with shape is value-sensitive release/acquire
+synchronization through an atomic object:
+
+1. A release operation records the releasing subgroup's current epoch in the
+   atomic-object table.
+2. The release record is keyed by the atomic object's address, the value that
+   the release makes observable, and the launch generation.
+3. An acquire operation performs the user atomic operation first.
+4. If the acquire observes a value with a matching release record, hip-moi
+   updates the acquired epoch token for
+   `(consumer subgroup, producer subgroup)`.
+5. Later exact-shadow LDS conflict checks consult that token table before
+   reporting a same-epoch cross-subgroup conflict.
+
+The current public atomic operations are:
+
+```c++
+value = ctx.atomic_load(ptr, order, scope, HIP_MOI_SITE_ID());
+ctx.atomic_store(ptr, value, order, scope, HIP_MOI_SITE_ID());
+old = ctx.atomic_fetch_add(ptr, delta, order, scope, HIP_MOI_SITE_ID());
+old = ctx.atomic_fetch_or(ptr, bits, order, scope, HIP_MOI_SITE_ID());
+ctx.atomic_fence(order, scope, HIP_MOI_SITE_ID());
+```
+
+The API uses hip-moi memory-order and memory-scope enums. The implementation
+lowers those operations to HIP/Clang atomic builtins and separately records the
+ordering metadata described here.
+
+This adapts the epoch idea without collapsing all participants into one clock.
+A subgroup can be in epoch zero and still have acquired another subgroup's
+epoch zero through an atomic flag. Conversely, two subgroups can both be in
+the same barrier epoch and still race if no acquire operation has observed the
+release that would order the payload accesses.
+
+`context::atomic_object_record` stores:
+
+| Field | Meaning |
+| --- | --- |
+| `generation` | Host launch generation that owns the record. |
+| `address` | Atomic object address. The object may be in global memory or LDS. |
+| `value` | Released value that a later acquire must observe. |
+| `releasing_subgroup_id` | Subgroup that performed the release. |
+| `releasing_epoch` | That subgroup's epoch at the release point. |
+| `release_site_id` | Source site id for the release operation. |
+
+For release stores, the released value is the stored value. For release-capable
+read-modify-write operations, the released value is the value produced by the
+operation. For example, `atomic_fetch_add(ptr, delta, release, ...)` records
+`old + delta`; `atomic_fetch_or(ptr, bits, release, ...)` records
+`old | bits`.
+
+For acquire loads, the observed value is the loaded value. For acquire-capable
+read-modify-write operations, the observed value is the old value returned by
+the hardware atomic. RMW acquire paths retry briefly because one RMW can
+observe the value produced by another RMW before the producing subgroup has
+finished publishing hip-moi's release metadata.
+
+Fence-only synchronization is not modeled. The implemented fence support is
+the standard paired-atomic shape:
+
+* a release fence records the current subgroup epoch as a pending release;
+* the next relaxed atomic store or RMW consumes that pending release and
+  publishes the released atomic value with the fence's epoch;
+* a relaxed atomic load or RMW remembers the address and value it observed;
+* a later acquire fence consumes that remembered observation and records the
+  acquire token if matching release metadata exists.
+
+The diagnostic payload remains LDS access. Global atomics are supported as
+synchronization operations because real kernels often use global flags,
+counters, or bitmasks to order work. Ordinary global loads and stores are not
+diagnosed as race payloads by hip-moi.
+
+Atomic metadata saturation is reported as `metadata_full`. Missing acquire
+metadata does not suppress an LDS conflict, so the failure mode is conservative
+for diagnostics: hip-moi may report a conflict it could not prove ordered, but
+it should not hide an unordered LDS conflict because atomic metadata was absent.
+
+`hip_moi::sampled_watchpoint_context` does not implement this atomics model. It
+is a publish-only sampled metadata path, not a diagnostic sanitizer mode.
 
 ## Sampled Watchpoint Access Algorithm
 
@@ -257,20 +355,24 @@ mode: it cannot tell a user that a race happened.
 
 ## Synchronization Model
 
-The current implemented synchronization model is deliberately narrow.
-
 `ctx.syncthreads()` performs a real `__syncthreads()`, advances the current
 epoch, and performs another `__syncthreads()`. For the general context, thread
 0 advances stored subgroup epochs. For `sampled_watchpoint_context`, each
 thread increments its local epoch.
 
-The model is therefore appropriate for kernels whose relevant ordering is
-expressed through full-workgroup barriers. It is not yet a model for atomics,
-release/acquire synchronization, fences, or subgroup-local barriers.
+`hip_moi::context` also models release/acquire synchronization through
+instrumented atomic operations, as described in
+[Atomic Synchronization Model](#atomic-synchronization-model). Atomic ordering
+does not advance the barrier epoch. It records producer epochs observed by
+consumer subgroups and lets the LDS conflict predicate suppress conflicts that
+are ordered by those acquire observations.
 
 Fence-only modeling is intentionally out of scope. Fences contribute to
 inter-thread synchronization when paired with operations, typically atomics,
-that can create synchronizes-with edges.
+that can create synchronizes-with edges. The implemented fence support is
+therefore limited to release/acquire fences paired with relaxed atomics.
+
+Subgroup-local barriers are not modeled as synchronization operations.
 
 ## What The Benchmarks Measure
 
@@ -291,4 +393,3 @@ limits.
 
 The benchmark suite and current RDNA4 numbers are documented in
 [`benchmarks/README.md`](../benchmarks/README.md).
-
