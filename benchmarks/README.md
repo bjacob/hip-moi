@@ -8,6 +8,9 @@ hip-moi-native workloads grown from the instrumented test corpus and from the
 llama.cpp/AITER shape signals recorded in
 [`attention_source_mining.md`](attention_source_mining.md).
 
+For interpretation of what the benchmark modes and current numbers imply, read
+[`docs/benchmark_interpretation.md`](../docs/benchmark_interpretation.md).
+
 All benchmark kernels route every LDS access through the selected
 instrumentation path. The `pass-through` rows are the only uninstrumented rows.
 Masked attention builds, when available, are triage-only and are not the

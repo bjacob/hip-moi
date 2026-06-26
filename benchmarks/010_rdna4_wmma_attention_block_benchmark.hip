@@ -599,6 +599,8 @@ struct PassThroughPolicy
     }
 };
 
+// Benchmark-local HIP reproduction of Jakub's sampled Loom-like policy.
+// It is not upstream HRX/Loom; use it only as the local comparison row.
 struct JakubSampledLoomPolicy
 {
     struct context_type

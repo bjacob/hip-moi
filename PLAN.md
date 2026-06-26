@@ -194,6 +194,11 @@ Current entry points:
 * `docs/atomics.md`: stable delivery-facing atomics model, including supported
   API, address-scoped release metadata, acquired epoch tokens, paired fences,
   precision trade-offs, and current RDNA4 performance interpretation;
+* `docs/loom_rfc_comparison.md`: mapping between hip-moi, the compiler-rt RFC,
+  HRX/Loom as summarized in Jakub's materials, and the benchmark-local
+  Jakub-Sampled-Loom path;
+* `docs/benchmark_interpretation.md`: interpretation of benchmark modes,
+  apples-to-apples comparisons, resource metrics, and current evidence;
 * `docs/atomics_plan.md`: staged atomics roadmap and current implementation
   status;
 * `benchmarks/README.md`: benchmark catalog, modes, resource pressure, and
@@ -214,30 +219,13 @@ The Markdown sweep is complete as of this session: the old chronological
 promises have been rewritten as implemented benchmark mappings, and the test
 READMEs now describe the current detector scope. The atomics delivery pass has
 also split the stable atomics model into `docs/atomics.md`, leaving
-`docs/atomics_plan.md` as history and future-work tracking.
+`docs/atomics_plan.md` as history and future-work tracking. The Loom/RFC and
+benchmark interpretation passes are complete in `docs/loom_rfc_comparison.md`
+and `docs/benchmark_interpretation.md`.
 
 ## Next Work
 
-1. Write a Loom/RFC comparison document.
-
-   This should map hip-moi concepts to real Loom, Jakub-Sampled-Loom, and the
-   RFC vocabulary: metadata layout, ownership, epoch advancement, access-time
-   checking, sampling, false-negative sources, and diagnostic capabilities.
-
-2. Write a benchmark interpretation document.
-
-   The benchmark README records numbers. A separate delivery document should
-   explain what those numbers imply for Loom and the RFC: which overheads come
-   from metadata traffic, which come from register pressure, which paths spill,
-   and which workload shapes are most informative.
-
-3. Tighten source comments around benchmark-local Jakub-Sampled-Loom code.
-
-   The benchmark sources contain a local comparison implementation. Comments
-   should make clear that this is Jakub's HIP prototype shape, not upstream
-   Loom itself.
-
-4. Keep ping-pong ATT validation as the guardrail for ping-pong benchmark work.
+1. Keep ping-pong ATT validation as the guardrail for ping-pong benchmark work.
 
    The optimized probe now validates pass-through and sampled hip-moi dynamic
    instruction streams through ROCprof UI JSON. SIMD 0/1 traces validate the
@@ -249,7 +237,7 @@ also split the stable atomics model into `docs/atomics.md`, leaving
    generated-code and ATT checks before latency numbers are treated as
    meaningful.
 
-5. Use the completed atomics package for delivery discussion.
+2. Use the completed atomics package for delivery discussion.
 
    The source-level atomics package is complete through Stage 16. The stable
    description is now `docs/atomics.md`: it defines address-scoped release

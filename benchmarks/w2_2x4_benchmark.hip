@@ -232,6 +232,8 @@ struct PassThroughPolicy {
   static constexpr PolicyKind kind = PolicyKind::PassThrough;
 };
 
+// Benchmark-local HIP reproduction of Jakub's sampled Loom-like policy.
+// It is not upstream HRX/Loom; use it only as the local comparison row.
 struct JakubSampledLoomPolicy {
   static constexpr bool enabled = true;
   static constexpr PolicyKind kind = PolicyKind::JakubSampledLoom;

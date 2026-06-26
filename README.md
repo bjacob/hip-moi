@@ -60,6 +60,10 @@ spill, and code-size overhead. It is not a replacement for the diagnostic API.
   sampling.
 * [docs/atomics.md](docs/atomics.md): source-level atomics model, precision
   trade-offs, paired fences, and current atomics performance interpretation.
+* [docs/loom_rfc_comparison.md](docs/loom_rfc_comparison.md): mapping between
+  hip-moi, the compiler-rt RFC, real Loom, and Jakub-Sampled-Loom.
+* [docs/benchmark_interpretation.md](docs/benchmark_interpretation.md): how to
+  read the benchmark modes, results, and resource-pressure signals.
 * [docs/context.md](docs/context.md): host/device context allocation and usage.
 * [benchmarks/README.md](benchmarks/README.md): current RDNA4 benchmark suite,
   resource pressure, and latency results.

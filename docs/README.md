@@ -47,27 +47,38 @@ interpreted.
    records, acquired epoch tokens, paired fences, address-only precision,
    fast-path limits, and current performance/resource interpretation.
 
-7. [Atomics Support Plan](atomics_plan.md)
+7. [Loom And RFC Comparison](loom_rfc_comparison.md)
+
+   Maps hip-moi concepts to the compiler-rt RFC, real HRX/Loom as summarized
+   in Jakub's local materials, and the benchmark-local Jakub-Sampled-Loom
+   policy.
+
+8. [Benchmark Interpretation](benchmark_interpretation.md)
+
+   Explains what the benchmark modes and current RDNA4 results imply for Loom,
+   the RFC, atomics, ping-pong, and future DBI work.
+
+9. [Atomics Support Plan](atomics_plan.md)
 
    Gives the staged implementation plan for user-kernel atomics: reference
    kernels, public API, atomic metadata, release/acquire handoffs, RMW
    operations, fence-plus-atomic patterns, Stream-K integration, and DBI seeds.
 
-8. [Atomics Corpus](atomics_corpus.md)
+10. [Atomics Corpus](atomics_corpus.md)
 
    Tracks the seed kernels for the atomics plan.
 
-9. [Atomics Fast-Path Notes](atomics_fast_paths.md)
+11. [Atomics Fast-Path Notes](atomics_fast_paths.md)
 
    Interprets the Stream-K-shaped atomics benchmark rows and the implemented
    Stage 7 direct RMW cache.
 
-10. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
+12. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
 
    Records atomic instruction seeds for the future rocjitsu DBI direction and
    keeps them separate from source-level HIP atomics semantics.
 
-11. [Benchmark README](../benchmarks/README.md)
+13. [Benchmark README](../benchmarks/README.md)
 
    Gives the current RDNA4 measurements and resource-pressure tables.
 
