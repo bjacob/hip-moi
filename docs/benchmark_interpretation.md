@@ -103,15 +103,17 @@ context. That is intentional: source-level atomics are synchronization
 semantics, and hip-moi must keep the release/acquire metadata exhaustive for
 diagnostics.
 
-The small atomics microbenchmarks mostly run around 6.7 to 9.0 microseconds
+The small atomics microbenchmarks mostly run around 7 to 9 microseconds
 through `context` versus about 3 microseconds pass-through. The Stream-K-shaped
-integration rows range from about 12.5 to 42.7 microseconds through `context`.
+integration rows range from about 12.4 to 45.2 microseconds through `context`.
 The current atomics resource refresh found no spills. That is a good sign:
 atomics overhead is currently metadata-protocol cost, not VGPR-spill collapse.
 
 The main atomics fast path is narrow: multi-subgroup release-capable RMWs
 populate a direct-mapped producer-mask cache. This helps the four-subgroup
 Stream-K-tree `atomicOr` row but is not a general solution to atomics overhead.
+The latest acquire-path audit also rejected two generic local shortcuts, so the
+next atomics speedup should be protocol-aware or DBI-informed.
 
 ## What The Current Data Says
 

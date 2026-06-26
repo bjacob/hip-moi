@@ -239,7 +239,7 @@ and `docs/benchmark_interpretation.md`.
 
 2. Use the completed atomics package for delivery discussion.
 
-   The source-level atomics package is complete through Stage 16. The stable
+   The source-level atomics package is complete through Stage 17. The stable
    description is now `docs/atomics.md`: it defines address-scoped release
    records, pairwise acquired epoch tokens, supported atomic operations,
    paired-fence semantics, address-only false-negative risk, sampled-reporting
@@ -250,10 +250,15 @@ and `docs/benchmark_interpretation.md`.
    release/acquire load/store, fetch-add/or/and/xor, exchange, successful and
    failed compare-exchange, `seq_cst` sanity coverage, and atomic fences paired
    with relaxed atomics. All refreshed atomics `context` rows are spill-free.
-   Small two-subgroup rows are roughly 6.7 to 9.0 µs through `context`, while
-   Stream-K-shaped integration rows range from 12.5 µs to 42.7 µs. VGPR
+   Small two-subgroup rows are roughly 7 to 9 µs through `context`, while
+   Stream-K-shaped integration rows range from 12.4 µs to 45.2 µs. VGPR
    pressure is controlled; remaining cost is mostly metadata protocol work and
-   global metadata traffic.
+   global metadata traffic. A deep acquire-path audit rejected two tempting
+   local shortcuts: conditional acquired-token publication broke the
+   four-subgroup `atomicOr` tree, and a special two-subgroup direct lookup
+   regressed the shared-context flag microbenchmark. The next meaningful
+   atomics speedup should be protocol-aware or DBI-informed, not another small
+   generic table-loop trim.
 
 ## Non-Goals
 

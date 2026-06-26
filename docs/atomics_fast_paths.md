@@ -23,20 +23,30 @@ The generic atomics implementation is semantically useful now:
   payload diagnostics;
 * deliberately relaxed or otherwise broken variants still diagnose.
 
-The most relevant RDNA4 rows after Stage 7 are:
+The most relevant RDNA4 rows after the Stage 17 performance audit are:
 
 | Benchmark key | Shape | Pass-through | `context` | `context` resources |
 | --- | --- | ---: | ---: | --- |
-| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.37 µs | 13.0 µs | 12 B LDS, 82 SGPR, 25 VGPR, no spills |
-| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.18 µs | 13.2 µs | 16 B LDS, 93 SGPR, 60 VGPR, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.48 µs | 26.6 µs | 4096 B LDS, 79 SGPR, 51 VGPR, no spills |
-| `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.77 µs | 43.6 µs | 8192 B LDS, 82 SGPR, 52 VGPR, no spills |
+| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.22 µs | 12.8 µs | 12 B LDS, 84 SGPR, 26 VGPR, no spills |
+| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.07 µs | 12.4 µs | 16 B LDS, 94 SGPR, 61 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | four WMMA K-slice partials, `atomicOr` bitmask tree | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPR, 52 VGPR, no spills |
 
 The latency and resource signals now point in the same direction: the current
 rows are spill-free, but the generic address-scoped metadata path is expensive
 enough to dominate the Stream-K-shaped rows. The cost is primarily from the
 generic metadata protocol and from exact-shadow LDS instrumentation in the
 final fold.
+
+Stage 17 also ruled out two narrower local shortcuts. Skipping the
+acquired-token `atomicMax` after a volatile read found a new-enough token
+looked like an easy way to reduce global atomic traffic, but it produced false
+diagnostics in the four-subgroup `atomicOr` tree. The acquired-token write is a
+publication point used by later LDS conflict checks. A special direct lookup
+for two-subgroup handoffs looked like an easy way to remove a loop, but it
+regressed the shared-context `atomic-flag-handoff` row from roughly 43 µs to
+roughly 270 µs. Those failures make the current recommendation stricter:
+future speedups should be protocol-aware, not generic loop shaving.
 
 ## Why The Generic Path Costs More
 
@@ -145,7 +155,7 @@ an explicit cache pointer in `storage_ref`; that raised SGPR pressure in rows
 that did not benefit. The committed version avoids that broader tax. The
 remaining trade-off is visible in the RDNA4 resource rows: the four-subgroup
 `atomicOr` tree gets a clear latency win, but SGPR pressure still rises from
-the pre-Stage-7 78 SGPRs to 82 SGPRs. VGPRs, spills, and private segment size
+the pre-Stage-7 78 SGPRs to 84 SGPRs. VGPRs, spills, and private segment size
 do not change.
 
 ## Candidate 2: Explicit Stream-K Counter Slots

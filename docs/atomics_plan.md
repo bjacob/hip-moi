@@ -47,6 +47,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 14. General-context atomics optimization | Complete | `hip_moi::context` now skips the address-cache probe for one- and two-subgroup acquire imports, where the RMW producer-mask cache is not populated. Synchronization metadata remains exhaustive; VGPRs and spills are unchanged; several atomics rows reduce SGPR pressure and some improve latency. |
 | 15. Sampled-reporting atomics correctness | Complete | The sampled-watchpoint reporting backend in the general `context` now consults acquired-epoch tokens before emitting conflicts. `008_sampled_watchpoint_backend_test.hip` covers release/acquire suppression and relaxed diagnostics; `021_atomic_happens_before_benchmark.hip` adds a sampled-reporting row. |
 | 16. Bitwise RMW source coverage | Complete | `hip_moi::context` now supports `atomic_fetch_and` and `atomic_fetch_xor`. `034_atomic_bitwise_happens_before_test.hip` covers release/acquire suppression and relaxed diagnostics for old-value-dependent bitmask handoffs; the matching benchmark records latency and resource pressure. |
+| 17. Atomics performance audit | Complete | Refreshed the atomics benchmark/resource table and rejected two tempting local shortcuts: conditional acquired-token `atomicMax` broke the four-subgroup `atomicOr` tree, and a two-subgroup direct-producer lookup regressed the shared-context flag microbenchmark. No implementation change survived this audit. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -137,6 +138,17 @@ and two-subgroup workgroups, acquire imports can therefore skip the cache probe
 and go directly to the generic atomic-object table. This preserves the same
 address-scoped release/acquire model and keeps synchronization metadata
 exhaustive.
+
+Stage 17 checked whether there was another low-risk local optimization hiding
+in the acquire path. Two candidates were rejected. First, reading an acquired
+epoch token and skipping `atomicMax` when it was already large enough caused
+false diagnostics in the four-subgroup `atomicOr` tree. The acquired-token
+update must remain an unconditional publication step in the current design.
+Second, a two-subgroup direct-producer lookup regressed the
+`atomic-flag-handoff` shared-context row from tens of microseconds to roughly
+270 microseconds. The conclusion is that the next major atomics speedup should
+not come from shaving the existing generic table loop; it should come from a
+protocol-aware fast path or from the future DBI-level design.
 
 The first supported memory-ordering rule should be release/acquire
 synchronization through an atomic object:
@@ -322,7 +334,7 @@ site.
 This stage intentionally does not suppress LDS diagnostics. The metadata is
 recorded but not yet queried by the LDS conflict predicate. The Stage 3
 benchmark shows the first cost baseline after the address-scoped metadata
-change: `atomic-metadata-release-store` is 3.44 µs pass-through and 21.1 µs
+change: `atomic-metadata-release-store` is 3.43 µs pass-through and 18.3 µs
 through `context` on the local RDNA4 machine. Resource counts should be
 refreshed before drawing VGPR or SGPR conclusions from this row.
 
@@ -394,7 +406,7 @@ release/acquire global flag orders an instrumented LDS payload and reports no
 diagnostic; a relaxed flag store with the same LDS payload still reports a
 deterministic conflict; and releasing one flag does not order a consumer that
 acquires a different relaxed-published flag. The first benchmark row is
-`atomic-hb-lds-handoff`: 3.33 µs pass-through and 8.93 µs through `context` on
+`atomic-hb-lds-handoff`: 3.11 µs pass-through and 8.96 µs through `context` on
 the local RDNA4 machine after the address-scoped metadata change. Resource
 counts should be refreshed before using this row as VGPR or SGPR evidence.
 
@@ -449,8 +461,8 @@ are never deleted within one generation, so a stale slot terminates an
 open-addressing probe chain unless another thread is actively claiming that
 slot. This mainly helps spin loops before the releasing subgroup has published
 metadata. Current local RDNA4 numbers after the address-scoped join change are
-21.1 µs for `atomic-metadata-release-store_context`, 45.5 µs for
-`atomic-flag-handoff_context`, and 8.93 µs for
+18.3 µs for `atomic-metadata-release-store_context`, 43.2 µs for
+`atomic-flag-handoff_context`, and 8.96 µs for
 `atomic-hb-lds-handoff_context`. The flag-handoff row is the clearest sign that
 the acquire side needs a cheaper address-scoped lookup path.
 
@@ -553,17 +565,17 @@ Current local RDNA4 rows are:
 
 | Benchmark key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-rmw-arrival-counter` | 3.45 µs | 8.23 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
-| `atomic-rmw-acq-rel-chain` | 3.25 µs | 8.93 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
-| `atomic-or-bitmask-handoff` | 3.21 µs | 8.75 µs | 8 B LDS, 63 SGPR, 23 VGPR, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | 3.48 µs | 26.6 µs | 4096 B LDS, 79 SGPR, 51 VGPR, no spills |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.77 µs | 43.6 µs | 8192 B LDS, 82 SGPR, 52 VGPR, no spills |
+| `atomic-rmw-arrival-counter` | 3.18 µs | 8.13 µs | 8 B LDS, 58 SGPR, 23 VGPR, no spills |
+| `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.92 µs | 8 B LDS, 57 SGPR, 23 VGPR, no spills |
+| `atomic-or-bitmask-handoff` | 3.10 µs | 7.96 µs | 8 B LDS, 58 SGPR, 23 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPR, 52 VGPR, no spills |
 
 The main positive result is the four-subgroup `atomicOr` tree row: it improves
-from the previous 49.2 µs `context` result to 43.6 µs. The limit is equally
+from the previous 49.2 µs `context` result to 45.2 µs. The limit is equally
 important: the cache does not attack exact-shadow LDS instrumentation in the
 final fold, and it raises SGPR pressure in the tree row from the previous 78
-SGPRs to 82 SGPRs. There are still no spills or private segment use.
+SGPRs to 84 SGPRs. There are still no spills or private segment use.
 
 ## Stage 8: Fences Paired With Atomics
 
@@ -642,7 +654,7 @@ owner/helper release/acquire flag protocol to one owner subgroup looping over
 two helper flags and folding two LDS helper partials. The ordered variant is
 quiet; the broken variant makes the second helper publish with a relaxed store
 and diagnoses the corresponding LDS payload handoff. The local RDNA4 benchmark
-row is 3.37 µs pass-through and 13.0 µs through `context` after the
+row is 3.22 µs pass-through and 12.8 µs through `context` after the
 address-scoped metadata change.
 
 The second integration rung landed in
@@ -652,8 +664,8 @@ RocJITsu two-tile ownership shape: four subgroups form two independent
 owner/helper tile fixups, with one release/acquire flag per tile. The ordered
 variant is quiet; the broken variant makes the second tile's helper publish
 with a relaxed store and diagnoses that tile's LDS payload handoff. The local
-RDNA4 benchmark row is 3.18 µs pass-through and 13.2 µs through `context`.
-The refreshed resource row is 16 B LDS, 93 SGPRs, 60 VGPRs, no spills, and no
+RDNA4 benchmark row is 3.07 µs pass-through and 12.4 µs through `context`.
+The refreshed resource row is 16 B LDS, 94 SGPRs, 61 VGPRs, no spills, and no
 private segment.
 
 The third integration rung landed in
@@ -663,8 +675,8 @@ arrival-counter path in `hip-matmul/matmul_rdna4.hip`: two subgroups compute
 two RDNA4 WMMA K-slice partials, publish their LDS partials with an
 `acq_rel fetch_add` counter, and the final subgroup folds both LDS partials.
 The ordered variant is quiet; the relaxed-counter variant diagnoses the final
-fold. The local RDNA4 benchmark row is 3.48 µs pass-through and 26.6 µs through
-`context`. The refreshed resource row is 4096 B LDS, 79 SGPRs, 51 VGPRs, no
+fold. The local RDNA4 benchmark row is 3.40 µs pass-through and 25.5 µs through
+`context`. The refreshed resource row is 4096 B LDS, 75 SGPRs, 51 VGPRs, no
 spills, and no private segment. An earlier single-lane fold draft was rejected
 because it distorted
 the benchmark by making one lane perform every instrumented partial load; the
@@ -678,8 +690,8 @@ subgroups compute four RDNA4 WMMA K-slice partials; the first three subgroups
 publish bits with release `atomicOr`; the final subgroup waits for those bits,
 uses an `acq_rel atomicOr` old-mask observation, and folds all four LDS
 partials. The ordered variant is quiet; the relaxed-producer variant diagnoses
-the final fold. The local RDNA4 benchmark row is 3.77 µs pass-through and
-43.6 µs through `context`. The refreshed resource row is 8192 B LDS, 82 SGPRs,
+the final fold. The local RDNA4 benchmark row is 3.66 µs pass-through and
+45.2 µs through `context`. The refreshed resource row is 8192 B LDS, 84 SGPRs,
 52 VGPRs, no spills, and no private segment.
 
 Stage 9 has served its purpose for Stage 7. Do not widen this source-level
@@ -748,9 +760,9 @@ acquire load and imports producer epochs for that atomic address.
 
 | Key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-exchange-handoff` | 3.37 µs | 8.56 µs | 4 B LDS, 62 SGPRs, 23 VGPRs, no spills |
-| `atomic-cas-lock-handoff` | 3.06 µs | 7.47 µs | 4 B LDS, 63 SGPRs, 23 VGPRs, no spills |
-| `atomic-failed-cas-acquire` | 3.11 µs | 7.10 µs | 4 B LDS, 62 SGPRs, 23 VGPRs, no spills |
+| `atomic-exchange-handoff` | 3.07 µs | 8.19 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-cas-lock-handoff` | 2.98 µs | 7.01 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-failed-cas-acquire` | 3.06 µs | 6.86 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
 
 ## Stage 12: Fences Paired With Relaxed RMWs
 
@@ -834,17 +846,17 @@ Selected local RDNA4 rows after the change:
 
 | Key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-hb-lds-handoff` | 3.32 µs | 8.88 µs | 4 B LDS, 55 SGPRs, 23 VGPRs, no spills |
-| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs | 8 B LDS, 57 SGPRs, 23 VGPRs, no spills |
-| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs | 8 B LDS, 56 SGPRs, 23 VGPRs, no spills |
-| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs | 8 B LDS, unchanged VGPR pressure, no spills |
-| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
-| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
-| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
-| `streamk-flag-fixup` | 3.20 µs | 12.5 µs | 12 B LDS, 82 SGPRs, 25 VGPRs, no spills |
-| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | 16 B LDS, 93 SGPRs, 60 VGPRs, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | 4096 B LDS, 73 SGPRs, 51 VGPRs, no spills |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | 8192 B LDS, 82 SGPRs, 52 VGPRs, no spills |
+| `atomic-hb-lds-handoff` | 3.11 µs | 8.96 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
+| `atomic-rmw-arrival-counter` | 3.18 µs | 8.13 µs | 8 B LDS, 58 SGPRs, 23 VGPRs, no spills |
+| `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.92 µs | 8 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-or-bitmask-handoff` | 3.10 µs | 7.96 µs | 8 B LDS, 58 SGPRs, 23 VGPRs, no spills |
+| `atomic-exchange-handoff` | 3.07 µs | 8.19 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-cas-lock-handoff` | 2.98 µs | 7.01 µs | 4 B LDS, 57 SGPRs, 23 VGPRs, no spills |
+| `atomic-failed-cas-acquire` | 3.06 µs | 6.86 µs | 4 B LDS, 56 SGPRs, 23 VGPRs, no spills |
+| `streamk-flag-fixup` | 3.22 µs | 12.8 µs | 12 B LDS, 84 SGPRs, 26 VGPRs, no spills |
+| `streamk-two-tile-flag-fixup` | 3.07 µs | 12.4 µs | 16 B LDS, 94 SGPRs, 61 VGPRs, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPRs, 51 VGPRs, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPRs, 52 VGPRs, no spills |
 
 ## Stage 15: Sampled-Reporting Atomics Correctness
 
@@ -877,7 +889,7 @@ Local RDNA4 check:
 | `HipMoiSampledWatchpointBackend.AtomicReleaseAcquireOrdersSampledDiagnostics` | passed |
 | `HipMoiSampledWatchpointBackend.RelaxedAtomicDoesNotOrderSampledDiagnostics` | passed |
 | `atomic-hb-lds-handoff_pass-through` | 3.11 µs |
-| `atomic-hb-lds-handoff_context` | 8.99 µs |
+| `atomic-hb-lds-handoff_context` | 8.96 µs |
 | `atomic-hb-lds-handoff_context-sampled-reporting` | 76.3 µs |
 
 The sampled-reporting benchmark uses `probe_count=0`, so it scans the entire
@@ -911,15 +923,15 @@ Local RDNA4 rows:
 
 | Key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-and-bitmask-handoff` | 2.93 µs | 8.99 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
-| `atomic-xor-bitmask-handoff` | 3.08 µs | 8.85 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
+| `atomic-and-bitmask-handoff` | 2.89 µs | 8.94 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
+| `atomic-xor-bitmask-handoff` | 3.02 µs | 8.91 µs | 4 B LDS, 59 SGPRs, 23 VGPRs, no spills |
 
 These rows are in the same latency and VGPR band as the existing two-subgroup
 RMW coverage. They do not motivate a new fast path on their own.
 
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 16.
+1. The current atomics plan is complete through Stage 17.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
 3. If sampled-reporting atomics become performance-relevant, add a low-probe
@@ -931,3 +943,6 @@ RMW coverage. They do not motivate a new fast path on their own.
    source-level synchronization payload needs them.
 5. Any future atomics work should start by deciding whether it belongs to the
    HIP/LLVM source-level detector or to the hardware-level DBI track.
+6. Do not re-try generic acquire-loop shaving without a new reason. Stage 17
+   already rejected conditional acquired-token publication and a special
+   two-subgroup direct-producer lookup.

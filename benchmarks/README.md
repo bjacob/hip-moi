@@ -269,27 +269,27 @@ are intentionally part of the semantic coverage.
 
 | Key | pass-through | `context` | `context-sampled-reporting` |
 | --- | ---: | ---: | ---: |
-| `atomic-flag-handoff` | 7.26 µs | 45.5 µs | n/a |
-| `atomic-metadata-release-store` | 3.44 µs | 21.1 µs | n/a |
-| `atomic-hb-lds-handoff` | 3.11 µs | 8.99 µs | 76.3 µs |
-| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs | n/a |
-| `atomic-rmw-acq-rel-chain` | 3.22 µs | 8.97 µs | n/a |
-| `atomic-or-bitmask-handoff` | 3.11 µs | 8.38 µs | n/a |
-| `atomic-fence-handoff` | 3.10 µs | 6.83 µs | n/a |
-| `atomic-exchange-handoff` | 3.08 µs | 8.61 µs | n/a |
-| `atomic-cas-lock-handoff` | 2.98 µs | 6.99 µs | n/a |
-| `atomic-failed-cas-acquire` | 3.05 µs | 6.81 µs | n/a |
-| `atomic-fence-rmw-handoff` | 3.16 µs | 8.62 µs | n/a |
-| `atomic-fence-exchange` | 3.05 µs | 8.60 µs | n/a |
-| `atomic-fence-successful-cas` | 2.99 µs | 6.67 µs | n/a |
+| `atomic-flag-handoff` | 8.07 µs | 43.2 µs | n/a |
+| `atomic-metadata-release-store` | 3.43 µs | 18.3 µs | n/a |
+| `atomic-hb-lds-handoff` | 3.11 µs | 8.96 µs | 76.3 µs |
+| `atomic-rmw-arrival-counter` | 3.18 µs | 8.13 µs | n/a |
+| `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.92 µs | n/a |
+| `atomic-or-bitmask-handoff` | 3.10 µs | 7.96 µs | n/a |
+| `atomic-fence-handoff` | 3.01 µs | 6.96 µs | n/a |
+| `atomic-exchange-handoff` | 3.07 µs | 8.19 µs | n/a |
+| `atomic-cas-lock-handoff` | 2.98 µs | 7.01 µs | n/a |
+| `atomic-failed-cas-acquire` | 3.06 µs | 6.86 µs | n/a |
+| `atomic-fence-rmw-handoff` | 3.09 µs | 8.45 µs | n/a |
+| `atomic-fence-exchange` | 3.08 µs | 8.61 µs | n/a |
+| `atomic-fence-successful-cas` | 3.00 µs | 6.69 µs | n/a |
 | `atomic-fence-failed-cas` | 3.06 µs | 6.87 µs | n/a |
-| `atomic-seq-cst-handoff` | 3.09 µs | 8.79 µs | n/a |
-| `atomic-and-bitmask-handoff` | 2.93 µs | 8.99 µs | n/a |
-| `atomic-xor-bitmask-handoff` | 3.08 µs | 8.85 µs | n/a |
-| `streamk-flag-fixup` | 3.20 µs | 12.5 µs | n/a |
-| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | n/a |
-| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | n/a |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | n/a |
+| `atomic-seq-cst-handoff` | 3.09 µs | 8.84 µs | n/a |
+| `atomic-and-bitmask-handoff` | 2.89 µs | 8.94 µs | n/a |
+| `atomic-xor-bitmask-handoff` | 3.02 µs | 8.91 µs | n/a |
+| `streamk-flag-fixup` | 3.22 µs | 12.8 µs | n/a |
+| `streamk-two-tile-flag-fixup` | 3.07 µs | 12.4 µs | n/a |
+| `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | n/a |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | n/a |
 
 ## Reading The Suite
 
@@ -334,6 +334,15 @@ cleaner generated code and lower SGPR pressure in the two-subgroup atomics
 rows; VGPR pressure stays unchanged and all refreshed atomics rows remain
 spill-free.
 
+A later atomics performance audit tried two smaller local shortcuts and
+rejected both. First, avoiding the acquired-token `atomicMax` when a volatile
+read already showed a new-enough token caused false diagnostics in the
+four-subgroup `atomicOr` tree. The acquired-token write is therefore a required
+publication step, not just a redundant metadata update. Second, a special
+two-subgroup direct-producer lookup badly regressed the
+`atomic-flag-handoff` shared-context microbenchmark. The current generic
+two-subgroup path remains the stable implementation.
+
 The atomic flag handoff row records release-side atomic-object metadata for a
 raw LDS payload. The metadata release-store row isolates the release-side
 table-recording cost. The happens-before LDS handoff row is the first row where
@@ -341,7 +350,7 @@ atomic metadata affects LDS diagnostics: a release/acquire global flag orders
 an instrumented LDS payload handoff, while the deliberately relaxed variant
 still diagnoses. These rows show that the current address-scoped publication
 and acquire paths are correct enough for the staged model, but not yet cheap;
-`atomic-flag-handoff_context` rose to 45.5 µs after address-scoped acquire
+`atomic-flag-handoff_context` is 43.2 µs after address-scoped acquire
 imports.
 
 The `atomic-hb-lds-handoff_context-sampled-reporting` row checks that sampled
@@ -397,14 +406,14 @@ cache did not pay for itself on those shapes.
 The Stream-K flag fixup rows are integration rows rather than one-edge
 microbenchmarks. They preserve RocJITsu hip-stream-k owner/helper flag
 protocols but distill the payload to LDS partials so hip-moi can diagnose the
-handoff. The one-owner/two-helper row is now 13.0 µs through `context`; the
-two-tile ownership row is now 13.2 µs through `context`.
+handoff. The one-owner/two-helper row is now 12.8 µs through `context`; the
+two-tile ownership row is now 12.4 µs through `context`.
 
 The RDNA4 WMMA Stream-K arrival-counter row is the first atomics integration
 row with WMMA arithmetic. It is not a direct global-partial Stream-K GEMM: the
 diagnostic payload is intentionally kept in LDS so hip-moi can test whether an
 arrival-counter synchronization edge orders the final fold of the partials.
-The current row is 26.6 µs through `context`. An earlier single-lane reduction
+The current row is 25.5 µs through `context`. An earlier single-lane reduction
 draft was rejected because it produced an unrepresentative 209 µs `context`
 latency by making one lane perform every instrumented partial load. The
 committed row uses lane-parallel reduction and is the better signal for the
@@ -415,21 +424,21 @@ row and the first WMMA-shaped bitmask-tree case. Four subgroups compute WMMA
 partials; the first three subgroups publish bits with release `atomicOr`; the
 final subgroup waits for those bits, performs an `acq_rel atomicOr`, and folds
 all four LDS partials. The Stage 7 direct RMW cache lowers this row from the
-previous 49.2 µs `context` result to 43.6 µs, at the cost of higher SGPR
+previous 49.2 µs `context` result to 45.2 µs, at the cost of higher SGPR
 pressure and no change in VGPRs or spills.
 
 The current atomics `context` resource refresh found no spills:
 
 | Key | Context LDS | Context SGPRs | Context VGPRs | Spills/private |
 | --- | ---: | ---: | ---: | --- |
-| `streamk-flag-fixup` | 12 B | 82 | 25 | none, 0 B |
-| `streamk-two-tile-flag-fixup` | 16 B | 93 | 60 | none, 0 B |
-| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 73 | 51 | none, 0 B |
-| `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 82 | 52 | none, 0 B |
-| `atomic-hb-lds-handoff` | 4 B | 55 | 23 | none, 0 B |
-| `atomic-rmw-arrival-counter` | 8 B | 57 | 23 | none, 0 B |
-| `atomic-rmw-acq-rel-chain` | 8 B | 56 | 23 | none, 0 B |
-| `atomic-exchange-handoff` | 4 B | 56 | 23 | none, 0 B |
+| `streamk-flag-fixup` | 12 B | 84 | 26 | none, 0 B |
+| `streamk-two-tile-flag-fixup` | 16 B | 94 | 61 | none, 0 B |
+| `rdna4-wmma-streamk-arrival-counter` | 4096 B | 75 | 51 | none, 0 B |
+| `rdna4-wmma-streamk-tree-atomic-or` | 8192 B | 84 | 52 | none, 0 B |
+| `atomic-hb-lds-handoff` | 4 B | 56 | 23 | none, 0 B |
+| `atomic-rmw-arrival-counter` | 8 B | 58 | 23 | none, 0 B |
+| `atomic-rmw-acq-rel-chain` | 8 B | 57 | 23 | none, 0 B |
+| `atomic-exchange-handoff` | 4 B | 57 | 23 | none, 0 B |
 | `atomic-cas-lock-handoff` | 4 B | 57 | 23 | none, 0 B |
 | `atomic-failed-cas-acquire` | 4 B | 56 | 23 | none, 0 B |
 | `atomic-fence-handoff` | 4 B | 57 | 23 | none, 0 B |
@@ -437,6 +446,6 @@ The current atomics `context` resource refresh found no spills:
 | `atomic-fence-exchange` | 4 B | 61 | 21 | none, 0 B |
 | `atomic-fence-successful-cas` | 4 B | 62 | 21 | none, 0 B |
 | `atomic-fence-failed-cas` | 4 B | 62 | 21 | none, 0 B |
-| `atomic-seq-cst-handoff` | 4 B | 57 | 21 | none, 0 B |
+| `atomic-seq-cst-handoff` | 4 B | 60 | 21 | none, 0 B |
 | `atomic-and-bitmask-handoff` | 4 B | 59 | 23 | none, 0 B |
 | `atomic-xor-bitmask-handoff` | 4 B | 59 | 23 | none, 0 B |

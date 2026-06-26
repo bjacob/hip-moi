@@ -260,25 +260,37 @@ Current intentional gaps:
 
 The refreshed RDNA4 atomics rows are all spill-free in the current
 `hip_moi::context` implementation. The small two-subgroup microbenchmarks
-mostly land in the 6.7 to 9.0 microsecond range through `context`, versus about
+mostly land in the 7 to 9 microsecond range through `context`, versus about
 3 microseconds pass-through. The Stream-K-shaped integration rows are more
 expensive:
 
 | Benchmark key | Pass-through | `context` | Context resources |
 | --- | ---: | ---: | --- |
-| `atomic-hb-lds-handoff` | 3.11 µs | 8.99 µs | 4 B LDS, 55 SGPR, 23 VGPR, no spills |
-| `atomic-rmw-arrival-counter` | 3.21 µs | 8.49 µs | 8 B LDS, 57 SGPR, 23 VGPR, no spills |
-| `atomic-fence-handoff` | 3.10 µs | 6.83 µs | 4 B LDS, 57 SGPR, 23 VGPR, no spills |
-| `atomic-and-bitmask-handoff` | 2.93 µs | 8.99 µs | 4 B LDS, 59 SGPR, 23 VGPR, no spills |
-| `atomic-xor-bitmask-handoff` | 3.08 µs | 8.85 µs | 4 B LDS, 59 SGPR, 23 VGPR, no spills |
-| `streamk-flag-fixup` | 3.20 µs | 12.5 µs | 12 B LDS, 82 SGPR, 25 VGPR, no spills |
-| `streamk-two-tile-flag-fixup` | 3.13 µs | 12.5 µs | 16 B LDS, 93 SGPR, 60 VGPR, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | 3.37 µs | 25.8 µs | 4096 B LDS, 73 SGPR, 51 VGPR, no spills |
-| `rdna4-wmma-streamk-tree-atomic-or` | 3.62 µs | 42.7 µs | 8192 B LDS, 82 SGPR, 52 VGPR, no spills |
+| `atomic-hb-lds-handoff` | 3.11 µs | 8.96 µs | 4 B LDS, 56 SGPR, 23 VGPR, no spills |
+| `atomic-rmw-arrival-counter` | 3.18 µs | 8.13 µs | 8 B LDS, 58 SGPR, 23 VGPR, no spills |
+| `atomic-fence-handoff` | 3.01 µs | 6.96 µs | 4 B LDS, 57 SGPR, 23 VGPR, no spills |
+| `atomic-and-bitmask-handoff` | 2.89 µs | 8.94 µs | 4 B LDS, 59 SGPR, 23 VGPR, no spills |
+| `atomic-xor-bitmask-handoff` | 3.02 µs | 8.91 µs | 4 B LDS, 59 SGPR, 23 VGPR, no spills |
+| `streamk-flag-fixup` | 3.22 µs | 12.8 µs | 12 B LDS, 84 SGPR, 26 VGPR, no spills |
+| `streamk-two-tile-flag-fixup` | 3.07 µs | 12.4 µs | 16 B LDS, 94 SGPR, 61 VGPR, no spills |
+| `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | 4096 B LDS, 75 SGPR, 51 VGPR, no spills |
+| `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | 8192 B LDS, 84 SGPR, 52 VGPR, no spills |
 
 The key interpretation is that VGPR pressure remains controlled and there are
 no spills in the current atomics rows. The remaining overhead is mostly
 metadata protocol cost: generic table probes, bounded acquire retries,
 exact-shadow LDS instrumentation, and global metadata traffic.
+
+The latest performance audit deliberately tried two obvious local shortcuts and
+left both out of the implementation. A conditional volatile load before the
+acquired-token `atomicMax` looked attractive, but it produced false diagnostics
+in the four-subgroup `atomicOr` tree. The acquired-token update is therefore a
+required publication point for later LDS conflict checks, not merely a
+redundant metadata write. A special two-subgroup direct-producer lookup also
+looked attractive, but it regressed the shared-context
+`atomic-flag-handoff_context` row from the tens of microseconds to roughly
+270 microseconds. This suggests that the remaining overhead is not removable by
+small local loop shortcuts; future speedups need a more protocol-aware fast
+path or a DBI-level design.
 
 Full benchmark context is in [`benchmarks/README.md`](../benchmarks/README.md).
