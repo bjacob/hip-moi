@@ -12,6 +12,24 @@ defines current semantics, the plan tracks implementation history and future
 work, and this note explains what the Stream-K-shaped measurements say about
 overhead and specialization.
 
+## Delivery Decision Record
+
+The current atomics fast-path position is:
+
+| Question | Current decision | Reason |
+| --- | --- | --- |
+| Should atomics use `sampled_watchpoint_context`? | No. | That context is publish-only and cannot report races. Atomics need exhaustive synchronization metadata so the detector does not miss real ordering edges and create false positives. |
+| Should release/acquire metadata stay address-scoped? | Yes, for now. | Address-only metadata avoids keeping scalar atomic values live, keeps the source-level prototype closer to future DBI, and has measured spill-free codegen. Address+value remains a precision experiment, not the default. |
+| Should the generic atomic-object table be removed? | No. | It is the authoritative correctness fallback, carries source-site information, and supports dynamic atomic patterns that do not fit the direct cache. |
+| Should we keep tuning the generic acquire loop? | Not without new evidence. | Stage 17 rejected the two obvious local trims: conditional acquired-token publication and a special two-subgroup direct lookup. |
+| What is the next plausible speedup? | A protocol-aware or DBI-informed path. | Remaining cost is dominated by metadata protocol work and global metadata traffic, not VGPR spills. |
+
+For Loom and RFC discussion, the key message is that source-level atomics
+support is semantically useful and already spill-free, but the generic
+address-scoped metadata protocol is not the performance endpoint. It is a
+reference point for what information must be represented before a lower-level
+or protocol-specialized implementation can safely remove work.
+
 ## Current Evidence
 
 The generic atomics implementation is semantically useful now:

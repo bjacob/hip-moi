@@ -15,6 +15,36 @@ kernel corpus that motivated the stages lives in
 [`atomics_corpus.md`](atomics_corpus.md). Fast-path notes live in
 [`atomics_fast_paths.md`](atomics_fast_paths.md).
 
+## Delivery Summary
+
+The source-level atomics package is complete enough for delivery discussion.
+It gives hip-moi a principled way to model atomic synchronization that orders
+LDS payload accesses, while keeping the detector's payload scope limited to
+LDS.
+
+The core design is:
+
+* release-capable atomics publish an address-scoped release record;
+* acquire-capable atomics import release records for the same atomic address;
+* imports update pairwise acquired-epoch tokens between consumer and producer
+  subgroups;
+* later LDS conflict checks consult those tokens before diagnosing a
+  same-epoch cross-subgroup LDS conflict.
+
+The most important precision trade-off is address-only joining. hip-moi does
+not currently key synchronization metadata by the scalar value stored, loaded,
+or returned by the atomic operation. This avoids keeping the atomic value live
+in the instrumentation path and maps naturally to future DBI work, but it can
+over-import release records for the same atomic address and therefore create
+false negatives.
+
+The most important performance conclusion is that current atomics rows are
+spill-free. VGPR pressure is controlled; remaining overhead comes primarily
+from global metadata traffic, generic table probes, bounded acquire retries,
+and exact-shadow LDS instrumentation. The latest audit rejected small generic
+acquire-path shortcuts, so further atomics speedups should be protocol-aware or
+DBI-informed rather than another local trim of the current table loop.
+
 ## Scope
 
 Atomics are synchronization operations in hip-moi. They are not the race
@@ -131,6 +161,62 @@ The reason is that the hardware atomic can become visible before the releasing
 thread has finished publishing hip-moi's metadata for the same source-level
 operation. The retry is bounded; if metadata is still missing, hip-moi leaves
 the LDS conflict diagnosable.
+
+## Metadata Timeline
+
+This section states exactly when hip-moi records or imports metadata relative
+to the user atomic operation.
+
+For `ctx.atomic_store`:
+
+1. If the order is release-capable, hip-moi records the current subgroup epoch
+   in the atomic-object table.
+2. If a pending release fence exists and the store is not release-capable, the
+   pending fence epoch is recorded for this atomic address.
+3. hip-moi performs the user atomic store.
+
+For `ctx.atomic_load`:
+
+1. hip-moi performs the user atomic load.
+2. If the order is acquire-capable, hip-moi imports producer release records
+   for the atomic address.
+3. hip-moi remembers the observed atomic address so that a later acquire fence
+   can import through that address.
+
+For `ctx.atomic_fetch_add`, `ctx.atomic_fetch_or`, `ctx.atomic_fetch_and`,
+`ctx.atomic_fetch_xor`, and `ctx.atomic_exchange`:
+
+1. hip-moi performs the user RMW and returns the old value to the user kernel.
+2. If the order is release-capable, hip-moi records the current subgroup epoch
+   for the atomic address.
+3. If a pending release fence exists and the RMW is not release-capable, the
+   pending fence epoch is recorded for this atomic address.
+4. If the order is acquire-capable, hip-moi imports release records for the
+   atomic address with a bounded retry loop.
+5. hip-moi remembers the observed atomic address for a later acquire fence.
+
+For `ctx.atomic_compare_exchange_strong`:
+
+1. hip-moi performs the user compare-exchange.
+2. On success, hip-moi applies the success order: release-capable success can
+   publish, non-release-capable success can consume a pending release fence,
+   and acquire-capable success can import.
+3. On failure, hip-moi applies the failure order only for acquire import. A
+   failed compare-exchange cannot publish because it does not modify the atomic
+   object and cannot consume a pending release fence.
+4. hip-moi remembers the observed atomic address for a later acquire fence.
+
+For `ctx.atomic_fence`:
+
+1. A release-capable fence stores the current subgroup epoch as pending state
+   in the device context.
+2. hip-moi emits the native atomic fence.
+3. An acquire-capable fence imports through the most recent atomic address
+   observed by the same device context.
+
+This timeline is why acquiring RMWs and compare-exchange paths retry metadata
+import. The hardware RMW can make progress before another subgroup has
+published the corresponding hip-moi metadata.
 
 ## Fences Paired With Atomics
 

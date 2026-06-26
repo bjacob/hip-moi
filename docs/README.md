@@ -12,6 +12,11 @@ interpreted.
 
 ## Reading Order
 
+For the atomics delivery discussion, read [Atomics Model](atomics.md) first,
+then [Atomics Fast-Path Notes](atomics_fast_paths.md), then the atomics rows in
+the [Benchmark README](../benchmarks/README.md). The staged plan and corpus
+notes are supporting material, not the main delivery narrative.
+
 1. [Instrumentation Model](instrumentation_model.md)
 
    Defines the terminology, metadata records, access-time algorithms,
@@ -70,8 +75,9 @@ interpreted.
 
 11. [Atomics Fast-Path Notes](atomics_fast_paths.md)
 
-   Interprets the Stream-K-shaped atomics benchmark rows and the implemented
-   Stage 7 direct RMW cache.
+   Interprets the Stream-K-shaped atomics benchmark rows, the implemented
+   direct RMW cache, and the Stage 17 decision to stop pursuing generic
+   acquire-loop trims without new evidence.
 
 12. [DBI Atomic Instruction Seeds](dbi_atomic_seeds.md)
 

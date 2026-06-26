@@ -193,7 +193,8 @@ Current entry points:
   inspection, and optimized ATT validation;
 * `docs/atomics.md`: stable delivery-facing atomics model, including supported
   API, address-scoped release metadata, acquired epoch tokens, paired fences,
-  precision trade-offs, and current RDNA4 performance interpretation;
+  exact metadata-record/import timing, precision trade-offs, and current RDNA4
+  performance interpretation;
 * `docs/loom_rfc_comparison.md`: mapping between hip-moi, the compiler-rt RFC,
   HRX/Loom as summarized in Jakub's materials, and the benchmark-local
   Jakub-Sampled-Loom path;
@@ -221,7 +222,9 @@ READMEs now describe the current detector scope. The atomics delivery pass has
 also split the stable atomics model into `docs/atomics.md`, leaving
 `docs/atomics_plan.md` as history and future-work tracking. The Loom/RFC and
 benchmark interpretation passes are complete in `docs/loom_rfc_comparison.md`
-and `docs/benchmark_interpretation.md`.
+and `docs/benchmark_interpretation.md`. The atomics delivery polish pass added
+a front-loaded delivery summary, a precise metadata timeline, and a fast-path
+decision table for Jakub-facing discussion.
 
 ## Next Work
 
