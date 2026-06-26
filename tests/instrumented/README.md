@@ -85,6 +85,11 @@ Current files:
 * `029_rdna4_wmma_streamk_tree_atomic_or_test.hip`: RDNA4-only WMMA
   Stream-K-tree-shaped `atomicOr` bitmask test where three subgroups publish
   K-slice LDS partials and the final subgroup folds them.
+* `030_atomic_exchange_compare_exchange_test.hip`: exchange and
+  compare-exchange synchronization shapes, including successful lock-like CAS
+  and failed acquire CAS.
+* `031_atomic_fence_rmw_happens_before_test.hip`: release/acquire fences paired
+  with relaxed RMW atomics.
 
 The removed single-subgroup ladder was useful while hip-moi still had a
 per-thread detector. It is deliberately gone from the active corpus so the tests

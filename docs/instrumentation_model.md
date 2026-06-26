@@ -247,12 +247,22 @@ value = ctx.atomic_load(ptr, order, scope, HIP_MOI_SITE_ID());
 ctx.atomic_store(ptr, value, order, scope, HIP_MOI_SITE_ID());
 old = ctx.atomic_fetch_add(ptr, delta, order, scope, HIP_MOI_SITE_ID());
 old = ctx.atomic_fetch_or(ptr, bits, order, scope, HIP_MOI_SITE_ID());
+old = ctx.atomic_exchange(ptr, value, order, scope, HIP_MOI_SITE_ID());
+exchanged = ctx.atomic_compare_exchange_strong(
+    ptr, &expected, desired, success_order, failure_order, scope, HIP_MOI_SITE_ID());
 ctx.atomic_fence(order, scope, HIP_MOI_SITE_ID());
 ```
 
 The API uses hip-moi memory-order and memory-scope enums. The implementation
 lowers those operations to HIP/Clang atomic builtins and separately records the
 ordering metadata described here.
+
+For exchange and fetch-style RMW operations, release-capable orders publish a
+release record for the atomic address and acquire-capable orders import release
+records for that address. For compare-exchange, the success order applies only
+when the operation actually exchanges the value. A failed compare-exchange does
+not publish a release record, but an acquire-capable failure order is modeled as
+an acquire load and imports release records for the atomic address.
 
 This adapts the epoch idea by adding an ordering predicate, not by adding more
 epochs. A subgroup can be in epoch zero and still have acquired another
@@ -325,11 +335,15 @@ Fence-only synchronization is not modeled. The implemented fence support is
 the standard paired-atomic shape:
 
 * a release fence records the current subgroup epoch as a pending release;
-* the next relaxed atomic store or RMW consumes that pending release and
-  publishes the atomic address with the fence's epoch;
+* the next relaxed atomic store or successful RMW consumes that pending release
+  and publishes the atomic address with the fence's epoch;
 * a relaxed atomic load or RMW remembers the address it observed;
 * a later acquire fence consumes that remembered address and imports release
   records for that address.
+
+A failed compare-exchange is not a release-side publication point for a pending
+release fence because it does not modify the atomic object. It can still be the
+observation consumed by a later acquire fence.
 
 The diagnostic payload remains LDS access. Global atomics are supported as
 synchronization operations because real kernels often use global flags,

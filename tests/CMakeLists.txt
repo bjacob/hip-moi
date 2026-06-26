@@ -147,3 +147,7 @@ hip_moi_add_gtest(hip_moi_instrumented_streamk_flag_protocol_test
                   instrumented/026_streamk_flag_protocol_test.hip)
 hip_moi_add_gtest(hip_moi_instrumented_streamk_two_tile_flag_protocol_test
                   instrumented/027_streamk_two_tile_flag_protocol_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_atomic_exchange_compare_exchange_test
+                  instrumented/030_atomic_exchange_compare_exchange_test.hip)
+hip_moi_add_gtest(hip_moi_instrumented_atomic_fence_rmw_happens_before_test
+                  instrumented/031_atomic_fence_rmw_happens_before_test.hip)

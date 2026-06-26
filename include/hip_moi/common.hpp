@@ -243,6 +243,43 @@ namespace hip_moi
                    || order == atomic_memory_order::seq_cst;
         }
 
+        __host__ __device__ constexpr int atomic_order_value(atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return __ATOMIC_RELAXED;
+            case atomic_memory_order::acquire:
+                return __ATOMIC_ACQUIRE;
+            case atomic_memory_order::release:
+                return __ATOMIC_RELEASE;
+            case atomic_memory_order::acq_rel:
+                return __ATOMIC_ACQ_REL;
+            case atomic_memory_order::seq_cst:
+                return __ATOMIC_SEQ_CST;
+            }
+            return __ATOMIC_SEQ_CST;
+        }
+
+        __host__ __device__ constexpr int
+            atomic_compare_exchange_failure_order_value(atomic_memory_order order)
+        {
+            switch(order)
+            {
+            case atomic_memory_order::relaxed:
+                return __ATOMIC_RELAXED;
+            case atomic_memory_order::acquire:
+                return __ATOMIC_ACQUIRE;
+            case atomic_memory_order::seq_cst:
+                return __ATOMIC_SEQ_CST;
+            case atomic_memory_order::release:
+                return __ATOMIC_RELAXED;
+            case atomic_memory_order::acq_rel:
+                return __ATOMIC_ACQUIRE;
+            }
+            return __ATOMIC_SEQ_CST;
+        }
+
         template <int Scope, typename T>
         __device__ inline T atomic_load_with_scope(T* ptr, atomic_memory_order order)
         {
@@ -319,6 +356,29 @@ namespace hip_moi
                 return __hip_atomic_fetch_or(ptr, value, __ATOMIC_SEQ_CST, Scope);
             }
             return __hip_atomic_fetch_or(ptr, value, __ATOMIC_SEQ_CST, Scope);
+        }
+
+        template <int Scope, typename T>
+        __device__ inline T atomic_exchange_with_scope(T* ptr, T value, atomic_memory_order order)
+        {
+            return __hip_atomic_exchange(ptr, value, atomic_order_value(order), Scope);
+        }
+
+        template <int Scope, typename T>
+        __device__ inline bool
+            atomic_compare_exchange_strong_with_scope(T*                  ptr,
+                                                      T*                  expected,
+                                                      T                   desired,
+                                                      atomic_memory_order success_order,
+                                                      atomic_memory_order failure_order)
+        {
+            return __hip_atomic_compare_exchange_strong(
+                ptr,
+                expected,
+                desired,
+                atomic_order_value(success_order),
+                atomic_compare_exchange_failure_order_value(failure_order),
+                Scope);
         }
 
         __device__ inline void atomic_fence_workgroup(atomic_memory_order order)
@@ -458,6 +518,49 @@ namespace hip_moi
                 return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
             }
             return atomic_fetch_or_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+        }
+
+        template <typename T>
+        __device__ inline T atomic_exchange_dispatch(T*                  ptr,
+                                                     T                   value,
+                                                     atomic_memory_order order,
+                                                     atomic_memory_scope scope)
+        {
+            switch(scope)
+            {
+            case atomic_memory_scope::workgroup:
+                return atomic_exchange_with_scope<__HIP_MEMORY_SCOPE_WORKGROUP>(ptr, value, order);
+            case atomic_memory_scope::agent:
+                return atomic_exchange_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+            case atomic_memory_scope::system:
+                return atomic_exchange_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(ptr, value, order);
+            }
+            return atomic_exchange_with_scope<__HIP_MEMORY_SCOPE_AGENT>(ptr, value, order);
+        }
+
+        template <typename T>
+        __device__ inline bool
+            atomic_compare_exchange_strong_dispatch(T*                  ptr,
+                                                    T*                  expected,
+                                                    T                   desired,
+                                                    atomic_memory_order success_order,
+                                                    atomic_memory_order failure_order,
+                                                    atomic_memory_scope scope)
+        {
+            switch(scope)
+            {
+            case atomic_memory_scope::workgroup:
+                return atomic_compare_exchange_strong_with_scope<__HIP_MEMORY_SCOPE_WORKGROUP>(
+                    ptr, expected, desired, success_order, failure_order);
+            case atomic_memory_scope::agent:
+                return atomic_compare_exchange_strong_with_scope<__HIP_MEMORY_SCOPE_AGENT>(
+                    ptr, expected, desired, success_order, failure_order);
+            case atomic_memory_scope::system:
+                return atomic_compare_exchange_strong_with_scope<__HIP_MEMORY_SCOPE_SYSTEM>(
+                    ptr, expected, desired, success_order, failure_order);
+            }
+            return atomic_compare_exchange_strong_with_scope<__HIP_MEMORY_SCOPE_AGENT>(
+                ptr, expected, desired, success_order, failure_order);
         }
 
         __device__ inline void atomic_fence_dispatch(atomic_memory_order order,

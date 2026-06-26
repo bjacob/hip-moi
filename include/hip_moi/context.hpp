@@ -327,6 +327,74 @@ namespace hip_moi
             return old_value;
         }
 
+        template <typename T>
+        __device__ T atomic_exchange(T*                  ptr,
+                                     T                   value,
+                                     atomic_memory_order order,
+                                     atomic_memory_scope scope,
+                                     site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_exchange currently supports "
+                          "4-byte and 8-byte integral values");
+            T old_value = detail::atomic_exchange_dispatch(ptr, value, order, scope);
+            if(detail::atomic_order_has_release(order))
+            {
+                record_atomic_rmw_release(ptr, sizeof(T), site);
+            }
+            else
+            {
+                consume_pending_release_fence(ptr, static_cast<uint32_t>(sizeof(T)), site);
+            }
+            if(detail::atomic_order_has_acquire(order))
+            {
+                record_atomic_acquire(ptr, kAtomicRmwAcquireRetryCount);
+            }
+            remember_observed_atomic(ptr);
+            return old_value;
+        }
+
+        template <typename T>
+        __device__ bool atomic_compare_exchange_strong(T*                  ptr,
+                                                       T*                  expected,
+                                                       T                   desired,
+                                                       atomic_memory_order success_order,
+                                                       atomic_memory_order failure_order,
+                                                       atomic_memory_scope scope,
+                                                       site_id             site = no_site_id) const
+        {
+            static_assert(detail::is_supported_atomic_value<T>::value,
+                          "hip_moi::context::atomic_compare_exchange_strong "
+                          "currently supports 4-byte and 8-byte integral values");
+            bool exchanged = detail::atomic_compare_exchange_strong_dispatch(
+                ptr, expected, desired, success_order, failure_order, scope);
+            if(exchanged)
+            {
+                if(detail::atomic_order_has_release(success_order))
+                {
+                    record_atomic_rmw_release(ptr, sizeof(T), site);
+                }
+                else
+                {
+                    consume_pending_release_fence(ptr, static_cast<uint32_t>(sizeof(T)), site);
+                }
+                if(detail::atomic_order_has_acquire(success_order))
+                {
+                    record_atomic_acquire(ptr, kAtomicRmwAcquireRetryCount);
+                }
+            }
+            else if(detail::atomic_order_has_acquire(failure_order))
+            {
+                record_atomic_acquire(ptr, kAtomicRmwAcquireRetryCount);
+            }
+            else
+            {
+                (void)site;
+            }
+            remember_observed_atomic(ptr);
+            return exchanged;
+        }
+
         __device__ void atomic_fence(atomic_memory_order order,
                                      atomic_memory_scope scope,
                                      site_id             site = no_site_id) const

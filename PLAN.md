@@ -241,7 +241,7 @@ READMEs now describe the current detector scope.
 
 5. Use the completed atomics package for the next delivery discussion.
 
-   The source-level atomics plan is complete through Stage 9 and Stage 7's
+   The source-level atomics plan is complete through Stage 12 and Stage 7's
    first fast path. `hip_moi::context` models address-scoped release/acquire
    synchronization for LDS diagnostics; release records are keyed by atomic
    address and producer subgroup, and acquires import producer epochs for that
@@ -262,6 +262,12 @@ READMEs now describe the current detector scope.
    `docs/dbi_atomic_seeds.md` records DBI-oriented atomic instruction seeds
    from RocJITsu and related corpora, while keeping hardware-level DBI
    semantics separate from the HIP/LLVM source-level diagnostic model.
+
+   Stage 11 added source-level `atomic_exchange` and
+   `atomic_compare_exchange_strong` wrappers with tests and benchmarks for
+   exchange handoff, successful lock-like CAS, and failed acquire CAS. Stage 12
+   added release/acquire fences paired with relaxed RMW atomics. Naked fences
+   still do not create ordering in hip-moi's source-level model.
 
 ## Non-Goals
 

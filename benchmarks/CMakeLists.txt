@@ -101,3 +101,7 @@ hip_moi_add_rdna4_benchmark(hip_moi_benchmark_rdna4_wmma_streamk_arrival_counter
                             028_rdna4_wmma_streamk_arrival_counter_benchmark.hip)
 hip_moi_add_rdna4_benchmark(hip_moi_benchmark_rdna4_wmma_streamk_tree_atomic_or
                             029_rdna4_wmma_streamk_tree_atomic_or_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_exchange_compare_exchange
+                            030_atomic_exchange_compare_exchange_benchmark.hip)
+hip_moi_add_rdna4_benchmark(hip_moi_benchmark_atomic_fence_rmw_happens_before
+                            031_atomic_fence_rmw_happens_before_benchmark.hip)

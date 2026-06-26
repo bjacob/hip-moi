@@ -37,6 +37,8 @@ benchmarks, documentation, and diligence notes have landed.
 | 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
 | 9. Stream-K integration tests | Complete for pre-optimization corpus | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, `028_rdna4_wmma_streamk_arrival_counter_test.hip`, and `029_rdna4_wmma_streamk_tree_atomic_or_test.hip` add Stream-K-shaped flag, ownership, RDNA4 WMMA arrival-counter, and RDNA4 WMMA bitmask-tree rows. |
 | 10. DBI-oriented atomic instruction seeds | Complete | `dbi_atomic_seeds.md` records HipKittens buffer atomics, Stream-K `atomicAdd`/`atomicOr`, hip-stream-k locks, llama count-equal, hip-fpsan atomics, and a Tensile buffer-cmpswap audit signal as DBI seeds separate from source-level HIP diagnostics. |
+| 11. Exchange and compare-exchange source shapes | Complete | `030_atomic_exchange_compare_exchange_test.hip` and matching benchmark cover release/acquire exchange, successful acquire compare-exchange lock acquisition, and failed acquire compare-exchange as an acquire load. |
+| 12. Fences paired with relaxed RMWs | Complete | `031_atomic_fence_rmw_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-fetch-add paired with relaxed-fetch-add-before-acquire-fence. Fence-only synchronization remains out of scope. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -675,10 +677,77 @@ minimal kernel candidate is HipKittens `buffer_atomic_pk_add_bf16`, because
 the instruction is explicit inline assembly rather than an inferred compiler
 lowering.
 
+## Stage 11: Exchange And Compare-Exchange Source Shapes
+
+Goal: cover source-level atomic operations that production synchronization
+protocols use for locks and token exchange.
+
+Status: complete for the first diagnostic scope. `hip_moi::context` now wraps
+`atomic_exchange` and `atomic_compare_exchange_strong`. Exchange is modeled as
+a read-modify-write operation: release-capable orders publish the current
+subgroup epoch for the atomic address, and acquire-capable orders import
+producer epochs for that address.
+
+Compare-exchange is split by outcome. A successful compare-exchange follows
+the success memory order and can both publish and acquire. A failed
+compare-exchange does not modify the atomic object, so it does not publish a
+release record and does not consume a pending release fence. If the failure
+memory order is acquire-capable, the failed compare-exchange is modeled as an
+acquire load and imports producer epochs for that atomic address.
+
+`030_atomic_exchange_compare_exchange_test.hip` covers:
+
+* release/acquire exchange ordering an LDS payload handoff;
+* a lock-like successful acquire compare-exchange after release unlock;
+* a failed acquire compare-exchange that observes the published value and
+  orders the LDS payload;
+* relaxed variants of all three cases, which still diagnose.
+
+`030_atomic_exchange_compare_exchange_benchmark.hip` records local RDNA4 rows:
+
+| Key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-exchange-handoff` | 3.37 µs | 8.56 µs | 4 B LDS, 62 SGPRs, 23 VGPRs, no spills |
+| `atomic-cas-lock-handoff` | 3.06 µs | 7.47 µs | 4 B LDS, 63 SGPRs, 23 VGPRs, no spills |
+| `atomic-failed-cas-acquire` | 3.11 µs | 7.10 µs | 4 B LDS, 62 SGPRs, 23 VGPRs, no spills |
+
+## Stage 12: Fences Paired With Relaxed RMWs
+
+Goal: expand raw-fence coverage beyond relaxed store/load flags to the RMW
+shape that appears in counter-based protocols.
+
+Status: complete for relaxed `fetch_add`. `031_atomic_fence_rmw_happens_before_test.hip`
+uses a release fence sequenced before a relaxed `fetch_add` publication and an
+acquire fence sequenced after a relaxed `fetch_add` observation. The paired
+fences suppress the ordered LDS handoff diagnostic. The same relaxed RMWs
+without fences still diagnose.
+
+The model remains intentionally paired-atomic-only:
+
+* a raw release fence arms the next relaxed atomic operation through the same
+  device `context`;
+* only an atomic operation that modifies the object can consume that pending
+  release fence and publish a release record;
+* a raw acquire fence consumes the most recent atomic address observed through
+  that context and imports release records for that address;
+* a naked fence with no paired atomic operation is not modeled as inter-subgroup
+  synchronization.
+
+`031_atomic_fence_rmw_happens_before_benchmark.hip` records the local RDNA4
+row:
+
+| Key | Pass-through | `context` | Context resources |
+| --- | ---: | ---: | --- |
+| `atomic-fence-rmw-handoff` | 3.44 µs | 8.03 µs | 8 B LDS, 63 SGPRs, 23 VGPRs, no spills |
+
 ## Immediate Next Sessions
 
-1. The current atomics plan is complete through Stage 10.
+1. The current atomics plan is complete through Stage 12.
 2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
-3. Any future atomics work should start by deciding whether it belongs to the
+3. Additional source-level atomics should be corpus-driven. Likely candidates
+   are `fetch_and`, `fetch_xor`, min/max, 64-bit production variants,
+   memory-scope-specific tests, and Clang builtin forms that appear in a real
+   workload.
+4. Any future atomics work should start by deciding whether it belongs to the
    HIP/LLVM source-level detector or to the hardware-level DBI track.
