@@ -36,7 +36,7 @@ benchmarks, documentation, and diligence notes have landed.
 | 7. RMW fast paths | Complete | Multi-subgroup release-capable RMWs now populate a direct-mapped address-scoped producer-mask cache with generic-table fallback. It improves the four-subgroup WMMA `atomicOr` tree row while leaving two-subgroup/store/fence paths on the generic table. |
 | 8. Fences paired with atomics | Complete for first standard shape | `025_atomic_fence_happens_before_test.hip` and matching benchmark cover release-fence-before-relaxed-store paired with relaxed-load-before-acquire-fence. Relaxed-without-fences still diagnoses. Relaxed RMW followed by fences, as seen in some matmul helpers, remains a separate source-model analysis item. |
 | 9. Stream-K integration tests | Complete for pre-optimization corpus | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, `028_rdna4_wmma_streamk_arrival_counter_test.hip`, and `029_rdna4_wmma_streamk_tree_atomic_or_test.hip` add Stream-K-shaped flag, ownership, RDNA4 WMMA arrival-counter, and RDNA4 WMMA bitmask-tree rows. |
-| 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
+| 10. DBI-oriented atomic instruction seeds | Complete | `dbi_atomic_seeds.md` records HipKittens buffer atomics, Stream-K `atomicAdd`/`atomicOr`, hip-stream-k locks, llama count-equal, hip-fpsan atomics, and a Tensile buffer-cmpswap audit signal as DBI seeds separate from source-level HIP diagnostics. |
 
 Current semantic trade-off: the atomic-object table is address-scoped. A
 release records `(atomic address, producer subgroup, generation)` and an
@@ -668,13 +668,17 @@ Exit criteria:
 * any DBI note clearly states when the model is hardware-level rather than
   HIP/LLVM-level.
 
+Status: complete as an inventory step. `docs/dbi_atomic_seeds.md` records the
+seed table, what rocjitsu would see, and the distinction between workload
+atomics and hip-moi detector metadata atomics. The best first future DBI
+minimal kernel candidate is HipKittens `buffer_atomic_pk_add_bf16`, because
+the instruction is explicit inline assembly rather than an inferred compiler
+lowering.
+
 ## Immediate Next Sessions
 
-1. Complete Stage 10 by recording DBI-oriented atomic instruction seeds from
-   RocJITsu and related corpora.
-2. Keep DBI-oriented atomic instruction seeds separate. If a future WMMA
-   extraction exposes interesting atomic instructions, record them in the
-   corpus notes, but do not mix hardware-level DBI semantics into the
-   source-level HIP diagnostic model.
-3. Do not pursue address+value keying unless a later false-negative study
+1. The current atomics plan is complete through Stage 10.
+2. Do not pursue address+value keying unless a later false-negative study
    makes precision, rather than overhead, the blocking problem.
+3. Any future atomics work should start by deciding whether it belongs to the
+   HIP/LLVM source-level detector or to the hardware-level DBI track.

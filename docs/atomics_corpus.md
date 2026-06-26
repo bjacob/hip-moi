@@ -13,15 +13,14 @@ Here, an atomic is a target workload operation such as `atomicAdd`,
 instruction. Atomics used inside hip-moi's own shadow metadata implementation
 are not part of this corpus.
 
-## Current hip-moi Reference State
+## Current hip-moi Corpus State
 
-`tests/reference` currently has no target workload atomics. A search for HIP
-atomics, Clang atomics, and Stream-K names in that directory found no matches.
-
-That absence is useful information: the first atomics sessions should add new
-reference kernels before adding instrumented tests. Those reference kernels
-should be ordinary HIP kernels with host-side checks, following the same shape
-as the existing reference corpus.
+`tests/reference/atomic_reference_kernels.hip` now contains the first
+RocJITsu-derived safe atomics references and compile-only broken handoff
+shapes. `tests/instrumented` contains source-level HIP atomics tests through
+release/acquire flags, RMW handoffs, fence-plus-atomic handoffs, and
+Stream-K-shaped RDNA4 WMMA rows. `docs/dbi_atomic_seeds.md` separately records
+instruction-level DBI seeds.
 
 ## Seed Sources
 

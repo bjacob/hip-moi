@@ -239,7 +239,7 @@ READMEs now describe the current detector scope.
    generated-code and ATT checks before latency numbers are treated as
    meaningful.
 
-5. Complete the DBI-oriented atomics bridge.
+5. Use the completed atomics package for the next delivery discussion.
 
    The source-level atomics plan is complete through Stage 9 and Stage 7's
    first fast path. `hip_moi::context` models address-scoped release/acquire
@@ -258,10 +258,10 @@ READMEs now describe the current detector scope.
    pressure: the tree row is still spill-free, but SGPR pressure rises from 78
    to 82; VGPRs stay at 52.
 
-   The remaining atomics item is Stage 10 in `docs/atomics_plan.md`: record
-   DBI-oriented atomic instruction seeds from RocJITsu and related corpora,
-   keeping hardware-level DBI semantics separate from the HIP/LLVM source-level
-   diagnostic model.
+   Stage 10 is now complete as an inventory step:
+   `docs/dbi_atomic_seeds.md` records DBI-oriented atomic instruction seeds
+   from RocJITsu and related corpora, while keeping hardware-level DBI
+   semantics separate from the HIP/LLVM source-level diagnostic model.
 
 ## Non-Goals
 
