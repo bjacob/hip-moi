@@ -74,7 +74,7 @@ The current diagnostic condition is:
 
 `ctx.syncthreads()` performs a real full-workgroup barrier and advances the
 epoch. `hip_moi::context` also models release/acquire ordering through
-instrumented atomic operations by recording value-sensitive release metadata
+instrumented atomic operations by recording address-scoped release metadata
 and pairwise acquired-epoch tokens between producer and consumer subgroups.
 
 Fence-only modeling is intentionally out of scope. Fence semantics become
@@ -272,21 +272,29 @@ READMEs now describe the current detector scope.
    owner/helper flag fixup test and benchmark. The two-tile Stream-K-shaped
    owner/helper fixup test and benchmark have also landed; they are quiet when
    each tile uses release/acquire publication and diagnose the deliberately
-   relaxed second-tile handoff. That row remains spill-free but raises
-   `context` pressure to 59 VGPRs and 85 SGPRs, so the next integration rung
-   should preserve arithmetic and control flow from a small RDNA4 WMMA Stream-K
-   extraction while checking register pressure closely. The first RDNA4
+   relaxed second-tile handoff. Earlier resource inspection showed that this
+   ownership shape can raise register pressure substantially, so resource
+   counts should be refreshed after the address-scoped metadata change before
+   making the next VGPR/SGPR-driven optimization decision. The first RDNA4
    WMMA-flavored Stream-K arrival-counter row has now landed as
    `028_rdna4_wmma_streamk_arrival_counter_test.hip` and its matching
    benchmark: it keeps the diagnostic payload in LDS, uses two subgroup-local
    WMMA K-slice partials, and uses an `acq_rel fetch_add` arrival counter to
-   order the final fold. It is spill-free but costs 27.4 µs through `context`
-   against a 3.47 µs pass-through baseline, with 51 VGPRs and 70 SGPRs in the
-   `context` kernel. `docs/atomics_fast_paths.md` now records the fast-path
-   decision point; its current recommendation is a small direct-mapped RMW
-   metadata cache behind the existing API, with fallback to the generic
-   address/value-keyed table. The
-   diagnostic payload remains LDS access; global atomics are synchronization
+   order the final fold. The current atomics implementation now uses an
+   address-scoped, TSan-like join model: releases record
+   `(atomic address, producer subgroup, generation)`, and acquires import
+   producer records for the atomic address. This intentionally drops
+   address+value keying from the default path to reduce VGPR pressure and to
+   align with the DBI direction. The cost is coarser synchronization and
+   possible false negatives from over-imported releases. `docs/atomics_fast_paths.md`
+   records the next performance question: whether a small direct-mapped cache
+   can accelerate the address-scoped model without changing the public API. The
+   refreshed local latency rows are 45.5 µs for
+   `atomic-flag-handoff_context`, 21.1 µs for
+   `atomic-metadata-release-store_context`, 8.57 to 8.97 µs for the current
+   `fetch_add` RMW rows, and 27.6 µs for
+   `rdna4-wmma-streamk-arrival-counter_context`. The diagnostic payload remains
+   LDS access; global atomics are synchronization
    operations, not a request to diagnose ordinary global load/store races. Each
    atomics stage must satisfy the
    completion checklist in `docs/atomics_plan.md`:
@@ -296,12 +304,8 @@ READMEs now describe the current detector scope.
    `docs/instrumentation_model.md` now documents the implemented atomics model:
    atomic synchronization preserves the ordinary per-subgroup barrier epochs
    and adds pairwise ordering evidence for release/acquire edges. It does not
-   add nested epochs inside the barrier epoch model. The current
-   address/value-keyed atomic-object table supports protocols where the
-   observed atomic value identifies the release event being acquired. Repeated
-   same-address same-value release stores need additional release identity or
-   conservative ambiguity handling before hip-moi can claim sound suppression
-   for them.
+   add nested epochs inside the barrier epoch model. Address+value keying is
+   now a possible future precision refinement, not the current implementation.
 
 ## Non-Goals
 

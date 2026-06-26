@@ -98,7 +98,7 @@ The host context lays out one device allocation into slices:
 | counters | two `int` values | Diagnostic count and simulated-barrier arrivals. |
 | exact shadow | `uint64_t[]` | One exact-shadow entry per 4-byte LDS cell. |
 | sampled watchpoints | `uint64_t[]` | Software watchpoint records. |
-| atomic objects | `context::atomic_object_record[]` | Value-sensitive release metadata keyed by atomic address and released value. |
+| atomic objects | `context::atomic_object_record[]` | Address-scoped release metadata, represented as one row per atomic address and producer subgroup. |
 | acquired epoch tokens | `uint32_t[]` | Pairwise ordering evidence created by atomic acquire operations. These are not additional epoch counters. |
 
 The default host storage budget is 16 MiB. `host_context_options` can either set
@@ -224,19 +224,19 @@ subgroup's epoch through a supported release/acquire atomic edge. It is not a
 clock that advances on every atomic operation, and it does not change either
 subgroup's current epoch.
 
-The represented synchronizes-with shape is value-sensitive release/acquire
-synchronization through an atomic object:
+The represented synchronizes-with shape is an address-scoped, TSan-like
+release/acquire synchronization object:
 
 1. A release operation records the releasing subgroup's current epoch in the
    atomic-object table.
-2. The release record is keyed by the atomic object's address, the value that
-   the release makes observable, and the launch generation.
+2. The release record is keyed by the atomic object's address, the releasing
+   subgroup, and the launch generation.
 3. An acquire operation performs the user atomic operation first.
-4. If the acquire observes a value with a matching release record, and the
-   protocol makes that observed value identify the release event, hip-moi
-   updates the pairwise acquired-epoch token for
-   `(consumer subgroup, producer subgroup)`.
-5. Later exact-shadow LDS conflict checks consult that token table before
+4. The acquire imports every release record for that atomic address, except
+   records produced by the acquiring subgroup itself.
+5. For each imported producer record, hip-moi updates the pairwise
+   acquired-epoch token for `(consumer subgroup, producer subgroup)`.
+6. Later exact-shadow LDS conflict checks consult that token table before
    reporting a same-epoch cross-subgroup conflict.
 
 The current public atomic operations are:
@@ -257,7 +257,7 @@ This adapts the epoch idea by adding an ordering predicate, not by adding more
 epochs. A subgroup can be in epoch zero and still have acquired another
 subgroup's epoch zero through an atomic flag. Conversely, two subgroups can
 both be in the same barrier epoch and still race if no acquire operation has
-observed the release that would order the payload accesses.
+imported release metadata that would order the payload accesses.
 
 `context::atomic_object_record` stores:
 
@@ -265,50 +265,41 @@ observed the release that would order the payload accesses.
 | --- | --- |
 | `generation` | Host launch generation that owns the record. |
 | `address` | Atomic object address. The object may be in global memory or LDS. |
-| `value` | Released value that a later acquire must observe. |
 | `releasing_subgroup_id` | Subgroup that performed the release. |
 | `releasing_epoch` | That subgroup's epoch at the release point. |
 | `release_site_id` | Source site id for the release operation. |
 
-For release stores, the released value is the stored value. For release-capable
-read-modify-write operations, the released value is the value produced by the
-operation. For example, `atomic_fetch_add(ptr, delta, release, ...)` records
-`old + delta`; `atomic_fetch_or(ptr, bits, release, ...)` records
-`old | bits`.
+Multiple releases from the same producer subgroup to the same atomic address
+join by keeping the maximum released producer epoch. Multiple producer
+subgroups using the same atomic address occupy separate metadata rows. An
+acquire of that address imports all producer rows for that address into the
+consumer subgroup's acquired-epoch tokens.
 
-For acquire loads, the observed value is the loaded value. For acquire-capable
-read-modify-write operations, the observed value is the old value returned by
-the hardware atomic. RMW acquire paths retry briefly because one RMW can
-observe the value produced by another RMW before the producing subgroup has
-finished publishing hip-moi's release metadata.
+The scalar value stored by a release store, returned by an acquire load, or
+returned/produced by a read-modify-write operation is not part of the current
+synchronization metadata key. This deliberately reduces VGPR pressure and
+matches the DBI-oriented direction where the atomic object address is the main
+sync-object identity. The trade-off is precision: an acquire of an atomic
+address can import release facts from releases through the same address that it
+did not actually read from. That over-approximation can hide a real LDS race,
+which is a false negative. It should not create false positives because release
+facts are joined, not overwritten.
 
-The current address-and-value-keyed representation is sufficient only when the
-synchronization protocol makes the observed atomic value identify the release
-that should be acquired, or when all same-address same-value releases carry
-equivalent ordering for the LDS payload being checked. Monotonic counters,
-unique flag values, and bitmasks whose observed values distinguish the relevant
-state are the intended shape.
-
-Repeated release stores of the same value to the same atomic object are not
-enough information for hip-moi to identify which store an acquire load read
-from. In the HIP/LLVM memory model, the acquire synchronizes with the specific
-release operation, or release sequence, that it observes; the returned scalar
-value alone does not encode that reads-from identity. If hip-moi matched only
-on `(address, value, generation)` in such a protocol, it could over-match the
-acquire to the wrong release record and incorrectly suppress an LDS diagnostic.
-Supporting that shape requires additional identity, such as a release-sequence
-identifier, a monotonic protocol value, or a conservative mode that refuses to
-use ambiguous same-value release records for suppression.
+Address+value keying remains a possible future precision refinement for
+protocols where the observed value cheaply identifies useful synchronization
+state, such as monotonic counters or bitmasks. It is not the current default.
+Even address+value keying is not a true memory-model reads-from identity for
+repeated same-address same-value release stores.
 
 Fence-only synchronization is not modeled. The implemented fence support is
 the standard paired-atomic shape:
 
 * a release fence records the current subgroup epoch as a pending release;
 * the next relaxed atomic store or RMW consumes that pending release and
-  publishes the released atomic value with the fence's epoch;
-* a relaxed atomic load or RMW remembers the address and value it observed;
-* a later acquire fence consumes that remembered observation and records the
-  acquire token if matching release metadata exists.
+  publishes the atomic address with the fence's epoch;
+* a relaxed atomic load or RMW remembers the address it observed;
+* a later acquire fence consumes that remembered address and imports release
+  records for that address.
 
 The diagnostic payload remains LDS access. Global atomics are supported as
 synchronization operations because real kernels often use global flags,

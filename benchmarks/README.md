@@ -134,16 +134,16 @@ segment notes are included when that fast row is not spill-free.
 | `attention-d128-no-score` | `015_rdna4_d128_no_score_lds_attention_benchmark.hip` | `tests/instrumented/015_rdna4_d128_no_score_lds_attention_test.hip` | production-faithful register-handoff direction, D128 shape | seq=12288, q_heads=64, kv_heads=8, gqa=8, head_dim=value_dim=128, K/V LDS only | 1024 B | 122, no spills |
 | `pingpong-private-lds` | `016_rdna4_pingpong_att_probe.hip` | `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`, `run_pingpong_att_validation.sh` | hip-moi RDNA4 ping-pong scheduling probe | 2 waves, 4 K tiles, private A/B LDS double-buffering, alternating `setprio`, WMMA live work | 4096 B | 44, no spills |
 | `pingpong-wide-cooperative-lds` | `018_rdna4_pingpong_wide_cooperative_lds_benchmark.hip` | `tests/instrumented/018_rdna4_pingpong_wide_cooperative_lds_test.hip` | hip-moi RDNA4 ping-pong sharing probe | 4 waves, 2 cooperating wave pairs, 4 K tiles, even wave stages shared B fragments, alternating `setprio`, WMMA live work | 6144 B | 48, no spills |
-| `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a; `context` row is 24 VGPRs, no spills |
-| `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a; `context` row is 23 VGPRs, no spills |
-| `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a; `context` row is 21 VGPRs, no spills |
-| `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a; `context` row is 23 VGPRs, no spills |
-| `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a; `context` row is 25 VGPRs, no spills |
-| `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a; `context` row is 24 VGPRs, no spills |
-| `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a; `context` row is 23 VGPRs, no spills |
-| `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a; `context` row is 25 VGPRs, no spills |
-| `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a; `context` row is 59 VGPRs, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a; `context` row is 51 VGPRs, no spills |
+| `atomic-flag-handoff` | `019_atomic_flag_handoff_benchmark.hip` | `tests/instrumented/019_atomic_api_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to LDS payload | 4096 workgroups, 2 subgroups/workgroup, global release/acquire flag orders raw LDS payload | 4 B | n/a (`context` only) |
+| `atomic-metadata-release-store` | `020_atomic_metadata_benchmark.hip` | `tests/instrumented/020_atomic_metadata_test.hip` | hip-moi Stage 3 metadata microbenchmark | 4096 workgroups, 2 subgroups/workgroup, one unique global release store per workgroup | 0 B | n/a (`context` only) |
+| `atomic-hb-lds-handoff` | `021_atomic_happens_before_benchmark.hip` | `tests/instrumented/021_atomic_happens_before_test.hip` | RocJITsu hip-stream-k release/acquire flag protocol, adapted to instrumented LDS payload | 256 workgroups, 2 subgroups/workgroup, release/acquire flag orders instrumented LDS payload | 4 B | n/a (`context` only) |
+| `atomic-rmw-arrival-counter` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter core, distilled into a two-subgroup LDS handoff | 256 workgroups, 2 subgroups/workgroup, release `fetch_add` publishes payload and acquire `fetch_add` consumes it | 8 B | n/a (`context` only) |
+| `atomic-rmw-acq-rel-chain` | `023_atomic_rmw_happens_before_benchmark.hip` | `tests/instrumented/023_atomic_rmw_happens_before_test.hip` | Stream-K-style arrival-counter chain stress case | 256 workgroups, 2 subgroups/workgroup, producer and consumer both use `acq_rel fetch_add` | 8 B | n/a (`context` only) |
+| `atomic-or-bitmask-handoff` | `024_atomic_or_bitmask_happens_before_benchmark.hip` | `tests/instrumented/024_atomic_or_bitmask_happens_before_test.hip` | Stream-K-tree-style sibling bitmask core | 256 workgroups, 2 subgroups/workgroup, release `atomicOr` publishes one bit and `acq_rel atomicOr` consumes the old mask | 8 B | n/a (`context` only) |
+| `atomic-fence-handoff` | `025_atomic_fence_happens_before_benchmark.hip` | `tests/instrumented/025_atomic_fence_happens_before_test.hip` | Standard fence-plus-atomic handoff | 256 workgroups, 2 subgroups/workgroup, release fence before relaxed flag store and acquire fence after relaxed flag load | 4 B | n/a (`context` only) |
+| `streamk-flag-fixup` | `026_streamk_flag_protocol_benchmark.hip` | `tests/instrumented/026_streamk_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k owner/helper flag protocol, distilled to LDS partial payloads | 256 workgroups, 3 subgroups/workgroup, one owner loops over two helper release/acquire flags and folds helper partials | 12 B | n/a (`context` only) |
+| `streamk-two-tile-flag-fixup` | `027_streamk_two_tile_flag_protocol_benchmark.hip` | `tests/instrumented/027_streamk_two_tile_flag_protocol_test.hip`, `tests/reference/atomic_reference_kernels.hip` | RocJITsu hip-stream-k two-tile ownership shape, distilled to LDS partial payloads | 256 workgroups, 4 subgroups/workgroup, two independent owner/helper tile fixups with one release/acquire flag per tile | 16 B | n/a (`context` only) |
+| `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a (`context` only) |
 
 ## Shapes and Resource Pressure
 
@@ -221,16 +221,16 @@ implemented only for `hip_moi::context`, not for sampled watchpoint modes.
 
 | Key | pass-through | `context` |
 | --- | ---: | ---: |
-| `atomic-flag-handoff` | 7.19 µs | 33.5 µs |
-| `atomic-metadata-release-store` | 3.43 µs | 15.5 µs |
-| `atomic-hb-lds-handoff` | 3.33 µs | 8.77 µs |
-| `atomic-rmw-arrival-counter` | 3.47 µs | 7.16 µs |
-| `atomic-rmw-acq-rel-chain` | 3.21 µs | 8.59 µs |
-| `atomic-or-bitmask-handoff` | 3.24 µs | 8.52 µs |
-| `atomic-fence-handoff` | 3.12 µs | 10.2 µs |
-| `streamk-flag-fixup` | 3.35 µs | 11.2 µs |
-| `streamk-two-tile-flag-fixup` | 3.20 µs | 11.1 µs |
-| `rdna4-wmma-streamk-arrival-counter` | 3.47 µs | 27.4 µs |
+| `atomic-flag-handoff` | 7.26 µs | 45.5 µs |
+| `atomic-metadata-release-store` | 3.44 µs | 21.1 µs |
+| `atomic-hb-lds-handoff` | 3.33 µs | 8.93 µs |
+| `atomic-rmw-arrival-counter` | 3.45 µs | 8.57 µs |
+| `atomic-rmw-acq-rel-chain` | 3.26 µs | 8.97 µs |
+| `atomic-or-bitmask-handoff` | 3.24 µs | 8.64 µs |
+| `atomic-fence-handoff` | 3.12 µs | 6.82 µs |
+| `streamk-flag-fixup` | 3.35 µs | 13.3 µs |
+| `streamk-two-tile-flag-fixup` | 3.19 µs | 12.7 µs |
+| `rdna4-wmma-streamk-arrival-counter` | 3.49 µs | 27.6 µs |
 
 ## Reading The Suite
 
@@ -260,87 +260,53 @@ keeps the same scheduling idiom but adds real cross-subgroup LDS sharing: in
 each pair, the even subgroup stages B fragments and both subgroups consume
 them.
 
-The atomic flag handoff row is no longer a pure API-wrapper guardrail: the
-`context` kernel records release-side atomic-object metadata. The pass-through
-kernel reports 4 B LDS, 3 VGPRs, 10 SGPRs, and no spills. The `context` kernel
-reports 4 B LDS, 24 VGPRs, 42 SGPRs, no scratch/private segment, and no spills.
-It is still not a diagnostic benchmark because Stage 3 does not query this
-metadata from the LDS conflict check.
+The atomics rows now use address-scoped release metadata. A release records the
+atomic address, producer subgroup, epoch, source site, and launch generation.
+An acquire imports producer records for that address; the scalar value stored,
+loaded, or returned by a RMW is not part of the current metadata key.
+Address+value remains a possible future precision refinement, but it is not the
+default implementation.
 
-The atomic metadata release-store row isolates the table-recording cost. The
-pass-through kernel reports 0 B LDS, 2 VGPRs, 5 SGPRs, and no spills. The
-`context` kernel reports 0 B LDS, 23 VGPRs, 37 SGPRs, no scratch/private
-segment, and no spills. The disassembly shows the expected bounded metadata
-probe/claim path, including global loads and a 64-bit compare-and-swap for
-claiming stale slots. The first implementation uses address hashing before
-linear probing; a previous all-probes-from-zero prototype was rejected because
-it made table fill effectively quadratic. The current Stage 5 implementation
-derives power-of-two atomic-object capacities and maps the hash with a mask,
-avoiding runtime division in the probe-start calculation. Acquire-side lookups
-also stop when they reach a stale slot in the open-addressing chain, which
-reduces the cost of polling before the release metadata exists.
+The atomic flag handoff row records release-side atomic-object metadata for a
+raw LDS payload. The metadata release-store row isolates the release-side
+table-recording cost. The happens-before LDS handoff row is the first row where
+atomic metadata affects LDS diagnostics: a release/acquire global flag orders
+an instrumented LDS payload handoff, while the deliberately relaxed variant
+still diagnoses. These rows show that the current address-scoped publication
+and acquire paths are correct enough for the staged model, but not yet cheap;
+`atomic-flag-handoff_context` rose to 45.5 µs after address-scoped acquire
+imports.
 
-The atomic happens-before LDS handoff row is the first row where atomic
-metadata affects LDS diagnostics. The pass-through kernel reports 4 B LDS, 3
-VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 4 B LDS, 21 VGPRs,
-55 SGPRs, no scratch/private segment, and no spills. This benchmark uses a
-fresh generation kernel argument for each measured launch so the exact-shadow
-entries and atomic-object records remain launch-separated without timing
-host-side metadata copies.
+The atomic RMW rows cover `fetch_add` arrival counters, a two-RMW `acq_rel`
+chain, and old-value-dependent `atomicOr` bitmask control flow. The old value
+returned by the RMW still drives user control flow, but hip-moi no longer uses
+that value as synchronization metadata. The current RMW latencies remain in the
+8 to 9 µs range through `context`.
 
-The atomic RMW rows are the first RMW synchronization rows. The pass-through
-kernels report 8 B LDS, 4 VGPRs, 10 SGPRs, and no spills. The release/acquire
-`context` kernel reports 8 B LDS, 23 VGPRs, 54 SGPRs, no scratch/private
-segment, and no spills. The `acq_rel` chain `context` kernel reports 8 B LDS,
-25 VGPRs, 54 SGPRs, no scratch/private segment, and no spills. Supporting the
-chain required making atomic metadata value-sensitive: the released counter
-value is part of the metadata key, so records for consecutive RMW values can
-coexist.
+The atomic fence handoff row supports the standard shape where a release fence
+is sequenced before a relaxed atomic store, and an acquire fence is sequenced
+after a relaxed atomic load that observed that store. The first implementation
+keeps fence state in the per-thread device context object: release fences arm
+the next relaxed atomic publication, and acquire fences consume the last
+relaxed atomic observation made through that context.
 
-The atomicOr bitmask row covers old-value-dependent control flow: the second
-subgroup branches on the old mask returned by `atomic_fetch_or` before reading
-the first subgroup's LDS payload. The pass-through kernel reports 8 B LDS, 4
-VGPRs, 10 SGPRs, and no spills. The `context` kernel reports 8 B LDS, 24 VGPRs,
-54 SGPRs, no scratch/private segment, and no spills. The disassembly has no
-scratch instructions; the remaining cost is the generic atomic metadata
-publication/acquire path and exact-shadow LDS checking.
-
-The atomic fence handoff row is the first fence-plus-atomic row. It supports
-the standard shape where a release fence is sequenced before a relaxed atomic
-store, and an acquire fence is sequenced after a relaxed atomic load that
-observed that store. The pass-through kernel reports 4 B LDS, 3 VGPRs, 10
-SGPRs, and no spills. The `context` kernel reports 4 B LDS, 23 VGPRs, 56 SGPRs,
-no scratch/private segment, and no spills. The first implementation keeps fence
-state in the per-thread device context object: release fences arm the next
-relaxed atomic publication, and acquire fences consume the last relaxed atomic
-observation made through that context.
-
-The Stream-K flag fixup row is the first integration row rather than a one-edge
-microbenchmark. It preserves the RocJITsu hip-stream-k owner/helper flag
-protocol: two helpers publish ready flags with release stores, and one owner
-loops over those flags with acquire loads before folding the helper partials.
-The pass-through kernel reports 12 B LDS, 4 VGPRs, 14 SGPRs, and no spills. The
-`context` kernel reports 12 B LDS, 25 VGPRs, 82 SGPRs, no scratch/private
-segment, and no spills. The high SGPR count is the first atomics row where the
-control-flow shape, not just the number of metadata operations, is visibly
-pushing scalar pressure.
-
-The Stream-K two-tile flag fixup row is the next ownership-shape rung. It uses
-four subgroups: tile 0 has one owner/helper pair, and tile 1 has another
-owner/helper pair. The pass-through kernel reports 16 B LDS, 3 VGPRs, 14 SGPRs,
-and no spills. The `context` kernel reports 16 B LDS, 59 VGPRs, 85 SGPRs, no
-scratch/private segment, and no spills. This row shows that widening the
-Stream-K control-flow shape can substantially increase live register pressure
-even when latency remains close to the previous integration row.
+The Stream-K flag fixup rows are integration rows rather than one-edge
+microbenchmarks. They preserve RocJITsu hip-stream-k owner/helper flag
+protocols but distill the payload to LDS partials so hip-moi can diagnose the
+handoff. The one-owner/two-helper row is now 13.3 µs through `context`; the
+two-tile ownership row is 12.7 µs through `context`.
 
 The RDNA4 WMMA Stream-K arrival-counter row is the first atomics integration
 row with WMMA arithmetic. It is not a direct global-partial Stream-K GEMM: the
 diagnostic payload is intentionally kept in LDS so hip-moi can test whether an
 arrival-counter synchronization edge orders the final fold of the partials.
-The pass-through kernel reports 4096 B LDS, 21 VGPRs, 14 SGPRs, and no spills.
-The `context` kernel reports 4096 B LDS, 51 VGPRs, 70 SGPRs, no
-scratch/private segment, and no spills. An earlier single-lane reduction draft
-was rejected because it produced an unrepresentative 209 µs `context` latency
-by making one lane perform every instrumented partial load. The committed row
-uses lane-parallel reduction and is the better signal for the next fast-path
-decision.
+The current row is 27.6 µs through `context`. An earlier single-lane reduction
+draft was rejected because it produced an unrepresentative 209 µs `context`
+latency by making one lane perform every instrumented partial load. The
+committed row uses lane-parallel reduction and is the better signal for the
+next fast-path decision.
+
+The detailed atomics `context` resource counts should be refreshed before they
+are used as current evidence. The latest session refreshed latency after the
+address-scoped metadata change, but it did not run a full code-object resource
+inspection pass for every atomics row.

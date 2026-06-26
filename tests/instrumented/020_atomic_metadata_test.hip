@@ -50,6 +50,25 @@ namespace
         }
     }
 
+    __global__ void publish_many_values_to_one_atomic_object_kernel(
+        hip_moi::context::storage_ref storage, int* flag, int value_count)
+    {
+        hip_moi::context ctx = make_atomic_metadata_context(storage);
+        ctx.init_workgroup();
+
+        if(ctx.thread_id() == 0)
+        {
+            for(int i = 0; i < value_count; ++i)
+            {
+                ctx.atomic_store(flag,
+                                 i + 1,
+                                 hip_moi::atomic_memory_order::release,
+                                 hip_moi::atomic_memory_scope::agent,
+                                 HIP_MOI_SITE_ID());
+            }
+        }
+    }
+
     hip_moi::host_context_options atomic_metadata_test_options()
     {
         hip_moi::host_context_options options;
@@ -131,4 +150,28 @@ TEST(HipMoiAtomicMetadata, AtomicObjectRecordsAreGenerationSeparated)
     EXPECT_TRUE(moi.check(nullptr));
 
     HIP_MOI_TEST_HIP_ASSERT(hipFree(device_flags));
+}
+
+TEST(HipMoiAtomicMetadata, ManyValuesOnOneAtomicObjectShareAddressScopedRecord)
+{
+    hip_moi::host_context moi(atomic_metadata_test_options());
+    int                   value_count = moi.atomic_object_capacity() + 1;
+    ASSERT_GT(moi.atomic_object_capacity(), 0);
+
+    int* device_flag = nullptr;
+    HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&device_flag, sizeof(int)));
+    HIP_MOI_TEST_HIP_ASSERT(hipMemset(device_flag, 0, sizeof(int)));
+
+    hipLaunchKernelGGL(publish_many_values_to_one_atomic_object_kernel,
+                       dim3(1),
+                       dim3(kThreadCount),
+                       0,
+                       0,
+                       moi.launch_ref(),
+                       device_flag,
+                       value_count);
+    HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
+    EXPECT_TRUE(moi.check(nullptr));
+
+    HIP_MOI_TEST_HIP_ASSERT(hipFree(device_flag));
 }

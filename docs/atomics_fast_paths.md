@@ -24,37 +24,38 @@ The generic atomics implementation is semantically useful now:
 
 The most relevant RDNA4 rows are:
 
-| Benchmark key | Shape | Pass-through | `context` | `context` resources |
-| --- | --- | ---: | ---: | --- |
-| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.35 µs | 11.2 µs | 12 B LDS, 25 VGPR, 82 SGPR, no spills |
-| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.20 µs | 11.1 µs | 16 B LDS, 59 VGPR, 85 SGPR, no spills |
-| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.47 µs | 27.4 µs | 4096 B LDS, 51 VGPR, 70 SGPR, no spills |
+| Benchmark key | Shape | Pass-through | `context` |
+| --- | --- | ---: | ---: |
+| `streamk-flag-fixup` | one owner subgroup, two helper flags | 3.35 µs | 13.3 µs |
+| `streamk-two-tile-flag-fixup` | two independent owner/helper tile fixups | 3.19 µs | 12.7 µs |
+| `rdna4-wmma-streamk-arrival-counter` | two WMMA K-slice partials, `fetch_add` arrival counter | 3.49 µs | 27.6 µs |
 
-The important result is not only latency. These rows are spill-free, so the
-current overhead is not caused by private-memory spills. The cost is primarily
-from the generic metadata protocol and from exact-shadow LDS instrumentation in
-the final fold.
+The resource counts for these rows should be refreshed after the
+address-scoped metadata change before making VGPR or SGPR claims. The latency
+signal is already clear enough to motivate the next fast-path question: the
+cost is primarily from the generic metadata protocol and from exact-shadow LDS
+instrumentation in the final fold.
 
 ## Why The Generic Path Costs More
 
 For a releasing RMW such as `ctx.atomic_fetch_add`, the current path:
 
 1. executes the user atomic operation;
-2. computes the released value;
-3. finds or claims an address/value-keyed atomic-object metadata slot keyed by
-   `(atomic address, released value)`;
-4. publishes the releasing subgroup and epoch into that slot;
-5. uses a thread fence before making the slot visible for the current launch
+2. finds or claims an address-scoped atomic-object metadata slot for
+   `(atomic address, producer subgroup)`;
+3. joins the releasing subgroup epoch into that slot;
+4. uses a thread fence before making the slot visible for the current launch
    generation.
 
 For an acquiring RMW, the current path:
 
 1. executes the user atomic operation and obtains the old value;
-2. looks up the metadata slot keyed by `(atomic address, old value)`;
+2. looks up producer metadata slots for the atomic address;
 3. retries because an acquiring RMW can observe the hardware atomic before the
    releasing thread has published hip-moi metadata;
-4. writes the acquired producer epoch into the per-consumer/per-producer
-   acquired-epoch matrix.
+4. writes acquired producer epochs into the per-consumer/per-producer
+   acquired-epoch matrix. The old value remains available to the user kernel,
+   but hip-moi does not use it for the current metadata key.
 
 For each instrumented LDS access, the exact-shadow path:
 
@@ -63,16 +64,16 @@ For each instrumented LDS access, the exact-shadow path:
 3. checks whether the prior entry conflicts;
 4. queries the acquired-epoch matrix before deciding whether to diagnose.
 
-The address/value key is a performance-conscious approximation of the
-memory-model reads-from relation. It is suitable for the Stream-K-like counter
-and bitmask protocols currently tested, where observed values distinguish the
-release state being acquired. It is not sufficient for protocols with repeated
-release stores of the same value to the same atomic object unless those
-same-value releases carry equivalent LDS ordering.
+The address-scoped key is a TSan-like approximation of the memory-model
+reads-from relation. It is intentionally coarse: an acquire imports releases
+through the same atomic address even if the acquire did not read from each of
+those releases. That can suppress real LDS conflicts, so it can create false
+negatives. It should not create false positives as long as release metadata is
+joined rather than overwritten.
 
-That is the right conservative structure for a general source-level prototype.
-It is also more general than the common Stream-K patterns in the current
-benchmarks.
+That is the right conservative structure for the current DBI-oriented
+prototype. Address+value keying remains a possible future precision refinement
+when realistic protocols justify keeping observed or released values live.
 
 ## What A Safe Fast Path Must Preserve
 
@@ -83,13 +84,15 @@ A fast path must preserve the source-level contract:
 * ordinary global loads and stores are not diagnostic payloads;
 * LDS accesses remain the diagnostic payload;
 * the detector may use compact metadata, but it must still suppress only those
-  LDS conflicts ordered by a tracked synchronizes-with edge;
+  LDS conflicts ordered by a tracked or deliberately over-approximated
+  synchronizes-with edge;
 * metadata collisions or unsupported dynamic shapes must fail conservatively,
   either by falling back to the generic path or by leaving the conflict
   diagnosable.
 
-The fast path should not silently treat every atomic RMW as a barrier. It must
-still be value-sensitive enough to distinguish the RMW value that was observed.
+The fast path should not silently treat every atomic RMW as a workgroup barrier.
+The current acceptable over-approximation is scoped to the atomic object
+address.
 
 ## Candidate 1: Direct-Mapped RMW Metadata Cache
 
@@ -99,13 +102,12 @@ existing `ctx.atomic_fetch_add` and `ctx.atomic_fetch_or` APIs.
 The cache would be keyed by a compact hash of:
 
 * atomic object address;
-* observed or released value;
+* producer subgroup for release slots;
 * launch generation.
 
 Each slot would store:
 
 * address tag;
-* value tag;
 * releasing subgroup;
 * releasing epoch;
 * generation.
@@ -117,9 +119,9 @@ and falls back to the generic lookup on miss.
 
 This preserves the public API and can improve the common case where a benchmark
 uses one or a few counters with predictable values. It does not require users
-to annotate Stream-K protocols. It preserves the current address/value-keyed
-semantics because the generic path remains the fallback; it does not solve
-ambiguous same-value release stores.
+to annotate Stream-K protocols. It preserves the current address-scoped
+semantics because the generic path remains the fallback; it does not add
+address+value precision.
 
 The risk is live state and code size: checking both the fast slot and the
 generic fallback can increase register pressure unless the fast path is
@@ -135,9 +137,9 @@ old = ctx.streamk_fetch_add(counter_slot, ptr, delta, order, scope, site);
 old = ctx.streamk_fetch_or(counter_slot, ptr, bits, order, scope, site);
 ```
 
-The slot would avoid hashing the address/value pair on the common path. It
-could store a tiny value-to-epoch record for the small number of values that a
-known Stream-K protocol can expose.
+The slot would avoid generic address/probe logic on the common path. It could
+store a tiny value-to-epoch record only if a later address+value precision mode
+is justified for a known Stream-K protocol.
 
 This is likely faster, but it changes the source instrumentation contract. It
 asks the user or source rewriter to identify Stream-K counters explicitly. That

@@ -38,14 +38,14 @@ benchmarks, documentation, and diligence notes have landed.
 | 9. Stream-K integration tests | In progress | `026_streamk_flag_protocol_test.hip`, `027_streamk_two_tile_flag_protocol_test.hip`, and `028_rdna4_wmma_streamk_arrival_counter_test.hip` add Stream-K-shaped flag, ownership, and RDNA4 WMMA arrival-counter rows. |
 | 10. DBI-oriented atomic instruction seeds | Not started | Kept separate from source-level HIP diagnostics. |
 
-Known semantic gap: the current atomic-object table is keyed by
-`(atomic address, released value, generation)`. That is sufficient only for
-protocols where the observed value identifies the release event, or where
-same-address same-value releases carry equivalent ordering for the LDS payload.
-Repeated release stores of the same value to the same atomic object can
-over-match an acquire to the wrong release metadata and incorrectly suppress a
-diagnostic. Supporting that shape requires additional release identity or a
-conservative ambiguity path.
+Current semantic trade-off: the atomic-object table is address-scoped. A
+release records `(atomic address, producer subgroup, generation)` and an
+acquire imports all producer records for that atomic address. This is the
+TSan-like direction we want for DBI because it avoids keeping the observed or
+released scalar value live in the instrumentation path. The trade-off is
+precision: releases through the same address that the acquire did not actually
+read from can still be imported, causing false negatives. Address+value keying
+is kept as a possible future precision refinement, not the current default.
 
 ## Stage Completion Checklist
 
@@ -227,11 +227,10 @@ release/acquire synchronization.
 Goal: record enough state for release/acquire handoff without yet modeling all
 RMW corner cases.
 
-Add a metadata table keyed by atomic object address and released value. For
-each release record, record at least:
+Add a metadata table keyed by atomic object address. For each release record,
+record at least:
 
 * address key;
-* released value or release sequence identifier;
 * releasing participant;
 * releasing participant clock;
 * site id for diagnostics;
@@ -258,19 +257,21 @@ Status: complete. `hip_moi::host_context` now derives an internal
 atomic-object table capacity from `storage_bytes`; the default 16 MiB storage
 budget provides thousands of records, while small test contexts get a small
 bounded table. Release-style atomic stores and release-capable RMW operations
-record address, value, releasing subgroup, releasing epoch, release site id,
-and generation. A stale slot is reclaimed through a temporary claim marker, and
-the probe sequence starts from a hash of the atomic-object address and released
-value. If no slot can be found or claimed, hip-moi emits a deterministic
+record the atomic address, releasing subgroup, releasing epoch, release site
+id, and generation. The table is address-scoped: the scalar value stored,
+loaded, or returned by the atomic operation is not part of the current metadata
+key. A stale slot is reclaimed through a temporary claim marker, and the probe
+sequence starts from a hash of the atomic-object address and producer subgroup.
+If no slot can be found or claimed, hip-moi emits a deterministic
 `metadata_full` diagnostic carrying the atomic address, byte size, and source
 site.
 
 This stage intentionally does not suppress LDS diagnostics. The metadata is
 recorded but not yet queried by the LDS conflict predicate. The Stage 3
-benchmark shows the first cost baseline: `atomic-metadata-release-store` is
-3.43 µs pass-through and 15.5 µs through `context` on the local RDNA4 machine,
-with 23 VGPRs, 37 SGPRs, no private segment, and no spills in the `context`
-kernel.
+benchmark shows the first cost baseline after the address-scoped metadata
+change: `atomic-metadata-release-store` is 3.44 µs pass-through and 21.1 µs
+through `context` on the local RDNA4 machine. Resource counts should be
+refreshed before drawing VGPR or SGPR conclusions from this row.
 
 ## Stage 4: Happens-Before For LDS Payload Handoffs
 
@@ -327,22 +328,22 @@ Exit criteria:
 Status: complete for the first minimal release/acquire handoff. The
 implementation adds a per-context matrix of acquired epoch tokens indexed by
 consumer subgroup and producer subgroup. A release-style atomic records the
-producing subgroup and epoch in the atomic-object table. An acquire load whose
-observed value identifies a release record updates the consumer's token for
-that producer. The exact-shadow conflict predicate suppresses a conflict only
-when the current subgroup has acquired a token covering the prior subgroup's
-recorded epoch. This status does not claim support for ambiguous same-value
-release stores.
+producing subgroup and epoch in the atomic-object table. An acquire operation
+imports release records for the same atomic address and updates the consumer's
+tokens for those producers. The exact-shadow conflict predicate suppresses a
+conflict only when the current subgroup has acquired a token covering the prior
+subgroup's recorded epoch. This status intentionally accepts address-scoped
+over-approximation: extra imported releases can cause false negatives, but
+joined release metadata should not cause false positives.
 
 `021_atomic_happens_before_test.hip` covers the key semantic cases: a
 release/acquire global flag orders an instrumented LDS payload and reports no
 diagnostic; a relaxed flag store with the same LDS payload still reports a
 deterministic conflict; and releasing one flag does not order a consumer that
-acquires a different relaxed-published flag. Stale value reuse remains a good
-Stage 5/6 guardrail. The first benchmark row is `atomic-hb-lds-handoff`: 3.34
-µs pass-through and 13.6 µs through `context` on the local RDNA4 machine, with
-21 VGPRs, 55 SGPRs, 4 B LDS, no private segment, and no spills in the `context`
-kernel.
+acquires a different relaxed-published flag. The first benchmark row is
+`atomic-hb-lds-handoff`: 3.33 µs pass-through and 8.93 µs through `context` on
+the local RDNA4 machine after the address-scoped metadata change. Resource
+counts should be refreshed before using this row as VGPR or SGPR evidence.
 
 ## Stage 5: Release/Acquire Fast Path
 
@@ -394,10 +395,11 @@ The second fast-path change targets acquire-side misses. Atomic metadata records
 are never deleted within one generation, so a stale slot terminates an
 open-addressing probe chain unless another thread is actively claiming that
 slot. This mainly helps spin loops before the releasing subgroup has published
-metadata. Current local RDNA4 numbers after the Stage 6 value-sensitive metadata
-change are 15.5 µs for `atomic-metadata-release-store_context`, 33.5 µs for
-`atomic-flag-handoff_context`, and 8.77 µs for
-`atomic-hb-lds-handoff_context`.
+metadata. Current local RDNA4 numbers after the address-scoped join change are
+21.1 µs for `atomic-metadata-release-store_context`, 45.5 µs for
+`atomic-flag-handoff_context`, and 8.93 µs for
+`atomic-hb-lds-handoff_context`. The flag-handoff row is the clearest sign that
+the acquire side needs a cheaper address-scoped lookup path.
 
 ## Stage 6: RMW Atomics As Both Access And Synchronization
 
@@ -440,16 +442,17 @@ consumer subgroup that observes the counter with an acquire `fetch_add` before
 reading the payload. The same test and benchmark also cover a two-RMW
 `acq_rel` `fetch_add` chain.
 
-Supporting the `acq_rel` chain required changing atomic metadata from an
-address-only key to an `(address, released value)` key. This lets records for
-consecutive counter values coexist long enough for the later RMW to acquire the
-earlier RMW's release metadata. This is sufficient for monotonic counter values;
-it is not a general reads-from identity for repeated same-value release stores.
-Current local RDNA4 rows are 7.16 µs for
-`atomic-rmw-arrival-counter_context` with 8 B LDS, 23 VGPRs, 54 SGPRs, no
-private segment, and no spills, and 8.59 µs for
-`atomic-rmw-acq-rel-chain_context` with 8 B LDS, 25 VGPRs, 54 SGPRs, no private
-segment, and no spills.
+The current implementation supports these RMW handoffs through the same
+address-scoped join model as release stores. A release-capable RMW records the
+producer subgroup's epoch for the atomic address; an acquire-capable RMW imports
+producer records for that address. The old value returned by the RMW is used by
+the user kernel's control flow, but not by hip-moi's current synchronization
+metadata key. Address+value remains a future precision refinement if false
+negative rates on realistic protocols justify the extra VGPR pressure.
+
+Current local RDNA4 rows after the address-scoped join change are 8.57 µs for
+`atomic-rmw-arrival-counter_context` and 8.97 µs for
+`atomic-rmw-acq-rel-chain_context`.
 
 The bitmask RMW rung landed in
 `024_atomic_or_bitmask_happens_before_test.hip` and
@@ -457,8 +460,7 @@ The bitmask RMW rung landed in
 an LDS payload and publishes one bit with release `atomicOr`; a second subgroup
 uses the old mask returned by an `acq_rel atomicOr` to decide whether to read
 that payload. The relaxed variant still diagnoses. The local RDNA4 benchmark
-row is 8.52 µs for `atomic-or-bitmask-handoff_context`, with 8 B LDS, 24 VGPRs,
-54 SGPRs, no private segment, and no spills.
+row is 8.64 µs for `atomic-or-bitmask-handoff_context`.
 
 ## Stage 7: RMW Fast Paths
 
@@ -519,9 +521,7 @@ a relaxed flag store and an acquire fence sequenced after a relaxed flag load.
 The fenced variant suppresses the ordered LDS handoff diagnostic; the same
 relaxed flag handoff without fences still diagnoses.
 `025_atomic_fence_happens_before_benchmark.hip` measures 3.12 µs pass-through
-and 10.2 µs through `context` on the local RDNA4 machine. Resource usage is 4 B
-LDS, 3 VGPRs, 10 SGPRs, no spills for pass-through, and 4 B LDS, 23 VGPRs, 56
-SGPRs, no spills for `context`.
+and 6.82 µs through `context` on the local RDNA4 machine.
 
 The implementation records only the simple source-level pattern described
 above. A release fence arms the next relaxed atomic publication made through
@@ -566,8 +566,8 @@ owner/helper release/acquire flag protocol to one owner subgroup looping over
 two helper flags and folding two LDS helper partials. The ordered variant is
 quiet; the broken variant makes the second helper publish with a relaxed store
 and diagnoses the corresponding LDS payload handoff. The local RDNA4 benchmark
-row is 3.35 µs pass-through and 11.2 µs through `context`, with 12 B LDS, 25
-VGPRs, 82 SGPRs, no private segment, and no spills in the `context` row.
+row is 3.35 µs pass-through and 13.3 µs through `context` after the
+address-scoped metadata change.
 
 The second integration rung landed in
 `027_streamk_two_tile_flag_protocol_test.hip` and
@@ -576,12 +576,10 @@ RocJITsu two-tile ownership shape: four subgroups form two independent
 owner/helper tile fixups, with one release/acquire flag per tile. The ordered
 variant is quiet; the broken variant makes the second tile's helper publish
 with a relaxed store and diagnoses that tile's LDS payload handoff. The local
-RDNA4 benchmark row is 3.20 µs pass-through and 11.1 µs through `context`. The
-pass-through row uses 16 B LDS, 3 VGPRs, 14 SGPRs, and no spills. The
-`context` row uses 16 B LDS, 59 VGPRs, 85 SGPRs, no private segment, and no
-spills. The high register pressure is now part of the Stage 9 diligence record:
-the next integration rung should not proceed blindly without checking whether a
-small RDNA4 WMMA Stream-K extraction keeps this pressure acceptable.
+RDNA4 benchmark row is 3.19 µs pass-through and 12.7 µs through `context`.
+Earlier resource inspection showed this ownership shape could raise register
+pressure substantially; refresh resource counts after the address-scoped
+metadata change before using them as current evidence.
 
 The third integration rung landed in
 `028_rdna4_wmma_streamk_arrival_counter_test.hip` and
@@ -590,12 +588,10 @@ arrival-counter path in `hip-matmul/matmul_rdna4.hip`: two subgroups compute
 two RDNA4 WMMA K-slice partials, publish their LDS partials with an
 `acq_rel fetch_add` counter, and the final subgroup folds both LDS partials.
 The ordered variant is quiet; the relaxed-counter variant diagnoses the final
-fold. The local RDNA4 benchmark row is 3.47 µs pass-through and 27.4 µs through
-`context`. The pass-through row uses 4096 B LDS, 21 VGPRs, 14 SGPRs, and no
-spills. The `context` row uses 4096 B LDS, 51 VGPRs, 70 SGPRs, no private
-segment, and no spills. An earlier single-lane fold draft was rejected because
-it distorted the benchmark by making one lane perform every instrumented
-partial load; the committed row uses lane-parallel reduction.
+fold. The local RDNA4 benchmark row is 3.49 µs pass-through and 27.6 µs through
+`context`. An earlier single-lane fold draft was rejected because it distorted
+the benchmark by making one lane perform every instrumented partial load; the
+committed row uses lane-parallel reduction.
 
 The next Stage 9 choice is now explicit: either extract a WMMA Stream-K-tree
 `atomicOr` row, or stop widening and decide whether Stage 7 needs a
@@ -636,10 +632,11 @@ Exit criteria:
 2. Decide whether Stage 7 now needs a protocol-specific fast path. The current
    recommendation in `atomics_fast_paths.md` is to try a small direct-mapped
    RMW metadata cache behind the existing API, with fallback to the generic
-   table. The two-tile flag row is spill-free but reaches 59 VGPRs and 85 SGPRs
-   in `context`; the WMMA arrival-counter row is spill-free at 51 VGPRs and 70
-   SGPRs but has a 27.4 µs `context` latency against a 3.47 µs pass-through
-   baseline.
+   table. The current address-scoped rows put `streamk-two-tile-flag-fixup` at
+   12.7 µs through `context` against a 3.19 µs pass-through baseline, and
+   `rdna4-wmma-streamk-arrival-counter` at 27.6 µs through `context` against a
+   3.49 µs pass-through baseline. Refresh resource counts before making the
+   next VGPR/SGPR-driven fast-path decision.
 3. If a fast path is pursued, keep it source-model honest: it may specialize
    common Stream-K synchronization shapes, but it must not silently replace the
    HIP/LLVM release/acquire model with hardware folklore.
