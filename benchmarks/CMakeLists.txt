@@ -130,6 +130,8 @@ if(_hip_moi_build_cdna4_benchmarks)
                         013_cdna4_mfma_register_handoff_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_no_score_lds_attention
                         014_cdna4_mfma_no_score_lds_attention_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_cdna4_d128_no_score_lds_attention
+                        015_cdna4_d128_no_score_lds_attention_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_pingpong_private_lds
                         016_cdna4_pingpong_private_lds_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_pingpong_cooperative_lds
