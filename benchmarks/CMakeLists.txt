@@ -124,6 +124,8 @@ if(_hip_moi_build_rdna4_benchmarks)
 endif()
 
 if(_hip_moi_build_cdna4_benchmarks)
+  hip_moi_add_benchmark(hip_moi_benchmark_cdna4_pingpong_wide_cooperative_lds
+                        018_cdna4_pingpong_wide_cooperative_lds_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_streamk_arrival_counter
                         028_cdna4_mfma_streamk_arrival_counter_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_streamk_tree_atomic_or
