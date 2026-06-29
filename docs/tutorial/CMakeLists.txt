@@ -62,7 +62,7 @@ endfunction()
 
 set(_hip_moi_build_rdna4_tutorials TRUE)
 foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
-  if(NOT _hip_moi_arch MATCHES "^gfx12")
+  if(NOT _hip_moi_arch MATCHES "^gfx120")
     set(_hip_moi_build_rdna4_tutorials FALSE)
   endif()
 endforeach()
