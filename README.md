@@ -6,7 +6,8 @@ SPDX-License-Identifier: MIT
 # hip-moi
 
 hip-moi is a source-level HIP instrumentation prototype for studying LDS
-memory-ordering diagnostics and their overhead on RDNA4-style workloads.
+memory-ordering diagnostics and their overhead on architecture-specific HIP
+workloads.
 
 The immediate audience is Jakub. The goal is to make the results useful for
 improving Loom, informing the LLVM GPU ThreadSanitizer RFC discussion, and
@@ -42,7 +43,7 @@ spill, and code-size overhead. It is not a replacement for the diagnostic API.
 
 * **Workgroup**: a HIP block.
 * **Subgroup**: the fixed-size thread group used as the instrumentation owner.
-  On the current RDNA4 tests this is a 32-thread wave.
+  The current architecture-specific GPU tests use 32-thread waves.
 * **Lane**: a thread's index inside its subgroup.
 * **Epoch**: a logical interval between instrumented full-workgroup barriers.
   Current diagnostic paths treat same-epoch conflicting accesses from different
@@ -68,8 +69,8 @@ spill, and code-size overhead. It is not a replacement for the diagnostic API.
   source-level hip-moi lessons to future rocjitsu DBI requirements and first
   experiments.
 * [docs/context.md](docs/context.md): host/device context allocation and usage.
-* [benchmarks/README.md](benchmarks/README.md): current RDNA4 benchmark suite,
-  resource pressure, and latency results.
+* [benchmarks/README.md](benchmarks/README.md): current architecture-specific
+  benchmark suite, resource pressure, validation status, and latency results.
 * [docs/tutorial/README.md](docs/tutorial/README.md): small compilable examples.
 * [tests/instrumented/README.md](tests/instrumented/README.md): correctness test
   corpus.
@@ -88,14 +89,30 @@ variants are much closer to the pass-through baseline.
 The benchmark README records the current numbers and the intermediate resource
 metrics, including LDS usage, VGPR pressure, spills, and private segment state.
 
+## Architecture Support
+
+The portable scalar LDS, atomics, and tutorial examples build on any HIP target
+supported by the configured toolchain. The architecture-specific rows are gated
+by `CMAKE_HIP_ARCHITECTURES`:
+
+| Architecture family | CMake architecture match | Coverage |
+| --- | --- | --- |
+| RDNA4 | `gfx120*` | RDNA4 WMMA tests, benchmarks, reference matmul corpus, and the RDNA4 WMMA tutorial. |
+| CDNA4/gfx950 | `gfx950*` | CDNA4 MFMA ports of the RDNA4 attention, ping-pong, and Stream-K WMMA rows. |
+| gfx1250 | `gfx1250` | gfx1250 WMMA ports of the RDNA4 attention, ping-pong, Stream-K, and standalone matmul benchmark rows. |
+
+The gfx1250 rows are build- and smoke-validated, but this repository does not
+claim hardware performance numbers for them until physical gfx1250 hardware is
+available.
+
 ## Build And Test
 
-The canonical build directory in this workspace is
-`/home/benoit/workspace/hip-moi-build`.
+Use an out-of-tree CMake build directory. For example:
 
 ```sh
-cmake --build /home/benoit/workspace/hip-moi-build
-ctest --test-dir /home/benoit/workspace/hip-moi-build --output-on-failure
+cmake -S . -B build -G Ninja -DCMAKE_HIP_ARCHITECTURES=gfx1201
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 Benchmarks are not enabled in the default build. See

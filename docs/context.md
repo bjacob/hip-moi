@@ -29,7 +29,7 @@ Benchmark rows named `context + sampled_watchpoint` use the general
 `hip_moi::context` object with its sampled backend selected. Rows named
 `sampled_watchpoint_context` use the narrower class directly. The latter keeps
 less state live in the hot kernel and is the faster publish-only benchmark path
-in the current RDNA4 results.
+in the current architecture-specific benchmark results.
 
 The distinction matters for future scope. `hip_moi::context` should remain the
 home for correctness-first diagnostics, storage saturation handling, reporting,

@@ -174,17 +174,19 @@ programs while experimenting.
 
 ## Current hip-moi Tests
 
-The current controlled RDNA4 tests are:
+The current controlled test family started as RDNA4 and now has CDNA4/gfx950
+and gfx1250 counterparts:
 
-* `tests/instrumented/016_rdna4_pingpong_private_lds_test.hip`
-* `tests/instrumented/017_rdna4_pingpong_cooperative_lds_test.hip`
+* private LDS rows: `016_rdna4_*`, `016_cdna4_*`, and `016_gfx1250_*`;
+* cooperative LDS rows: `017_rdna4_*`, `017_cdna4_*`, and `017_gfx1250_*`;
+* wide cooperative LDS rows: `018_rdna4_*`, `018_cdna4_*`, and `018_gfx1250_*`.
 
 They are tests first, not benchmarks. They exist to make sure hip-moi can
 instrument kernels that combine:
 
 * multiple subgroups in one workgroup;
 * LDS double-buffering;
-* WMMA;
+* target-specific matrix instructions;
 * `__builtin_amdgcn_s_setprio`;
 * `__builtin_amdgcn_sched_barrier`;
 * all LDS accesses routed through hip-moi.
@@ -220,9 +222,8 @@ benchmarks/inspect_pingpong_codegen.sh
 
 It extracts the `.hip_fatbin` section from the two RDNA4 ping-pong GTest
 executables, unbundles the `gfx1201` device objects, and prints kernel metadata
-and instruction counts. The default build location is
-`/home/benoit/workspace/hip-moi-build`; override it with
-`HIP_MOI_BUILD_DIR=/path/to/build` if needed.
+and instruction counts. Set `HIP_MOI_BUILD_DIR=<build-dir>` when the build
+directory is not the default expected by the script.
 
 The script currently checks:
 
@@ -257,27 +258,20 @@ not, by itself, evidence that the source-level scheduling boundary was ignored.
 
 ## Optimized ATT Validation
 
-The local TheRock tree can provide `rocprofv3` with advanced thread trace
-support. In this workspace it was built by enabling profiler support:
+A ROCm or TheRock installation can provide `rocprofv3` with advanced thread
+trace support. For a TheRock build, enable profiler support in an out-of-tree
+build directory:
 
 ```bash
-cmake -S /home/benoit/workspace/TheRock \
-      -B /home/benoit/workspace/TheRock-build \
+cmake -S <therock-source-dir> \
+      -B <therock-build-dir> \
       -DTHEROCK_ENABLE_PROFILER=ON \
       -DTHEROCK_ENABLE_ROCPROFV3=ON \
       -DTHEROCK_BUILD_TESTING=OFF
 ```
 
-The resulting tool is:
-
-```bash
-/home/benoit/workspace/TheRock-build/profiler/rocprofiler-sdk/dist/bin/rocprofv3
-```
-
-In the current local build, `rocprofv3 --version` reports ROCprofiler-SDK 1.3.2
-from the checked-out TheRock sources. The build may require the staged SQLite
-include directory to be visible to rocprofiler-sdk compilation if the local
-TheRock configuration does not propagate that sysdep include path.
+Then put the resulting `rocprofv3` on `PATH`, or point the validation script at
+that tool if it supports an override.
 
 The reproducible validation entry point is:
 
@@ -359,8 +353,8 @@ experiments:
   ping-pong-shaped kernels.
 
 RDNA4 is a weaker choice for claiming production ping-pong performance
-representativeness. The strongest local producer examples are CDNA or GFX950
-oriented, and Triton's default enablement does not include `gfx1201`. RDNA4
+representativeness. The strongest producer examples are CDNA4/gfx950-oriented,
+and Triton's default enablement does not include `gfx1201`. RDNA4
 experiments should therefore be presented as controlled source-level
 instrumentation experiments, not as evidence that a production RDNA4 kernel
 should use ping-pong scheduling.

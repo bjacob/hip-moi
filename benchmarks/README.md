@@ -1,11 +1,12 @@
 # hip-moi Benchmarks
 
-This directory contains the RDNA4 and CDNA4 performance benchmarks used to
-guide hip-moi's sampled publish-only implementation. The matmul benchmarks are
-focused extractions from Jakub's
-`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the attention benchmarks are
-hip-moi-native workloads grown from the instrumented test corpus and from the
-llama.cpp/AITER production-shape signals summarized in this README and in
+This directory contains the RDNA4, CDNA4/gfx950, and gfx1250 benchmark rows
+used to guide hip-moi's sampled publish-only implementation. The original
+matmul benchmarks are focused extractions from Jakub's
+`sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the gfx1250 matmul rows are
+target-specific ports of the same standalone shapes. The attention benchmarks
+are hip-moi-native workloads grown from the instrumented test corpus and from
+the llama.cpp/AITER production-shape signals summarized in this README and in
 [`docs/benchmark_interpretation.md`](../docs/benchmark_interpretation.md).
 
 For interpretation of what the benchmark modes and current numbers imply, read
@@ -28,15 +29,14 @@ The comparison rows are:
 Benchmarks are disabled in the default CMake build. Enable them with:
 
 ```bash
-cmake -S . -B ../hip-moi-build -DHIP_MOI_BUILD_BENCHMARKS=ON
-cmake --build ../hip-moi-build --target hip_moi_benchmark_prod_16x8
-../hip-moi-build/benchmarks/hip_moi_benchmark_prod_16x8
+cmake -S . -B build -DHIP_MOI_BUILD_BENCHMARKS=ON
+cmake --build build --target hip_moi_benchmark_prod_16x8
+build/benchmarks/hip_moi_benchmark_prod_16x8
 ```
 
 The standalone scripts in this directory compile and run individual benchmark
 families directly with `hipcc`. They use `ROCM_ROOT` when provided, otherwise
-they try the local TheRock SDK path used during development. They default to
-`gfx1201`.
+they rely on the ROCm tools available on `PATH`. They default to `gfx1201`.
 
 Common timing knobs:
 
@@ -55,12 +55,27 @@ The current headline rows use the fair publish-only defaults printed by the
 benchmarks: `watchpoints=1`, `skip=32`, `probes=1`, `delay=32`, and
 `reports=off`.
 
+## Architecture Support
+
+CMake gates architecture-specific benchmark targets by `CMAKE_HIP_ARCHITECTURES`:
+
+| Architecture family | CMake architecture match | Benchmark rows |
+| --- | --- | --- |
+| RDNA4 | `gfx120*` | Original WMMA matmul, attention, ping-pong, and WMMA Stream-K rows. |
+| CDNA4/gfx950 | `gfx950*` | MFMA ports of the RDNA4 attention, ping-pong, and WMMA Stream-K rows. |
+| gfx1250 | `gfx1250` | WMMA ports of the RDNA4 attention, ping-pong, WMMA Stream-K, and standalone matmul rows. |
+
+The RDNA4 and CDNA4 sections below report hardware measurements. The gfx1250
+section records build and smoke-validation status only; it intentionally does
+not claim hardware performance numbers.
+
 ## Codegen Inspection
 
-Several scripts in this directory extract HIP fatbins, unbundle RDNA4 device
+Several scripts in this directory extract HIP fatbins, unbundle target device
 objects, and report metadata or instruction counts with LLVM tools. They are
 sanity checks for whether a benchmark or test object still has the generated
-code shape that the measurement assumes.
+code shape that the measurement assumes. The current ATT validation scripts are
+RDNA4-specific.
 
 The current ping-pong inspection scripts are:
 
@@ -192,6 +207,12 @@ segment notes are included when that fast row is not spill-free.
 | `streamk-two-level-reduction` | `037_streamk_two_level_reduction_benchmark.hip` | `tests/instrumented/037_streamk_two_level_reduction_test.hip` | Sanitized split-K/PostGSU-style two-level flag reduction, localized to LDS payload diagnostics | 256 workgroups, 6 subgroups/workgroup, four producer subgroups feed two pair reducers, then one final reducer folds pair partials | 768 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-arrival-counter` | `028_rdna4_wmma_streamk_arrival_counter_benchmark.hip` | `tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K arrival-counter idea, localized to LDS payload diagnostics | 256 workgroups, 2 subgroups/workgroup, two K-slice RDNA4 WMMA partials, `acq_rel fetch_add` arrival counter, final subgroup folds LDS partials | 4096 B | n/a (`context` only) |
 | `rdna4-wmma-streamk-tree-atomic-or` | `029_rdna4_wmma_streamk_tree_atomic_or_benchmark.hip` | `tests/instrumented/029_rdna4_wmma_streamk_tree_atomic_or_test.hip` | `hip-matmul/matmul_rdna4.hip` Stream-K-tree `atomicOr` idea, localized to LDS payload diagnostics | 256 workgroups, 4 subgroups/workgroup, four K-slice RDNA4 WMMA partials, first three subgroups publish bits with release `atomicOr`, final subgroup folds LDS partials after `acq_rel atomicOr` | 8192 B | n/a (`context` only) |
+
+Architecture-specific mirror files follow the same numbering where possible:
+`010_gfx1250_*` mirrors `010_rdna4_*`, `010_cdna4_*` mirrors the CDNA4/gfx950
+port, and so on. The standalone gfx1250 matmul ports are named
+`gfx1250_w2_2x4_benchmark.hip` and `gfx1250_prod_16x8_benchmark.hip` because
+the original RDNA4 filenames predate the numeric benchmark ladder.
 
 ## Shapes and Resource Pressure
 
@@ -349,6 +370,37 @@ sampled-watchpoint mode rows:
 | --- | ---: | ---: |
 | `cdna4-mfma-streamk-arrival-counter` | 9.52 µs | 45.8 µs |
 | `cdna4-mfma-streamk-tree-atomic-or` | 14.3 µs | 77.8 µs |
+
+## Current gfx1250 Validation
+
+The gfx1250 rows were built and smoke-run on 2026-06-29 with the same fair
+sampled defaults used by the measured sections: `watchpoints=1`, `skip=32`,
+`probes=1`, `delay=32`, and `reports=off`. These runs validate that the kernels
+compile, launch, and exercise the expected benchmark modes. They are not
+hardware performance measurements.
+
+| Key | Validation status |
+| --- | --- |
+| `gfx1250-matmul-wave-w2` | Benchmark built and smoke-run. |
+| `gfx1250-matmul-wave-w4` | Benchmark built and smoke-run. |
+| `gfx1250-matmul-wave-w8` | Benchmark built and smoke-run. |
+| `gfx1250-matmul-prod-16x8` | Benchmark built and smoke-run with a minimal valid M/N/K. |
+| `gfx1250-attention-d16-dense` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-attention-d128-dense` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-attention-d128-pressure-full-kv16` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-attention-d128-pressure-wide-k32` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-wmma-register-handoff` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-wmma-register-handoff-pv` | GTest passed through the register-handoff test binary; benchmark built and smoke-run. |
+| `gfx1250-wmma-no-score-lds-attention` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-pingpong-private-lds` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-pingpong-cooperative-lds` | GTest passed; no standalone benchmark row. |
+| `gfx1250-pingpong-wide-cooperative-lds` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-wmma-streamk-arrival-counter` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-wmma-streamk-tree-atomic-or` | GTest passed; benchmark built and smoke-run. |
+| `gfx1250-attention-lds-alias-handoff` | GTest passed; benchmark built and smoke-run. |
+
+A full gfx1250 CMake/Ninja build also passes with the RDNA4 tutorial target
+gated out for that architecture.
 
 ## Reading The Suite
 

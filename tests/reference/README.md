@@ -23,7 +23,7 @@ The active files are:
   including a tiny global `atomicAdd` reduction, global release/acquire flags
   ordering LDS payload accesses, and compile-only broken flag handoffs for
   later instrumented diagnostics.
-* `rdna4_jakub_matmul_reference.hip`: a `gfx12`-gated RDNA4 WMMA reference
+* `rdna4_jakub_matmul_reference.hip`: a `gfx120*`-gated RDNA4 WMMA reference
   derived from Jakub's `sanitizer-strategy/rdna4_matmul` corpus.
 
 ## Harness Shape

@@ -31,17 +31,14 @@ comments while avoiding undefined behavior in the reference run.
 The detector contract tested by the instrumented suite is documented in
 [`../docs/instrumentation_model.md`](../docs/instrumentation_model.md).
 
-Configure/build example for this machine:
+Configure/build example:
 
 ```sh
-cmake -E env CCACHE_DISABLE=1 cmake -G Ninja -S hip-moi -B hip-moi-build \
-  -DCMAKE_CXX_COMPILER=/home/benoit/workspace/TheRock-build/dist/rocm/llvm/bin/clang++ \
-  -DCMAKE_HIP_COMPILER=/home/benoit/workspace/TheRock-build/dist/rocm/llvm/bin/clang++ \
-  -DCMAKE_PREFIX_PATH=/home/benoit/workspace/TheRock-build/dist/rocm \
-  -DCMAKE_HIP_COMPILER_ROCM_ROOT=/home/benoit/workspace/TheRock-build/dist/rocm
-cmake -E env CCACHE_DISABLE=1 cmake --build hip-moi-build --target hip_moi_reference_selftest
-ctest --test-dir hip-moi-build --output-on-failure
+cmake -E env CCACHE_DISABLE=1 cmake -G Ninja -S . -B build \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1201
+cmake -E env CCACHE_DISABLE=1 cmake --build build --target hip_moi_reference_selftest
+ctest --test-dir build --output-on-failure
 ```
 
-CMake 4.2 rejects `hipcc` as `CMAKE_HIP_COMPILER`; use the underlying TheRock
-Clang for CMake builds.
+When using a TheRock SDK, point CMake at the SDK's underlying ROCm Clang and
+ROCm prefix rather than using `hipcc` as `CMAKE_HIP_COMPILER`.

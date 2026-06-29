@@ -6,7 +6,7 @@ SPDX-License-Identifier: MIT
 # Benchmark Interpretation
 
 This document explains how to read hip-moi's benchmark suite. The raw benchmark
-catalog and RDNA4 tables live in [`benchmarks/README.md`](../benchmarks/README.md).
+catalog and architecture-specific result tables live in [`benchmarks/README.md`](../benchmarks/README.md).
 This document is the interpretation layer: what the rows are meant to prove,
 which comparisons are apples-to-apples, and what the current data suggests for
 Loom, the RFC, and future DBI work.

@@ -48,8 +48,8 @@ For the future rocjitsu DBI direction, read
 
    Records the current source survey and explains why `setprio` is a
    scheduling operation, not a memory-ordering operation, for hip-moi's current
-   detector. Also records the current RDNA4 ping-pong test shapes,
-   generated-code inspection workflow, and ATT trace smoke test.
+   detector. Also records the current architecture-specific ping-pong test
+   shapes, generated-code inspection workflow, and ATT trace smoke test.
 
 6. [Atomics Model](atomics.md)
 
@@ -65,8 +65,8 @@ For the future rocjitsu DBI direction, read
 
 8. [Benchmark Interpretation](benchmark_interpretation.md)
 
-   Explains what the benchmark modes and current RDNA4 results imply for Loom,
-   the RFC, atomics, ping-pong, and future DBI work.
+   Explains what the benchmark modes and current architecture-specific results
+   imply for Loom, the RFC, atomics, ping-pong, and future DBI work.
 
 9. [Atomics Corpus](atomics_corpus.md)
 
@@ -91,7 +91,8 @@ For the future rocjitsu DBI direction, read
 
 13. [Benchmark README](../benchmarks/README.md)
 
-   Gives the current RDNA4 measurements and resource-pressure tables.
+   Gives the current architecture-specific measurements, validation status,
+   and resource-pressure tables.
 
 ## Documentation Policy
 

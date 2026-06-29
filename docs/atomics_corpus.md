@@ -32,8 +32,8 @@ not make hip-moi a general global-memory race detector.
 
 ## RocJITsu Hip-Stream-K Flags
 
-The strongest source-level seed came from
-`/home/benoit/workspace/rocjitsu-test-corpus/corpus/fuzz-targets`.
+The strongest source-level seed came from the RocJITsu test corpus,
+`rocjitsu-test-corpus/corpus/fuzz-targets`.
 
 Relevant files:
 
@@ -79,7 +79,7 @@ pair partials after a second flag handoff.
 
 ## RDNA4 Stream-K Counters And Bitmasks
 
-`/home/benoit/workspace/hip-matmul/matmul_rdna4.hip` supplied the RDNA4 WMMA
+`hip-matmul/matmul_rdna4.hip` supplied the RDNA4 WMMA
 counter and bitmask shapes that RocJITsu did not cover directly.
 
 The arrival-counter source shapes are:

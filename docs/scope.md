@@ -69,14 +69,15 @@ context.
 The benchmark suite currently covers:
 
 * tiny matmul wave-scaling rows for fast overhead triage;
-* a production-shaped FP16 RDNA4 matmul extraction from Jakub's benchmark;
+* production-shaped FP16 matmul rows from the RDNA4 extraction and gfx1250 port;
 * dense attention rows that stress scalar LDS score and softmax-weight scratch;
 * D128/V128 attention pressure rows with larger K/V LDS staging;
 * no-score/register-handoff attention rows that are closer to mature
   flash-attention structure.
 
-The benchmark catalog, resource-pressure table, mode definitions, and current
-RDNA4 timings live in [`../benchmarks/README.md`](../benchmarks/README.md).
+The benchmark catalog, resource-pressure table, mode definitions, current
+architecture-specific timings, and validation status live in
+[`../benchmarks/README.md`](../benchmarks/README.md).
 
 The main current performance lesson is not "always use the fast view." The
 lesson is narrower:

@@ -18,21 +18,20 @@ and what false-negative sources are being accepted.
 
 ## Source Basis
 
-The comparison is based on local materials in this workspace:
+The comparison is based on the following source materials:
 
 | Source | Role |
 | --- | --- |
-| `/home/benoit/workspace/sanitizer-strategy/rfc-thread-concurrency-sanitizer-gpus-compiler-rt.md` | Saved copy of the compiler-rt RFC text. |
-| `/home/benoit/workspace/sanitizer-strategy/sanitizer_landscape.md` | Local survey of RFC, HRX/Loom, DBI, and other GPU sanitizer directions. |
-| `/home/benoit/workspace/sanitizer-strategy/rdna4_matmul/README.md` | Jakub's explanation of the RDNA4 HIP harness policies. |
-| `/home/benoit/workspace/sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip` | Jakub's large self-contained HIP implementation. |
+| `sanitizer-strategy/rfc-thread-concurrency-sanitizer-gpus-compiler-rt.md` | Saved copy of the compiler-rt RFC text. |
+| `sanitizer-strategy/sanitizer_landscape.md` | Local survey of RFC, HRX/Loom, DBI, and other GPU sanitizer directions. |
+| `sanitizer-strategy/rdna4_matmul/README.md` | Jakub's explanation of the RDNA4 HIP harness policies. |
+| `sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip` | Jakub's large self-contained HIP implementation. |
 | `benchmarks/*benchmark.hip` | hip-moi's focused, vendored benchmark extracts. |
 | `docs/instrumentation_model.md` and `docs/atomics.md` | Current hip-moi implementation model. |
 
-The HRX submodule checkout in this workspace is not currently populated as a
-normal source tree, so this document does not cite HRX source file paths. It
-uses Jakub's local summaries and benchmark extraction as the grounded reference
-for Loom concepts.
+The HRX source tree is not vendored here, so this document does not cite HRX
+source file paths. It uses Jakub's summaries and benchmark extraction as the
+grounded reference for Loom concepts.
 
 ## Names
 

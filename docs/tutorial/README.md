@@ -27,7 +27,7 @@ This tutorial uses a small vocabulary consistently:
 * **Workgroup** means a HIP block. This matches the terminology used in the
   implementation docs.
 * **Subgroup** is the owner unit recorded by hip-moi metadata. The current
-  RDNA4 examples use 32 threads per subgroup.
+  architecture-specific examples use 32 threads per subgroup.
 * **Lane** is a thread's index inside its subgroup.
 * **Epoch** is the interval between instrumented full-workgroup barriers. A
   cross-subgroup conflict is reportable only when both accesses are in the same
@@ -52,7 +52,7 @@ and
 Run every tutorial program through CTest:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/hip-moi-build -R HipMoiTutorial --output-on-failure
+ctest --test-dir build -R HipMoiTutorial --output-on-failure
 ```
 
 Some tutorial programs intentionally fail when run directly. Their CTest

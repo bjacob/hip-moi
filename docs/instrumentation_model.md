@@ -509,5 +509,5 @@ part of the result: VGPR count, spills, private segment size, LDS use, and code
 size are all relevant because production kernels are already close to resource
 limits.
 
-The benchmark suite and current RDNA4 numbers are documented in
+The benchmark suite and current architecture-specific results are documented in
 [`benchmarks/README.md`](../benchmarks/README.md).
