@@ -139,6 +139,8 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip)
 endif()
 if(_hip_moi_build_cdna4_tests)
+  hip_moi_add_gtest(hip_moi_instrumented_cdna4_pingpong_private_lds_test
+                    instrumented/016_cdna4_pingpong_private_lds_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_pingpong_wide_cooperative_lds_test
                     instrumented/018_cdna4_pingpong_wide_cooperative_lds_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test
