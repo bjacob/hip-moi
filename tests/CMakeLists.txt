@@ -143,6 +143,8 @@ if(_hip_moi_build_cdna4_tests)
                     instrumented/028_cdna4_mfma_streamk_arrival_counter_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_streamk_tree_atomic_or_test
                     instrumented/029_cdna4_mfma_streamk_tree_atomic_or_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_attention_lds_alias_handoff_test
+                    instrumented/036_cdna4_mfma_attention_lds_alias_handoff_test.hip)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_atomic_api_test
                   instrumented/019_atomic_api_test.hip)

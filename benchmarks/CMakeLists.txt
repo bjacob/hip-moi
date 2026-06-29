@@ -128,4 +128,6 @@ if(_hip_moi_build_cdna4_benchmarks)
                         028_cdna4_mfma_streamk_arrival_counter_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_streamk_tree_atomic_or
                         029_cdna4_mfma_streamk_tree_atomic_or_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_attention_lds_alias_handoff
+                        036_cdna4_mfma_attention_lds_alias_handoff_benchmark.hip)
 endif()
