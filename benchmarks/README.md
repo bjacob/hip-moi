@@ -1,7 +1,7 @@
 # hip-moi Benchmarks
 
-This directory contains the RDNA4 performance benchmarks used to guide
-hip-moi's sampled publish-only implementation. The matmul benchmarks are
+This directory contains the RDNA4 and CDNA4 performance benchmarks used to
+guide hip-moi's sampled publish-only implementation. The matmul benchmarks are
 focused extractions from Jakub's
 `sanitizer-strategy/rdna4_matmul/rdna4_matmul.hip`; the attention benchmarks are
 hip-moi-native workloads grown from the instrumented test corpus and from the
@@ -312,6 +312,43 @@ are intentionally part of the semantic coverage.
 | `streamk-two-level-reduction` | 3.71 µs | 27.9 µs | n/a |
 | `rdna4-wmma-streamk-arrival-counter` | 3.40 µs | 25.5 µs | n/a |
 | `rdna4-wmma-streamk-tree-atomic-or` | 3.66 µs | 45.2 µs | n/a |
+
+## Current CDNA4/gfx950 Results
+
+CDNA4 rows were measured on 2026-06-29 on device 0, AMD Instinct
+MI355X, `gfx950:sramecc+:xnack-`, 256 CUs. The benchmark set was built from the
+TheRock HIP toolchain configured for `gfx950`. Latencies below 1 ms are
+normalized to microseconds (`µs`); larger latencies are printed in
+milliseconds. The fair sampled defaults were used: `watchpoints=1`, `skip=32`,
+`probes=1`, `delay=32`, and `reports=off`.
+
+Dense, D128 pressure, and D128 no-score attention rows use the sequence lengths
+printed by the benchmark names. Register-handoff, D16 no-score, ping-pong,
+Stream-K, and LDS-alias rows use their default 256-workgroup benchmark shapes
+with `MIN_MS=100` and `WARMUP_MS=100` or the benchmark-local equivalent.
+
+| Key | pass-through | Jakub-Sampled-Loom | `context + sampled_watchpoint` | `sampled_watchpoint_context` |
+| --- | ---: | ---: | ---: | ---: |
+| `cdna4-attention-d16-dense` | 18.4 ms | 258 ms | 210 ms | 130 ms |
+| `cdna4-attention-d128-dense` | 7.03 ms | 169 ms | 162 ms | 55.1 ms |
+| `cdna4-attention-d128-pressure-full-kv16` | 6.09 ms | 170 ms | 150 ms | 54.0 ms |
+| `cdna4-attention-d128-pressure-wide-k32` | 6.04 ms | 173 ms | 96.4 ms | 56.2 ms |
+| `cdna4-attention-d128-no-score` | 4.02 ms | 18.6 ms | 161 ms | 11.1 ms |
+| `cdna4-mfma-register-handoff` | 3.12 µs | n/a | 12.6 µs | 3.39 µs |
+| `cdna4-mfma-register-handoff-pv` | 3.18 µs | n/a | 12.9 µs | 3.77 µs |
+| `cdna4-mfma-no-score-lds-attention` | 3.11 µs | n/a | 28.2 µs | 5.77 µs |
+| `cdna4-pingpong-private-lds` | 3.10 µs | n/a | 14.4 µs | 7.62 µs |
+| `cdna4-pingpong-cooperative-lds` | 3.08 µs | n/a | 49.7 µs | 9.16 µs |
+| `cdna4-pingpong-wide-cooperative-lds` | 3.10 µs | n/a | 54.6 µs | 9.67 µs |
+| `cdna4-attention-lds-alias-handoff` | 3.14 µs | n/a | 21.9 µs | 4.03 µs |
+
+The CDNA4 Stream-K rows currently expose the general `context` path rather than
+sampled-watchpoint mode rows:
+
+| Key | pass-through | `context` |
+| --- | ---: | ---: |
+| `cdna4-mfma-streamk-arrival-counter` | 9.52 µs | 45.8 µs |
+| `cdna4-mfma-streamk-tree-atomic-or` | 14.3 µs | 77.8 µs |
 
 ## Reading The Suite
 
