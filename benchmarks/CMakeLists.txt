@@ -138,6 +138,10 @@ if(_hip_moi_build_gfx1250_benchmarks)
                         013_gfx1250_wmma_register_handoff_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_no_score_lds_attention
                         014_gfx1250_wmma_no_score_lds_attention_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_pingpong_private_lds
+                        016_gfx1250_pingpong_att_probe.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_pingpong_wide_cooperative_lds
+                        018_gfx1250_pingpong_wide_cooperative_lds_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_attention_lds_alias_handoff
                         036_gfx1250_wmma_attention_lds_alias_handoff_benchmark.hip)
 endif()
