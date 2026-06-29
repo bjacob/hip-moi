@@ -242,6 +242,7 @@ The gfx950 port now has an initial CDNA4-specific test and benchmark set under
 
 * MFMA attention block with LDS softmax scratch: `010_cdna4_mfma_attention_block`;
 * MFMA D128 attention block with LDS softmax scratch: `011_cdna4_d128_attention_block`;
+* MFMA D128 LDS pressure variants: `012_cdna4_d128_attention_pressure`;
 * MFMA register handoff: `013_cdna4_mfma_register_handoff`;
 * MFMA no-score LDS attention: `014_cdna4_mfma_no_score_lds_attention`;
 * MFMA D128 no-score LDS attention: `015_cdna4_d128_no_score_lds_attention`;
@@ -257,10 +258,11 @@ material. The gfx950-only `<8 x half>` builtins, especially
 `__builtin_amdgcn_mfma_f32_16x16x32_f16`, are available in the local LLVM tree
 and should be used for future ports that need the native CDNA4 K=32 f16 tile.
 
-Remaining RDNA4-specific tests that still need CDNA4 counterparts are the
-larger attention row: `012`. Their CDNA4 ports
-should be based on the verified MFMA layout helpers, the rocjitsu gfx950 MFMA
-layout corpus, and the CDNA4 ISA manual rather than RDNA4 WMMA lane formulas.
+All RDNA4-specific tests now have CDNA4 counterparts under the gfx950 CMake
+paths. Future CDNA4 work should broaden coverage with native gfx950 MFMA shapes
+and source-mined kernels as needed, using the verified MFMA layout helpers, the
+rocjitsu gfx950 MFMA layout corpus, and the CDNA4 ISA manual rather than RDNA4
+WMMA lane formulas.
 
 ## Next Work
 

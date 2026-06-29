@@ -128,6 +128,8 @@ if(_hip_moi_build_cdna4_benchmarks)
                         010_cdna4_mfma_attention_block_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_d128_attention_block
                         011_cdna4_d128_attention_block_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_cdna4_d128_attention_pressure
+                        012_cdna4_d128_attention_pressure_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_register_handoff
                         013_cdna4_mfma_register_handoff_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_cdna4_mfma_no_score_lds_attention

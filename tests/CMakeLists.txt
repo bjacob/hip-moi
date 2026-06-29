@@ -143,6 +143,8 @@ if(_hip_moi_build_cdna4_tests)
                     instrumented/010_cdna4_mfma_attention_block_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_d128_attention_block_test
                     instrumented/011_cdna4_d128_attention_block_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_cdna4_d128_attention_pressure_test
+                    instrumented/012_cdna4_d128_attention_pressure_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_register_handoff_test
                     instrumented/013_cdna4_mfma_register_handoff_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_no_score_lds_attention_test
