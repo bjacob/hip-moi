@@ -234,6 +234,30 @@ worklog. Durable atomics provenance now lives in `docs/atomics_corpus.md`; the
 attention conclusions live in `benchmarks/README.md` and
 `docs/benchmark_interpretation.md`.
 
+
+## CDNA4/gfx950 Port Status
+
+The gfx950 port now has an initial CDNA4-specific test and benchmark set under
+`tests/instrumented` and `benchmarks`, guarded by the gfx950 CMake paths:
+
+* MFMA register handoff: `013_cdna4_mfma_register_handoff`;
+* MFMA ping-pong LDS rows: `016`, `017`, and `018`;
+* MFMA Stream-K rows: `028` and `029`;
+* MFMA attention LDS alias handoff: `036`.
+
+The current CDNA4 MFMA helpers have been checked against the CDNA4 ISA manual's
+general MFMA input/output layout and the local LLVM gfx950 builtin definitions.
+The committed rows intentionally use the legacy wave64 `16x16x16f16` MFMA shape
+where that matches the existing RDNA4 tile structure or the `hip-matmul` source
+material. The gfx950-only `<8 x half>` builtins, especially
+`__builtin_amdgcn_mfma_f32_16x16x32_f16`, are available in the local LLVM tree
+and should be used for future ports that need the native CDNA4 K=32 f16 tile.
+
+Remaining RDNA4-specific tests that still need CDNA4 counterparts are the
+larger attention rows: `010`, `011`, `012`, `014`, and `015`. Their CDNA4 ports
+should be based on the verified MFMA layout helpers, the rocjitsu gfx950 MFMA
+layout corpus, and the CDNA4 ISA manual rather than RDNA4 WMMA lane formulas.
+
 ## Next Work
 
 1. Import newly mined production hazard patterns into the corpus.
