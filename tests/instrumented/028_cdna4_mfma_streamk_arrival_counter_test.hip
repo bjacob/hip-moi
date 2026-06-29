@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/instrumented/028_rdna4_wmma_streamk_arrival_counter_test.hip
+// tests/instrumented/028_cdna4_mfma_streamk_arrival_counter_test.hip
 //
-// Stage 9 atomics test: a small RDNA4 WMMA Stream-K-shaped arrival counter.
+// Stage 9 atomics test: a small CDNA4 MFMA Stream-K-shaped arrival counter.
 // Two subgroups compute two K-slice partials for one C tile, publish their LDS
 // partials with a global fetch-add counter, and the last arriving subgroup
 // folds both partials.
@@ -16,18 +16,19 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace
 {
     using half_t  = _Float16;
-    using f16x8_t = half_t __attribute__((ext_vector_type(8)));
-    using f32x8_t = float __attribute__((ext_vector_type(8)));
+    using f16x4_t = half_t __attribute__((ext_vector_type(4)));
+    using f32x4_t = float __attribute__((ext_vector_type(4)));
 
-    constexpr int kThreadsPerSubgroup = 32;
+    constexpr int kThreadsPerSubgroup = 64;
     constexpr int kSubgroupCount      = 2;
     constexpr int kThreadCount        = kThreadsPerSubgroup * kSubgroupCount;
-    constexpr int kFragmentElements   = 8;
+    constexpr int kFragmentElements   = 4;
     constexpr int kTileM              = 16;
     constexpr int kTileN              = 16;
     constexpr int kKSlice             = 16;
@@ -35,16 +36,16 @@ namespace
     constexpr int kInitialOutput      = -1;
 
     constexpr std::size_t kInputFragmentCount = kSubgroupCount * kThreadsPerSubgroup;
-    constexpr std::size_t kInputBytes         = kInputFragmentCount * sizeof(f16x8_t);
+    constexpr std::size_t kInputBytes         = kInputFragmentCount * sizeof(f16x4_t);
     constexpr std::size_t kOutputBytes        = kCElementCount * sizeof(float);
 
     constexpr uint32_t kASharedByteOffset = 0;
     constexpr uint32_t kBSharedByteOffset
         = kASharedByteOffset
-          + static_cast<uint32_t>(kSubgroupCount * kThreadsPerSubgroup * sizeof(f16x8_t));
+          + static_cast<uint32_t>(kSubgroupCount * kThreadsPerSubgroup * sizeof(f16x4_t));
     constexpr uint32_t kPartialsSharedByteOffset
         = kBSharedByteOffset
-          + static_cast<uint32_t>(kSubgroupCount * kThreadsPerSubgroup * sizeof(f16x8_t));
+          + static_cast<uint32_t>(kSubgroupCount * kThreadsPerSubgroup * sizeof(f16x4_t));
     constexpr int kSharedBytes = static_cast<int>(kPartialsSharedByteOffset
                                                   + kSubgroupCount * kThreadsPerSubgroup
                                                         * kFragmentElements * sizeof(float));
@@ -60,21 +61,21 @@ namespace
     constexpr hip_moi::site_id kPartialLoadSite(0x1c06);
     constexpr hip_moi::site_id kCounterSite(0x1c07);
 
-    __host__ __device__ int rdna4_wmma_acc_m(int lane, int elem)
+    __host__ __device__ int cdna4_mfma_acc_m(int lane, int elem)
     {
-        return elem + 8 * (lane >> 4);
+        return elem + 4 * (lane >> 4);
     }
 
     __host__ __device__ uint32_t a_fragment_offset(int subgroup, int lane)
     {
         return kASharedByteOffset
-               + static_cast<uint32_t>((subgroup * kThreadsPerSubgroup + lane) * sizeof(f16x8_t));
+               + static_cast<uint32_t>((subgroup * kThreadsPerSubgroup + lane) * sizeof(f16x4_t));
     }
 
     __host__ __device__ uint32_t b_fragment_offset(int subgroup, int lane)
     {
         return kBSharedByteOffset
-               + static_cast<uint32_t>((subgroup * kThreadsPerSubgroup + lane) * sizeof(f16x8_t));
+               + static_cast<uint32_t>((subgroup * kThreadsPerSubgroup + lane) * sizeof(f16x4_t));
     }
 
     __host__ __device__ uint32_t partial_offset(int subgroup, int lane, int elem)
@@ -92,7 +93,7 @@ namespace
         return first_slice + second_slice;
     }
 
-    hip_moi::host_context_options streamk_wmma_options()
+    hip_moi::host_context_options streamk_mfma_options()
     {
         hip_moi::host_context_options options;
         options.storage_bytes               = 256 * 1024;
@@ -103,7 +104,7 @@ namespace
         return options;
     }
 
-    __device__ hip_moi::context make_streamk_wmma_context(hip_moi::context::storage_ref storage)
+    __device__ hip_moi::context make_streamk_mfma_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
             /*thread_count=*/kThreadCount,
@@ -113,9 +114,9 @@ namespace
         return hip_moi::context(storage, cfg);
     }
 
-    __device__ f32x8_t zero_f32x8()
+    __device__ f32x4_t zero_f32x4()
     {
-        f32x8_t value;
+        f32x4_t value;
 #pragma unroll
         for(int elem = 0; elem < kFragmentElements; ++elem)
         {
@@ -125,17 +126,17 @@ namespace
     }
 
     template <hip_moi::atomic_memory_order CounterOrder>
-    __global__ void wmma_streamk_arrival_counter_kernel(hip_moi::context::storage_ref storage,
-                                                        const f16x8_t* __restrict__ a_fragments,
-                                                        const f16x8_t* __restrict__ b_fragments,
+    __global__ void mfma_streamk_arrival_counter_kernel(hip_moi::context::storage_ref storage,
+                                                        const f16x4_t* __restrict__ a_fragments,
+                                                        const f16x4_t* __restrict__ b_fragments,
                                                         int* __restrict__ counter,
                                                         float* __restrict__ out)
     {
-        __shared__ f16x8_t a_shared[kSubgroupCount][kThreadsPerSubgroup];
-        __shared__ f16x8_t b_shared[kSubgroupCount][kThreadsPerSubgroup];
+        __shared__ f16x4_t a_shared[kSubgroupCount][kThreadsPerSubgroup];
+        __shared__ f16x4_t b_shared[kSubgroupCount][kThreadsPerSubgroup];
         __shared__ float   partials[kSubgroupCount][kThreadsPerSubgroup][kFragmentElements];
 
-        hip_moi::context ctx = make_streamk_wmma_context(storage);
+        hip_moi::context ctx = make_streamk_mfma_context(storage);
         ctx.init_workgroup();
 
         int tid      = static_cast<int>(threadIdx.x);
@@ -153,12 +154,12 @@ namespace
 
         ctx.syncthreads();
 
-        f16x8_t a_fragment = ctx.lds_load_at(
+        f16x4_t a_fragment = ctx.lds_load_at(
             &a_shared[subgroup][lane], a_fragment_offset(subgroup, lane), kALoadSite);
-        f16x8_t b_fragment = ctx.lds_load_at(
+        f16x4_t b_fragment = ctx.lds_load_at(
             &b_shared[subgroup][lane], b_fragment_offset(subgroup, lane), kBLoadSite);
-        f32x8_t acc = zero_f32x8();
-        acc         = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_fragment, b_fragment, acc);
+        f32x4_t acc = zero_f32x4();
+        acc         = __builtin_amdgcn_mfma_f32_16x16x16f16(a_fragment, b_fragment, acc, 0, 0, 0);
 
 #pragma unroll
         for(int elem = 0; elem < kFragmentElements; ++elem)
@@ -191,14 +192,14 @@ namespace
                                              partial_offset(partial_subgroup, lane, elem),
                                              kPartialLoadSite);
                 }
-                int row                    = rdna4_wmma_acc_m(lane, elem);
+                int row                    = cdna4_mfma_acc_m(lane, elem);
                 int column                 = lane & 15;
                 out[row * kTileN + column] = value;
             }
         }
     }
 
-    void fill_fragments(std::vector<f16x8_t>* a_fragments, std::vector<f16x8_t>* b_fragments)
+    void fill_fragments(std::vector<f16x4_t>* a_fragments, std::vector<f16x4_t>* b_fragments)
     {
         a_fragments->resize(kInputFragmentCount);
         b_fragments->resize(kInputFragmentCount);
@@ -206,8 +207,8 @@ namespace
         {
             for(int lane = 0; lane < kThreadsPerSubgroup; ++lane)
             {
-                f16x8_t a;
-                f16x8_t b;
+                f16x4_t a;
+                f16x4_t b;
 #pragma unroll
                 for(int elem = 0; elem < kFragmentElements; ++elem)
                 {
@@ -222,8 +223,8 @@ namespace
 
     struct device_buffers
     {
-        f16x8_t* a       = nullptr;
-        f16x8_t* b       = nullptr;
+        f16x4_t* a       = nullptr;
+        f16x4_t* b       = nullptr;
         int*     counter = nullptr;
         float*   out     = nullptr;
 
@@ -248,8 +249,8 @@ namespace
         }
     };
 
-    void allocate_and_copy_inputs(const std::vector<f16x8_t>& a_fragments,
-                                  const std::vector<f16x8_t>& b_fragments,
+    void allocate_and_copy_inputs(const std::vector<f16x4_t>& a_fragments,
+                                  const std::vector<f16x4_t>& b_fragments,
                                   device_buffers*             buffers)
     {
         HIP_MOI_TEST_HIP_ASSERT(hipMalloc(&buffers->a, kInputBytes));
@@ -273,10 +274,10 @@ namespace
     }
 
     template <hip_moi::atomic_memory_order CounterOrder>
-    void launch_wmma_streamk_arrival_counter(hip_moi::context::storage_ref storage,
+    void launch_mfma_streamk_arrival_counter(hip_moi::context::storage_ref storage,
                                              device_buffers*               buffers)
     {
-        hipLaunchKernelGGL((wmma_streamk_arrival_counter_kernel<CounterOrder>),
+        hipLaunchKernelGGL((mfma_streamk_arrival_counter_kernel<CounterOrder>),
                            dim3(1),
                            dim3(kThreadCount),
                            0,
@@ -296,10 +297,10 @@ namespace
     }
 
     template <hip_moi::atomic_memory_order CounterOrder>
-    void run_wmma_streamk_arrival_counter(hip_moi::host_context* moi, device_buffers* buffers)
+    void run_mfma_streamk_arrival_counter(hip_moi::host_context* moi, device_buffers* buffers)
     {
         reset_counter_and_output(buffers);
-        launch_wmma_streamk_arrival_counter<CounterOrder>(moi->launch_ref(), buffers);
+        launch_mfma_streamk_arrival_counter<CounterOrder>(moi->launch_ref(), buffers);
         HIP_MOI_TEST_HIP_ASSERT(hipGetLastError());
         HIP_MOI_TEST_HIP_ASSERT(hipDeviceSynchronize());
         std::vector<float> output;
@@ -312,32 +313,32 @@ namespace
 
     void make_inputs_and_buffers(device_buffers* buffers)
     {
-        std::vector<f16x8_t> a_fragments;
-        std::vector<f16x8_t> b_fragments;
+        std::vector<f16x4_t> a_fragments;
+        std::vector<f16x4_t> b_fragments;
         fill_fragments(&a_fragments, &b_fragments);
         allocate_and_copy_inputs(a_fragments, b_fragments, buffers);
     }
 } // namespace
 
-TEST(HipMoiRdna4WmmaStreamKArrivalCounter, AcqRelFetchAddOrdersWmmaPartials)
+TEST(HipMoiCdna4MfmaStreamKArrivalCounter, AcqRelFetchAddOrdersMfmaPartials)
 {
-    hip_moi::host_context moi(streamk_wmma_options());
+    hip_moi::host_context moi(streamk_mfma_options());
     device_buffers        buffers;
     ASSERT_NO_FATAL_FAILURE(make_inputs_and_buffers(&buffers));
 
     ASSERT_NO_FATAL_FAILURE(
-        (run_wmma_streamk_arrival_counter<hip_moi::atomic_memory_order::acq_rel>(&moi, &buffers)));
+        (run_mfma_streamk_arrival_counter<hip_moi::atomic_memory_order::acq_rel>(&moi, &buffers)));
     EXPECT_TRUE(moi.check(nullptr));
 }
 
-TEST(HipMoiRdna4WmmaStreamKArrivalCounter, RelaxedFetchAddDiagnosesWmmaPartialRace)
+TEST(HipMoiCdna4MfmaStreamKArrivalCounter, RelaxedFetchAddDiagnosesMfmaPartialRace)
 {
-    hip_moi::host_context moi(streamk_wmma_options());
+    hip_moi::host_context moi(streamk_mfma_options());
     device_buffers        buffers;
     ASSERT_NO_FATAL_FAILURE(make_inputs_and_buffers(&buffers));
 
     ASSERT_NO_FATAL_FAILURE(
-        (run_wmma_streamk_arrival_counter<hip_moi::atomic_memory_order::relaxed>(&moi, &buffers)));
+        (run_mfma_streamk_arrival_counter<hip_moi::atomic_memory_order::relaxed>(&moi, &buffers)));
     EXPECT_FALSE(moi.check(nullptr));
     EXPECT_GT(moi.last_diagnostic_count(), 0);
 }

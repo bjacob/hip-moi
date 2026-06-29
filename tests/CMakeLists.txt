@@ -79,6 +79,13 @@ foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
   endif()
 endforeach()
 
+set(_hip_moi_build_cdna4_tests TRUE)
+foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
+  if(NOT _hip_moi_arch MATCHES "^gfx950")
+    set(_hip_moi_build_cdna4_tests FALSE)
+  endif()
+endforeach()
+
 hip_moi_add_gtest(hip_moi_reference_selftest
                   reference/mvp_reference_kernels.hip)
 hip_moi_add_gtest(hip_moi_reference_atomic
@@ -130,6 +137,10 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/029_rdna4_wmma_streamk_tree_atomic_or_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_attention_lds_alias_handoff_test
                     instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip)
+endif()
+if(_hip_moi_build_cdna4_tests)
+  hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_streamk_arrival_counter_test
+                    instrumented/028_cdna4_mfma_streamk_arrival_counter_test.hip)
 endif()
 hip_moi_add_gtest(hip_moi_instrumented_atomic_api_test
                   instrumented/019_atomic_api_test.hip)
