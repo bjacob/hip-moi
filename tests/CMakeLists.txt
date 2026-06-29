@@ -141,6 +141,8 @@ endif()
 if(_hip_moi_build_cdna4_tests)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_register_handoff_test
                     instrumented/013_cdna4_mfma_register_handoff_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_cdna4_mfma_no_score_lds_attention_test
+                    instrumented/014_cdna4_mfma_no_score_lds_attention_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_pingpong_private_lds_test
                     instrumented/016_cdna4_pingpong_private_lds_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_cdna4_pingpong_cooperative_lds_test
