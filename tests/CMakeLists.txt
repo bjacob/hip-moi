@@ -148,10 +148,16 @@ endif()
 if(_hip_moi_build_gfx1250_tests)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_wmma_attention_block_test
                     instrumented/010_gfx1250_wmma_attention_block_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1250_d128_attention_block_test
+                    instrumented/011_gfx1250_d128_attention_block_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1250_d128_attention_pressure_test
+                    instrumented/012_gfx1250_d128_attention_pressure_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_wmma_register_handoff_test
                     instrumented/013_gfx1250_wmma_register_handoff_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_wmma_no_score_lds_attention_test
                     instrumented/014_gfx1250_wmma_no_score_lds_attention_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1250_d128_no_score_lds_attention_test
+                    instrumented/015_gfx1250_d128_no_score_lds_attention_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_pingpong_private_lds_test
                     instrumented/016_gfx1250_pingpong_private_lds_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_pingpong_cooperative_lds_test

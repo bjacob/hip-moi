@@ -134,10 +134,16 @@ endif()
 if(_hip_moi_build_gfx1250_benchmarks)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_attention_block
                         010_gfx1250_wmma_attention_block_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_d128_attention_block
+                        011_gfx1250_d128_attention_block_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_d128_attention_pressure
+                        012_gfx1250_d128_attention_pressure_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_register_handoff
                         013_gfx1250_wmma_register_handoff_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_no_score_lds_attention
                         014_gfx1250_wmma_no_score_lds_attention_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_d128_no_score_lds_attention
+                        015_gfx1250_d128_no_score_lds_attention_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_pingpong_private_lds
                         016_gfx1250_pingpong_att_probe.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_pingpong_wide_cooperative_lds
