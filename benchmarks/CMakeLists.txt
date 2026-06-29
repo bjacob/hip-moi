@@ -142,6 +142,10 @@ if(_hip_moi_build_gfx1250_benchmarks)
                         016_gfx1250_pingpong_att_probe.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_pingpong_wide_cooperative_lds
                         018_gfx1250_pingpong_wide_cooperative_lds_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_streamk_arrival_counter
+                        028_gfx1250_wmma_streamk_arrival_counter_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_streamk_tree_atomic_or
+                        029_gfx1250_wmma_streamk_tree_atomic_or_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_attention_lds_alias_handoff
                         036_gfx1250_wmma_attention_lds_alias_handoff_benchmark.hip)
 endif()
