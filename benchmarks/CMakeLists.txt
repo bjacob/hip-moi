@@ -134,6 +134,8 @@ endif()
 if(_hip_moi_build_gfx1250_benchmarks)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_register_handoff
                         013_gfx1250_wmma_register_handoff_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_no_score_lds_attention
+                        014_gfx1250_wmma_no_score_lds_attention_benchmark.hip)
 endif()
 
 if(_hip_moi_build_cdna4_benchmarks)
