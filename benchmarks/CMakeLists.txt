@@ -132,6 +132,30 @@ if(_hip_moi_build_rdna4_benchmarks)
 endif()
 
 if(_hip_moi_build_gfx1250_benchmarks)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_w2_2x4
+                        gfx1250_w2_2x4_benchmark.hip)
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_w4_4x16
+                        gfx1250_w2_2x4_benchmark.hip)
+  target_compile_definitions(hip_moi_benchmark_gfx1250_w4_4x16 PRIVATE
+    HIP_MOI_BENCH_WAVES=4
+    HIP_MOI_BENCH_MTILES=4
+    HIP_MOI_BENCH_NTILES=16
+    HIP_MOI_BENCH_WAVE_TILE_M=4
+    HIP_MOI_BENCH_WAVE_TILE_N=4)
+
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_w8_16x8
+                        gfx1250_w2_2x4_benchmark.hip)
+  target_compile_definitions(hip_moi_benchmark_gfx1250_w8_16x8 PRIVATE
+    HIP_MOI_BENCH_WAVES=8
+    HIP_MOI_BENCH_MTILES=16
+    HIP_MOI_BENCH_NTILES=8
+    HIP_MOI_BENCH_WAVE_TILE_M=4
+    HIP_MOI_BENCH_WAVE_TILE_N=4
+    HIP_MOI_BENCH_STORAGE_BYTES=4194304)
+
+  hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_prod_16x8
+                        gfx1250_prod_16x8_benchmark.hip)
+
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_wmma_attention_block
                         010_gfx1250_wmma_attention_block_benchmark.hip)
   hip_moi_add_benchmark(hip_moi_benchmark_gfx1250_d128_attention_block
