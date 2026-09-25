@@ -346,8 +346,11 @@ WMMA lane formulas.
    caches observable. The repaired tree passes three consecutive ConSan `max`
    clean controls with a fresh rocprofv3 allowlist. All 184 gfx950 CTest cases
    pass. Generic two-subgroup atomic tests now use native waves: their former
-   32-lane split could deadlock inside a single CDNA wave64. Fault sensitivity
-   qualification remains tracked in rocjitsu's CDNA4 validation ledger.
+   32-lane split could deadlock inside a single CDNA wave64. Fresh tree fault
+   qualification detects 0/8 at `default`, 1/8 at `high`, and 8/8 at `higher`,
+   making `higher` the lowest passing ConSan preset. SuperCollider `sleep=15`
+   retains a passing clean control and 0/8 detections. Full evidence is tracked
+   in rocjitsu's CDNA4 validation ledger.
 
    The short version for discussion is: `hip_moi::context` supports
    release/acquire load/store, fetch-add/or/and/xor, exchange, successful and
