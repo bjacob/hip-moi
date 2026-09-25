@@ -8,7 +8,7 @@
 // handoff. This is the same source-level synchronization family as
 // fence-plus-relaxed-store/load and fence-plus-relaxed-RMW.
 //
-#include "test_support.hpp"
+#include "native_wave_test_support.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -16,8 +16,6 @@
 
 namespace
 {
-    constexpr int kThreadCount        = 64;
-    constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
     constexpr int kPayloadValue       = 409;
     constexpr int kInitialOutput      = -1;
@@ -42,8 +40,8 @@ namespace
                make_atomic_fence_extended_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
-            /*thread_count=*/kThreadCount,
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/warpSize,
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
@@ -78,7 +76,7 @@ namespace
                                       HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(__hip_atomic_load(flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
                   != kPublishedFlag)
@@ -130,7 +128,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             int expected = kUnlocked;
             while(!ctx.atomic_compare_exchange_strong(lock,
@@ -182,7 +180,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(__hip_atomic_load(flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
                   != kPublishedFlag)
@@ -231,7 +229,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(ctx.atomic_load(flag,
                                   hip_moi::atomic_memory_order::seq_cst,
@@ -309,7 +307,7 @@ TEST(HipMoiAtomicFenceExtended, ReleaseAcquireFencesOrderRelaxedExchangePayload)
         [](hip_moi::context::storage_ref storage, int* flag, int* output) {
             hipLaunchKernelGGL((atomic_fence_exchange_handoff_kernel</*UseFences=*/true>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -325,7 +323,7 @@ TEST(HipMoiAtomicFenceExtended, RelaxedExchangeWithoutFencesDoesNotOrderPayload)
         [](hip_moi::context::storage_ref storage, int* flag, int* output) {
             hipLaunchKernelGGL((atomic_fence_exchange_handoff_kernel</*UseFences=*/false>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -341,7 +339,7 @@ TEST(HipMoiAtomicFenceExtended, ReleaseAcquireFencesOrderSuccessfulRelaxedCasPay
         [](hip_moi::context::storage_ref storage, int* lock, int* output) {
             hipLaunchKernelGGL((atomic_fence_successful_cas_handoff_kernel</*UseFences=*/true>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -357,7 +355,7 @@ TEST(HipMoiAtomicFenceExtended, SuccessfulRelaxedCasWithoutFencesDoesNotOrderPay
         [](hip_moi::context::storage_ref storage, int* lock, int* output) {
             hipLaunchKernelGGL((atomic_fence_successful_cas_handoff_kernel</*UseFences=*/false>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -373,7 +371,7 @@ TEST(HipMoiAtomicFenceExtended, ReleaseAcquireFencesOrderFailedRelaxedCasPayload
         [](hip_moi::context::storage_ref storage, int* flag, int* output) {
             hipLaunchKernelGGL((atomic_fence_failed_cas_handoff_kernel</*UseFences=*/true>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -389,7 +387,7 @@ TEST(HipMoiAtomicFenceExtended, FailedRelaxedCasWithoutFencesDoesNotOrderPayload
         [](hip_moi::context::storage_ref storage, int* flag, int* output) {
             hipLaunchKernelGGL((atomic_fence_failed_cas_handoff_kernel</*UseFences=*/false>),
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,
@@ -405,7 +403,7 @@ TEST(HipMoiAtomicFenceExtended, SeqCstStoreLoadOrdersPayload)
         [](hip_moi::context::storage_ref storage, int* flag, int* output) {
             hipLaunchKernelGGL(atomic_seq_cst_handoff_kernel,
                                dim3(1),
-                               dim3(kThreadCount),
+                               dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                                0,
                                0,
                                storage,

@@ -7,7 +7,7 @@
 // publication, paired with an acquire fence sequenced after a relaxed atomic
 // observation, can order an instrumented LDS payload handoff.
 //
-#include "test_support.hpp"
+#include "native_wave_test_support.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -15,8 +15,6 @@
 
 namespace
 {
-    constexpr int kThreadCount        = 64;
-    constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
     constexpr int kPayloadValue       = 83;
     constexpr int kInitialOutput      = -1;
@@ -37,8 +35,8 @@ namespace
     __device__ hip_moi::context make_atomic_fence_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
-            /*thread_count=*/kThreadCount,
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/warpSize,
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
@@ -73,7 +71,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(ctx.atomic_load(flag,
                                   hip_moi::atomic_memory_order::relaxed,
@@ -113,7 +111,7 @@ TEST(HipMoiAtomicFenceHappensBefore, ReleaseAcquireFencesOrderRelaxedFlagPayload
 
     hipLaunchKernelGGL((atomic_fence_orders_lds_payload_kernel</*UseFences=*/true>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),
@@ -143,7 +141,7 @@ TEST(HipMoiAtomicFenceHappensBefore, RelaxedFlagWithoutFencesDoesNotOrderPayload
 
     hipLaunchKernelGGL((atomic_fence_orders_lds_payload_kernel</*UseFences=*/false>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),

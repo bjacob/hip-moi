@@ -7,7 +7,7 @@
 // operations that can carry release/acquire synchronization for LDS payload
 // diagnostics.
 //
-#include "test_support.hpp"
+#include "native_wave_test_support.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -15,8 +15,6 @@
 
 namespace
 {
-    constexpr int kThreadCount        = 64;
-    constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
     constexpr int kPayloadValue       = 101;
     constexpr int kInitialOutput      = -1;
@@ -41,8 +39,8 @@ namespace
         make_atomic_exchange_compare_exchange_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
-            /*thread_count=*/kThreadCount,
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/warpSize,
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
@@ -72,7 +70,7 @@ namespace
                                       HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(__hip_atomic_load(flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
                   != kPublishedFlag)
@@ -115,7 +113,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             int expected = kUnlocked;
             while(!ctx.atomic_compare_exchange_strong(lock,
@@ -156,7 +154,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(__hip_atomic_load(flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
                   != kPublishedFlag)
@@ -199,7 +197,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, ReleaseAcquireExchangeOrdersPayload)
     hipLaunchKernelGGL((atomic_exchange_handoff_kernel<hip_moi::atomic_memory_order::release,
                                                        hip_moi::atomic_memory_order::acquire>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),
@@ -230,7 +228,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, RelaxedExchangeDoesNotOrderPayload)
     hipLaunchKernelGGL((atomic_exchange_handoff_kernel<hip_moi::atomic_memory_order::relaxed,
                                                        hip_moi::atomic_memory_order::relaxed>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),
@@ -263,7 +261,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, SuccessfulAcquireCompareExchangeOrders
         (atomic_compare_exchange_lock_handoff_kernel<hip_moi::atomic_memory_order::release,
                                                      hip_moi::atomic_memory_order::acquire>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),
@@ -295,7 +293,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, RelaxedCompareExchangeLockDoesNotOrder
         (atomic_compare_exchange_lock_handoff_kernel<hip_moi::atomic_memory_order::relaxed,
                                                      hip_moi::atomic_memory_order::relaxed>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),
@@ -327,7 +325,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, FailedAcquireCompareExchangeOrdersPayl
     hipLaunchKernelGGL(
         (failed_compare_exchange_handoff_kernel<hip_moi::atomic_memory_order::acquire>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),
@@ -358,7 +356,7 @@ TEST(HipMoiAtomicExchangeCompareExchange, FailedRelaxedCompareExchangeDoesNotOrd
     hipLaunchKernelGGL(
         (failed_compare_exchange_handoff_kernel<hip_moi::atomic_memory_order::relaxed>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),

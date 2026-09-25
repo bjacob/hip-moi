@@ -336,6 +336,19 @@ WMMA lane formulas.
    sampled-reporting caveats, and current RDNA4 cost. Source provenance is in
    `docs/atomics_corpus.md`.
 
+   CDNA4 ConSan validation exposed an incomplete atomic-address cache: bounded
+   insertion retries can omit a producer even when its authoritative release
+   record is ready. Acquires now use the cache only as a positive hint and scan
+   the table for producers not successfully imported. Deterministic partial-mask
+   and empty-mask regressions reproduce the old failure, with a negative control
+   proving that cache bits cannot invent releases. Keep this fallback when
+   optimizing the metadata protocol; instrumented scheduling makes partial
+   caches observable. The repaired tree passes three consecutive ConSan `max`
+   clean controls with a fresh rocprofv3 allowlist. All 184 gfx950 CTest cases
+   pass. Generic two-subgroup atomic tests now use native waves: their former
+   32-lane split could deadlock inside a single CDNA wave64. Fault sensitivity
+   qualification remains tracked in rocjitsu's CDNA4 validation ledger.
+
    The short version for discussion is: `hip_moi::context` supports
    release/acquire load/store, fetch-add/or/and/xor, exchange, successful and
    failed compare-exchange, `seq_cst` sanity coverage, and atomic fences paired

@@ -876,26 +876,29 @@ namespace hip_moi
             }
 
             uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
+            uint64_t  imported_producers = 0;
+            bool      found              = false;
             if(detail::configured_subgroup_count(cfg_) > 2u)
             {
-                bool cache_hit = false;
-                bool found
-                    = try_record_atomic_acquire_from_cache(address, consumer, capacity, &cache_hit);
-                if(cache_hit)
-                {
-                    return found;
-                }
+                found = try_record_atomic_acquire_from_cache(
+                    address, consumer, capacity, &imported_producers);
             }
 
-            return try_record_atomic_acquire_from_table(address, consumer, capacity);
+            // Cache insertion has a bounded retry budget, so even an address
+            // hit can omit a producer whose release record is already ready.
+            // The cache is a positive hint, never evidence of absence. Search
+            // the authoritative table for every producer not imported above.
+            return try_record_atomic_acquire_from_table(
+                       address, consumer, capacity, imported_producers)
+                   || found;
         }
 
         __device__ bool try_record_atomic_acquire_from_cache(uintptr_t address,
                                                              uint32_t  consumer,
                                                              uint32_t  capacity,
-                                                             bool*     cache_hit) const
+                                                             uint64_t* imported_producers) const
         {
-            *cache_hit                         = false;
+            *imported_producers                = 0;
             atomic_address_cache_record* cache = atomic_address_cache_records();
             if(!cache)
             {
@@ -917,7 +920,6 @@ namespace hip_moi
                 return false;
             }
 
-            *cache_hit = true;
             uint64_t producer_mask
                 = *reinterpret_cast<volatile uint64_t*>(&cache_record->producer_mask);
             bool found = false;
@@ -932,20 +934,25 @@ namespace hip_moi
                     continue;
                 }
 
-                found |= try_import_atomic_release_from_producer(
-                    address, consumer, capacity, producer);
+                if(try_import_atomic_release_from_producer(address, consumer, capacity, producer))
+                {
+                    found = true;
+                    *imported_producers |= uint64_t{1} << producer;
+                }
             }
             return found;
         }
 
         __device__ bool try_record_atomic_acquire_from_table(uintptr_t address,
                                                              uint32_t  consumer,
-                                                             uint32_t  capacity) const
+                                                             uint32_t  capacity,
+                                                             uint64_t  imported_producers) const
         {
             bool found = false;
             for(uint32_t producer = 0; producer < capacity; ++producer)
             {
-                if(producer == consumer)
+                if(producer == consumer
+                   || (producer < 64 && ((imported_producers >> producer) & 1u) != 0))
                 {
                     continue;
                 }

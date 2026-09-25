@@ -7,7 +7,7 @@
 // release_fence/barrier/acquire_fence is an instrumented full-workgroup epoch
 // boundary, while fences without a barrier do not advance the epoch.
 //
-#include "test_support.hpp"
+#include "native_wave_test_support.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -15,8 +15,6 @@
 
 namespace
 {
-    constexpr int kThreadCount        = 64;
-    constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
     constexpr int kPayloadValue       = 313;
 
@@ -35,8 +33,8 @@ namespace
         hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
-            /*thread_count=*/kThreadCount,
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/warpSize,
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
@@ -66,7 +64,7 @@ namespace
         }
         ctx.acquire_fence(hip_moi::atomic_memory_scope::workgroup, HIP_MOI_SITE_ID());
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             out[0] = ctx.lds_load_at(&payload, /*lds_byte_offset=*/0, HIP_MOI_SITE_ID());
         }
@@ -81,7 +79,7 @@ TEST(HipMoiWorkgroupBarrierFence, ReleaseBarrierAcquireFenceOrdersPayload)
 
     hipLaunchKernelGGL((workgroup_barrier_fence_handoff_kernel</*UseBarrier=*/true>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),
@@ -106,7 +104,7 @@ TEST(HipMoiWorkgroupBarrierFence, FencesWithoutBarrierDoNotOrderPayload)
 
     hipLaunchKernelGGL((workgroup_barrier_fence_handoff_kernel</*UseBarrier=*/false>),
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),

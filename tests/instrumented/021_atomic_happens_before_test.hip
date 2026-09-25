@@ -6,7 +6,7 @@
 // Stage 4 atomics tests: release/acquire atomic synchronization can order an
 // instrumented LDS payload handoff. Broken ordering still diagnoses.
 //
-#include "test_support.hpp"
+#include "native_wave_test_support.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -14,8 +14,6 @@
 
 namespace
 {
-    constexpr int kThreadCount        = 64;
-    constexpr int kThreadsPerSubgroup = 32;
     constexpr int kSubgroupCount      = 2;
     constexpr int kPayloadValue       = 37;
     constexpr int kInitialOutput      = -1;
@@ -37,8 +35,8 @@ namespace
                make_atomic_happens_before_context(hip_moi::context::storage_ref storage)
     {
         hip_moi::context::config cfg{
-            /*thread_count=*/kThreadCount,
-            /*threads_per_subgroup=*/kThreadsPerSubgroup,
+            /*thread_count=*/static_cast<int>(blockDim.x),
+            /*threads_per_subgroup=*/warpSize,
             /*subgroup_count=*/kSubgroupCount,
         };
         return hip_moi::context(storage, cfg);
@@ -67,7 +65,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(ctx.atomic_load(flag,
                                   hip_moi::atomic_memory_order::acquire,
@@ -106,7 +104,7 @@ namespace
                              HIP_MOI_SITE_ID());
         }
 
-        if(ctx.thread_id() == kThreadsPerSubgroup)
+        if(ctx.thread_id() == static_cast<uint32_t>(warpSize))
         {
             while(ctx.atomic_load(&flags[1],
                                   hip_moi::atomic_memory_order::acquire,
@@ -152,7 +150,7 @@ TEST(HipMoiAtomicHappensBefore, ReleaseAcquireOrdersInstrumentedLdsPayload)
     hipLaunchKernelGGL(
         (atomic_flag_orders_lds_payload_kernel<hip_moi::atomic_memory_order::release>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),
@@ -183,7 +181,7 @@ TEST(HipMoiAtomicHappensBefore, RelaxedStoreDoesNotOrderInstrumentedLdsPayload)
     hipLaunchKernelGGL(
         (atomic_flag_orders_lds_payload_kernel<hip_moi::atomic_memory_order::relaxed>),
         dim3(1),
-        dim3(kThreadCount),
+        dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
         0,
         0,
         moi.launch_ref(),
@@ -214,7 +212,7 @@ TEST(HipMoiAtomicHappensBefore, ReleasingDifferentFlagDoesNotOrderInstrumentedLd
 
     hipLaunchKernelGGL(wrong_flag_index_does_not_order_lds_payload_kernel,
                        dim3(1),
-                       dim3(kThreadCount),
+                       dim3(kSubgroupCount * hip_moi::test::native_wave_size()),
                        0,
                        0,
                        moi.launch_ref(),
