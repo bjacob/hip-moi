@@ -79,6 +79,13 @@ foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
   endif()
 endforeach()
 
+set(_hip_moi_build_gfx1100_tests TRUE)
+foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
+  if(NOT _hip_moi_arch MATCHES "^gfx1100$")
+    set(_hip_moi_build_gfx1100_tests FALSE)
+  endif()
+endforeach()
+
 set(_hip_moi_build_gfx1250_tests TRUE)
 foreach(_hip_moi_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
   if(NOT _hip_moi_arch MATCHES "^gfx1250$")
@@ -144,6 +151,20 @@ if(_hip_moi_build_rdna4_tests)
                     instrumented/029_rdna4_wmma_streamk_tree_atomic_or_test.hip)
   hip_moi_add_gtest(hip_moi_instrumented_rdna4_wmma_attention_lds_alias_handoff_test
                     instrumented/036_rdna4_wmma_attention_lds_alias_handoff_test.hip)
+endif()
+if(_hip_moi_build_gfx1100_tests)
+  hip_moi_add_gtest(hip_moi_reference_gfx1100_jakub_matmul
+                    reference/gfx1100_jakub_matmul_reference.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1100_wmma_attention_block_test
+                    instrumented/010_gfx1100_wmma_attention_block_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1100_d128_attention_block_test
+                    instrumented/011_gfx1100_d128_attention_block_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1100_d128_attention_pressure_test
+                    instrumented/012_gfx1100_d128_attention_pressure_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1100_wmma_streamk_arrival_counter_test
+                    instrumented/028_gfx1100_wmma_streamk_arrival_counter_test.hip)
+  hip_moi_add_gtest(hip_moi_instrumented_gfx1100_wmma_streamk_tree_atomic_or_test
+                    instrumented/029_gfx1100_wmma_streamk_tree_atomic_or_test.hip)
 endif()
 if(_hip_moi_build_gfx1250_tests)
   hip_moi_add_gtest(hip_moi_instrumented_gfx1250_wmma_attention_block_test

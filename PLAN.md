@@ -163,6 +163,9 @@ The instrumented suite now focuses on:
 * explicit LDS-offset APIs;
 * exact-shadow diagnostics;
 * sampled-watchpoint diagnostics and publish-only fast execution;
+* W7900-validated gfx1100 native WMMA fixtures for rocJitsu ConSan: attention,
+  D128 pressure, Stream-K arrival/atomic-or protocols, and Jakub's packed
+  matmul schedules;
 * RDNA4 matmul and attention-shaped correctness tests;
 * RDNA4 ping-pong-shaped correctness tests with private LDS staging, minimal
   cooperative LDS staging, wider pairwise cooperative LDS staging, `setprio`,

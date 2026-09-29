@@ -25,6 +25,10 @@ The active files are:
   later instrumented diagnostics.
 * `rdna4_jakub_matmul_reference.hip`: a `gfx120*`-gated RDNA4 WMMA reference
   derived from Jakub's `sanitizer-strategy/rdna4_matmul` corpus.
+* `gfx1100_jakub_matmul_reference.hip`: a `gfx1100`-gated GFX11 WMMA port of
+  the same no-pipeline, pipelined, and double-buffered schedule shapes. Its
+  compact input layout keeps the production double-buffered kernel at 49,152 B
+  of LDS.
 
 ## Harness Shape
 
@@ -51,6 +55,7 @@ The launched no-diagnostic corpus includes:
   kernels;
 * Jakub-derived RDNA4 packed FP16 WMMA matmul schedules: no-pipeline,
   pipelined, and double-buffered;
+* Jakub-derived gfx1100 packed FP16 WMMA ports of those three safe schedules;
 * RocJITsu-derived atomics cases that establish the first source shapes for
   the source-level atomics model.
 
@@ -68,6 +73,7 @@ The compile-only corpus includes:
 * divergent-barrier hard cases;
 * Jakub-derived RDNA4 WMMA missing-barrier variants for load/compute and
   compute/load reuse mistakes;
+* gfx1100 WMMA ports of the same missing-barrier variants;
 * plain and relaxed flag handoffs derived from RocJITsu hip-stream-k, kept
   compile-only until the instrumented atomics API can diagnose them.
 

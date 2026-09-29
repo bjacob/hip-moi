@@ -38,6 +38,12 @@ Current files:
 
 Architecture-specific attention and ping-pong families:
 
+* RDNA3/gfx1100 validation tests:
+  `010_gfx1100_wmma_attention_block_test.hip`,
+  `011_gfx1100_d128_attention_block_test.hip`, and
+  `012_gfx1100_d128_attention_pressure_test.hip`. These use the GFX11
+  `f16x16` WMMA input ABI and compact 16-slot operand staging while preserving
+  the wave32 `f32x8` accumulator layout.
 * RDNA4/gfx120* tests:
   `010_rdna4_wmma_attention_block_test.hip`,
   `011_rdna4_d128_attention_block_test.hip`,
@@ -94,10 +100,12 @@ architecture-specific matrix instructions available on each target.
 Architecture-specific WMMA/MFMA Stream-K families:
 
 * Arrival-counter tests:
+  `028_gfx1100_wmma_streamk_arrival_counter_test.hip`,
   `028_rdna4_wmma_streamk_arrival_counter_test.hip`,
   `028_cdna4_mfma_streamk_arrival_counter_test.hip`, and
   `028_gfx1250_wmma_streamk_arrival_counter_test.hip`.
 * Tree `atomicOr` tests:
+  `029_gfx1100_wmma_streamk_tree_atomic_or_test.hip`,
   `029_rdna4_wmma_streamk_tree_atomic_or_test.hip`,
   `029_cdna4_mfma_streamk_tree_atomic_or_test.hip`, and
   `029_gfx1250_wmma_streamk_tree_atomic_or_test.hip`.
