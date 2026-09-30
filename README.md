@@ -97,6 +97,7 @@ by `CMAKE_HIP_ARCHITECTURES`:
 
 | Architecture family | CMake architecture match | Coverage |
 | --- | --- | --- |
+| RDNA3/gfx1100 | `gfx1100` | W7900-validated GFX11 WMMA attention, D128 pressure, Stream-K atomic, and packed reference matmul fixtures used by rocJitsu ConSan validation. |
 | RDNA4 | `gfx120*` | RDNA4 WMMA tests, benchmarks, reference matmul corpus, and the RDNA4 WMMA tutorial. |
 | CDNA4/gfx950 | `gfx950*` | CDNA4 MFMA ports of the RDNA4 attention, ping-pong, and Stream-K WMMA rows. |
 | gfx1250 | `gfx1250` | gfx1250 WMMA ports of the RDNA4 attention, ping-pong, Stream-K, and standalone matmul benchmark rows. |
